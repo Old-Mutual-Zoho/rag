@@ -76,8 +76,5 @@ docker-compose up -d
 ```
 
 ## Resources
-
-- [Architecture Docs](docs/rag_architecture.md)
-- [API Docs](docs/api_documentation.md)
-- [Team Wiki](https://wiki.oldmutual.co.ug/rag-project)
-- [Slack Channel](https://oldmutual.slack.com/archives/C0XXX)
+- [Readme](README.md)
+- [Exploring scraping](SCRAPER_USAGE.md)

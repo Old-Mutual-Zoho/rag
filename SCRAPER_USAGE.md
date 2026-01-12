@@ -70,29 +70,3 @@ The scraper will:
 2. Log to `logs/scraper.log` (or specified log file)
 3. Display statistics in the console
 
-## Example Output
-
-```
-================================================================================
-SCRAPING COMPLETE
-================================================================================
-Total pages scraped: 18
-
-Breakdown by type:
-  article: 1
-  info_page: 3
-  product: 14
-
-Breakdown by category:
-  business: 3
-  personal: 11
-  safety-and-security: 1
-
-Scraper Statistics:
-  Total scraped: 18
-  Valid content: 18
-  Invalid content: 1
-  Duplicates skipped: 3
-  Errors: 9
-```
-

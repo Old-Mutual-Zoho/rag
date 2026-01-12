@@ -55,20 +55,9 @@ python scripts/run_rag.py
 ```
 
 ## 📚 Documentation
-
-- [Setup Guide](docs/setup.md)
-- [Architecture](docs/rag_architecture.md)
-- [API Documentation](docs/api_documentation.md)
 - [Contributing](CONTRIBUTING.md)
+- [Exploring scraping](SCRAPER_USAGE.md)
 
-## 📊 Project Status
 
--  Data Scraping
--  Data Processing
--  Embedding Generation
--  RAG Pipeline
--  Zoho Integration
--  Production Deployment
-
-## 🤝 Contact
+##  Contact
 
