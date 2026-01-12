@@ -50,3 +50,9 @@ Thumbs.db
 # Vector databases (local)
 *.index
 *.faiss
+
+# helper docs
+IMPLEMENTATION_SUMMARY.md
+LOOPHOLES_ANALYSIS.md
+scripts/test_extraction.py
+scripts/test_scraper.py

@@ -1,0 +1,31 @@
+name: Data Pipeline
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # Daily at 2 AM
+  workflow_dispatch:
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: pip install -r requirements.txt
+    
+    - name: Run pipeline
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+      run: |
+        python scripts/run_scraping.py --scrapers website
+        python scripts/process_data.py
+        python scripts/generate_embeddings.py \
+          --chunks-file data/processed/processed_chunks_*.jsonl

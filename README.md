@@ -1,8 +1,4 @@
 # Old Mutual Zoho RAG System
-
-[![CI](https://github.com/old-mutual-uganda/zoho-rag/workflows/CI/badge.svg)](https://github.com/old-mutual-uganda/zoho-rag/actions)
-[![codecov](https://codecov.io/gh/old-mutual-uganda/zoho-rag/branch/main/graph/badge.svg)](https://codecov.io/gh/old-mutual-uganda/zoho-rag)
-
 Hybrid RAG system for Old Mutual Uganda's Zoho ecosystem with conversational AI.
 
 ##  Quick Start
@@ -15,7 +11,7 @@ Hybrid RAG system for Old Mutual Uganda's Zoho ecosystem with conversational AI.
 ### Installation
 ```bash
 # Clone repository
-git clone https://github.com/old-mutual-uganda/rag.git
+git clone https://github.com/Old-Mutual-Zoho/rag.git
 cd rag
 
 # Create virtual environment
@@ -36,8 +32,16 @@ mkdir -p data/processed logs
 
 ### Usage
 ```bash
+# Activate virtual environment
+source venv/bin/activate  # Windows: venv\Scripts\activate
+
 # 1. Scrape data
-python scripts/run_scraping.py --scrapers all
+python scripts/run_scraping.py
+
+# Or with options:
+python scripts/run_scraping.py --verbose
+python scripts/run_scraping.py --dry-run  # Preview what will be scraped
+python scripts/run_scraping.py --help     # See all options
 
 # 2. Process data
 python scripts/process_data.py
