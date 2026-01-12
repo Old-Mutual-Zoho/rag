@@ -99,4 +99,3 @@ def get_pdf_config(config: ScrapingConfig) -> PDFScraperConfig:
 
     pdf_data = config.scrapers['pdf']
     return PDFScraperConfig(**pdf_data)
-

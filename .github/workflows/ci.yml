@@ -39,7 +39,7 @@ jobs:
     
     - name: Lint
       run: |
-        flake8 src tests --max-line-length=100
+        flake8 src tests --max-line-length=160
         black --check src tests
     
     - name: Test

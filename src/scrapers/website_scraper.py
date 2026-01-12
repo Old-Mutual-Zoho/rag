@@ -563,7 +563,7 @@ class OldMutualWebsiteScraper:
 
         for keyword in pricing_keywords:
             sections = soup.find_all(['div', 'section', 'p'],
-                                    class_=re.compile(keyword, re.IGNORECASE))
+                                     class_=re.compile(keyword, re.IGNORECASE))
 
             for section in sections:
                 text = section.get_text(strip=True)
@@ -655,7 +655,7 @@ class OldMutualWebsiteScraper:
                 # Only content found, try to find heading elsewhere or use default
                 # Check if there's a heading in the same wrapper
                 heading_in_wrapper = grid_wrapper.find(['h2', 'h3', 'h4', 'span', 'div'],
-                                                      class_=re.compile(r'heading|text-heading', re.IGNORECASE))
+                                                       class_=re.compile(r'heading|text-heading', re.IGNORECASE))
                 if heading_in_wrapper:
                     heading_text = heading_in_wrapper.get_text(strip=True)
                     content_items.append({
@@ -915,9 +915,10 @@ class OldMutualWebsiteScraper:
 
             if sentence.endswith('?'):
                 # Must start with question word or be reasonably short
-                if (re.match(r'^(What|How|Who|Where|When|Why|Can|Do|Does|Is|Are|Will|Would|Should|May|Could|Have|Has|Does|Did|Want|Need)',
-                            sentence, re.IGNORECASE) or
-                    (len(sentence) > 15 and len(sentence) < 200)):
+                matches_pattern = re.match(r'^(What|How|Who|Where|When|Why|Can|Do|Does|Is|Are|Will|Would|Should|May|Could|Have|Has|Does|Did|Want|Need)',
+                                           sentence, re.IGNORECASE)
+                is_short_question = len(sentence) > 15 and len(sentence) < 200
+                if matches_pattern or is_short_question:
                     is_question = True
 
             if is_question:
@@ -1067,8 +1068,8 @@ class OldMutualWebsiteScraper:
                     item = item.strip()
                     # Look for benefits (often start with capital, describe advantages)
                     if (len(item) > 25 and len(item) < 250 and
-                        item[0].isupper() and
-                        not item.endswith('?')):
+                            item[0].isupper() and
+                            not item.endswith('?')):
                         benefits.append(item)
 
         # Remove duplicates
@@ -1246,7 +1247,7 @@ class OldMutualWebsiteScraper:
 
                 # Check if line contains document-related terms
                 if re.search(r'(?:document|ID|certificate|statement|photo|passport|bank)',
-                            line, re.IGNORECASE):
+                             line, re.IGNORECASE):
                     if len(line) > 15 and len(line) < 250:
                         requirements.append(line)
 
@@ -1337,8 +1338,8 @@ class OldMutualWebsiteScraper:
         for sentence in sentences[:5]:  # First 5 sentences
             sentence = sentence.strip()
             if (len(sentence) > 30 and
-                not sentence.endswith('?') and
-                not re.match(r'^(What|How|Who|Where|When|Why)', sentence, re.IGNORECASE)):
+                    not sentence.endswith('?') and
+                    not re.match(r'^(What|How|Who|Where|When|Why)', sentence, re.IGNORECASE)):
                 overview_sentences.append(sentence)
             if len(overview_sentences) >= 3:
                 break
