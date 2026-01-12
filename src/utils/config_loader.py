@@ -53,26 +53,26 @@ class ScrapingConfig(BaseModel):
 def load_scraping_config(config_path: Optional[Path] = None) -> ScrapingConfig:
     """
     Load and validate scraping configuration from YAML file
-    
+
     Args:
         config_path: Path to config file. Defaults to config/scraping_config.yml
-        
+
     Returns:
         Validated ScrapingConfig object
-        
+
     Raises:
         FileNotFoundError: If config file doesn't exist
         ValidationError: If config doesn't match schema
     """
     if config_path is None:
         config_path = Path(__file__).parent.parent.parent / "config" / "scraping_config.yml"
-    
+
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
-    
+
     with open(config_path, 'r', encoding='utf-8') as f:
         config_data = yaml.safe_load(f)
-    
+
     try:
         # Validate and create config object
         config = ScrapingConfig(**config_data)
@@ -87,7 +87,7 @@ def get_website_config(config: ScrapingConfig) -> WebsiteScraperConfig:
     """Extract and validate website scraper config"""
     if 'website' not in config.scrapers:
         raise ValueError("Website scraper config not found")
-    
+
     website_data = config.scrapers['website']
     return WebsiteScraperConfig(**website_data)
 
@@ -96,7 +96,7 @@ def get_pdf_config(config: ScrapingConfig) -> PDFScraperConfig:
     """Extract and validate PDF scraper config"""
     if 'pdf' not in config.scrapers:
         raise ValueError("PDF scraper config not found")
-    
+
     pdf_data = config.scrapers['pdf']
     return PDFScraperConfig(**pdf_data)
 
