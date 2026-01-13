@@ -1,6 +1,7 @@
 """
 Rate limiting utility for web scraping
 """
+
 import time
 from collections import deque
 from typing import Optional
@@ -63,8 +64,4 @@ class RateLimiter:
         current_time = time.time()
         self._cleanup_old_requests(current_time)
 
-        return {
-            'requests_in_last_minute': len(self.request_times),
-            'limit': self.requests_per_minute,
-            'last_request_time': self.last_request_time
-        }
+        return {"requests_in_last_minute": len(self.request_times), "limit": self.requests_per_minute, "last_request_time": self.last_request_time}
