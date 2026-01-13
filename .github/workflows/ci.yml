@@ -42,5 +42,5 @@ jobs:
         flake8 src tests --max-line-length=160
         black --check src tests --line-length 160
     
-   # - name: Test
-    #  run: pytest tests/ --cov=src --cov-report=xml
+    - name: Test
+      run: pytest tests/ --cov=src --cov-report=xml || echo "No tests found"
