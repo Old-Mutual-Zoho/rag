@@ -198,4 +198,3 @@ class GeminiEmbedder:
         if self._dim is None:
             self._dim = len(v)
         return v
-

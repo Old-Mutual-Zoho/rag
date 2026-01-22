@@ -5,7 +5,7 @@ Query pipeline: embed question -> retrieve from Qdrant.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List
 
 from src.rag.embeddings.embedder import GeminiEmbedder, OllamaEmbedder, OpenAIEmbedder, SentenceTransformersEmbedder
 from src.rag.integrations.qdrant_store import QdrantVectorStore
@@ -47,4 +47,3 @@ def retrieve_context(question: str, cfg: RAGConfig, *, top_k: int | None = None)
     qv = embedder.embed_query(question)
     hits = store.search(query_vector=qv, limit=k)
     return hits
-

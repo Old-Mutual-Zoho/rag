@@ -105,4 +105,3 @@ def ingest_chunks_to_qdrant(chunks_file: Path, cfg: RAGConfig, *, limit: Optiona
     flush()
     logger.info("Embedded and stored %s chunks into Qdrant collection '%s'", total, cfg.vector_store.collection)
     return total
-

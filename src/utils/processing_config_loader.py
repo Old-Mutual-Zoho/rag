@@ -79,4 +79,3 @@ def load_processing_config(config_path: Optional[Path] = None) -> ProcessingConf
     except ValidationError as e:
         logger.error(f"Processing config validation failed: {e}")
         raise
-

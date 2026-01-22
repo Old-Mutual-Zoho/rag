@@ -24,12 +24,7 @@ class ProductMatcher:
 
     def __init__(self, index_path: Optional[Path] = None) -> None:
         if index_path is None:
-            index_path = (
-                Path(__file__).parent.parent.parent
-                / "data"
-                / "processed"
-                / "website_index.json"
-            )
+            index_path = Path(__file__).parent.parent.parent / "data" / "processed" / "website_index.json"
 
         self.index_path = index_path
         self.product_index: Dict[str, Dict[str, Any]] = {}
@@ -100,11 +95,7 @@ class ProductMatcher:
 
     def get_products_by_category(self, category: str) -> List[Dict[str, Any]]:
         cat = (category or "").lower()
-        return [
-            p
-            for p in self.product_index.values()
-            if p.get("category_name", "").lower() == cat
-        ]
+        return [p for p in self.product_index.values() if p.get("category_name", "").lower() == cat]
 
     def get_related_products(self, product_id: str, top_k: int = 3) -> List[Dict[str, Any]]:
         """
@@ -122,11 +113,7 @@ class ProductMatcher:
         for p in self.product_index.values():
             if p["product_id"] == product_id:
                 continue
-            if (
-                p.get("category_name", "").lower() == cat
-                and p.get("sub_category_name", "").lower() == sub
-            ):
+            if p.get("category_name", "").lower() == cat and p.get("sub_category_name", "").lower() == sub:
                 related.append(p)
 
         return related[:top_k]
-

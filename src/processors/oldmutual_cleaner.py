@@ -169,4 +169,3 @@ class OldMutualCleaner:
         if "bank" in c:
             return f"{heading} (Banking)"
         return heading
-

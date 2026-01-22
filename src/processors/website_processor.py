@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Optional
@@ -333,8 +332,7 @@ class WebsiteProcessor:
 
         if self.config.metadata_extraction.enabled:
             combined = f"{title}\n" + "\n".join(
-                [f"{s['heading']}\n{s['content']}" for s in cleaned_sections]
-                + [f"{f['question']}\n{f['answer']}" for f in cleaned_faqs]
+                [f"{s['heading']}\n{s['content']}" for s in cleaned_sections] + [f"{f['question']}\n{f['answer']}" for f in cleaned_faqs]
             )
             if self.config.metadata_extraction.extract_insurance_types:
                 doc["insurance_types"] = _detect_insurance_types(combined)
@@ -382,9 +380,7 @@ class WebsiteProcessor:
                 used_section_indexes.update(payment_indexes)
                 combined = "\n\n".join([p for p in payment_parts if p]).strip()
                 for j, part in enumerate(_split_words(combined, chunk_size_words=chunk_size, overlap_words=chunk_overlap)):
-                    for k, capped in enumerate(
-                        _split_chars(part, max_chars=max_chars, overlap_chars=min(200, max_chars // 10))
-                    ):
+                    for k, capped in enumerate(_split_chars(part, max_chars=max_chars, overlap_chars=min(200, max_chars // 10))):
                         chunk_id = f"{doc['doc_id']}:payment_methods:chunk:{j}.{k}"
                         yield {
                             "id": chunk_id,
@@ -418,9 +414,7 @@ class WebsiteProcessor:
                 c = _safe_text(sections[idx].get("content"))
                 section_text = "\n".join([p for p in [h, c] if p]).strip()
                 for j, part in enumerate(_split_words(section_text, chunk_size_words=chunk_size, overlap_words=chunk_overlap)):
-                    for k, capped in enumerate(
-                        _split_chars(part, max_chars=max_chars, overlap_chars=min(200, max_chars // 10))
-                    ):
+                    for k, capped in enumerate(_split_chars(part, max_chars=max_chars, overlap_chars=min(200, max_chars // 10))):
                         chunk_id = f"{doc['doc_id']}:{label}:chunk:{j}.{k}"
                         yield {
                             "id": chunk_id,
@@ -482,4 +476,3 @@ class WebsiteProcessor:
                         "section_index": i,
                         **base_meta,
                     }
-

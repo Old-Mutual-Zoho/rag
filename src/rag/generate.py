@@ -10,6 +10,7 @@ from typing import Any, Dict, List
 import google.generativeai as genai
 from google.api_core import exceptions
 
+
 def build_context(hits: List[Dict[str, Any]], *, max_chars: int = 6000) -> str:
     """
     Build a compact context string from retrieved Qdrant hits.
@@ -28,6 +29,7 @@ def build_context(hits: List[Dict[str, Any]], *, max_chars: int = 6000) -> str:
         parts.append(block)
         used += len(block)
     return "\n".join(parts).strip()
+
 
 def generate_with_gemini(
     *,
@@ -56,7 +58,7 @@ def generate_with_gemini(
 
     # Use a specific model instance
     m = genai.GenerativeModel(model)
-    
+
     # Attempt generation with a single retry on rate limit
     try:
         resp = m.generate_content(prompt)

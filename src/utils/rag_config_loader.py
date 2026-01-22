@@ -65,4 +65,3 @@ def load_rag_config(config_path: Optional[Path] = None) -> RAGConfig:
     except ValidationError as e:
         logger.error("RAG config validation failed: %s", e)
         raise
-

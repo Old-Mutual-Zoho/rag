@@ -1,9 +1,9 @@
 """
 FastAPI application - Main entry point
 """
+
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, List
 import logging
@@ -29,11 +29,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
-app = FastAPI(
-    title="Old Mutual Chatbot API",
-    description="AI-powered insurance chatbot with conversational and guided modes",
-    version="1.0.0"
-)
+app = FastAPI(title="Old Mutual Chatbot API", description="AI-powered insurance chatbot with conversational and guided modes", version="1.0.0")
 
 # CORS middleware
 app.add_middleware(
@@ -132,6 +128,7 @@ def get_router():
 # REQUEST/RESPONSE MODELS
 # ============================================================================
 
+
 class ChatMessage(BaseModel):
     message: str
     session_id: Optional[str] = None
@@ -164,36 +161,21 @@ class QuoteResponse(BaseModel):
 # ENDPOINTS
 # ============================================================================
 
+
 @app.get("/")
 async def root():
     """Health check endpoint"""
-    return {
-        "service": "Old Mutual Chatbot API",
-        "status": "healthy",
-        "version": "1.0.0",
-        "timestamp": datetime.now().isoformat()
-    }
+    return {"service": "Old Mutual Chatbot API", "status": "healthy", "version": "1.0.0", "timestamp": datetime.now().isoformat()}
 
 
 @app.get("/health")
 async def health_check():
     """Detailed health check"""
-    return {
-        "status": "healthy",
-        "database": {
-            "postgres": "connected",
-            "redis": redis_cache.ping()
-        },
-        "timestamp": datetime.now().isoformat()
-    }
+    return {"status": "healthy", "database": {"postgres": "connected", "redis": redis_cache.ping()}, "timestamp": datetime.now().isoformat()}
 
 
 @app.post("/chat/message", response_model=ChatResponse)
-async def send_message(
-    request: ChatMessage,
-    router: ChatRouter = Depends(get_router),
-    db: PostgresDB = Depends(get_db)
-):
+async def send_message(request: ChatMessage, router: ChatRouter = Depends(get_router), db: PostgresDB = Depends(get_db)):
     """
     Send a message to the chatbot
     Automatically routes to conversational or guided mode
@@ -201,87 +183,55 @@ async def send_message(
     try:
         # Get or create session
         session_id = request.session_id
-        
+
         if not session_id:
             # Create new session
             user = db.get_or_create_user(phone_number=request.user_id)
             session_id = state_manager.create_session(str(user.id))
-        
+
         # Route message
-        response = await router.route(
-            message=request.message,
-            session_id=session_id,
-            user_id=request.user_id
-        )
-        
+        response = await router.route(message=request.message, session_id=session_id, user_id=request.user_id)
+
         # Save message to database
         session = state_manager.get_session(session_id)
         if session:
+            db.add_message(conversation_id=session["conversation_id"], role="user", content=request.message, metadata=request.metadata)
+
             db.add_message(
-                conversation_id=session['conversation_id'],
-                role='user',
-                content=request.message,
-                metadata=request.metadata
+                conversation_id=session["conversation_id"], role="assistant", content=str(response.get("response", "")), metadata={"mode": response.get("mode")}
             )
-            
-            db.add_message(
-                conversation_id=session['conversation_id'],
-                role='assistant',
-                content=str(response.get('response', '')),
-                metadata={'mode': response.get('mode')}
-            )
-        
-        return ChatResponse(
-            response=response,
-            session_id=session_id,
-            mode=response.get('mode', 'conversational'),
-            timestamp=datetime.now().isoformat()
-        )
-    
+
+        return ChatResponse(response=response, session_id=session_id, mode=response.get("mode", "conversational"), timestamp=datetime.now().isoformat())
+
     except Exception as e:
         logger.error(f"Error processing message: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/chat/start-guided")
-async def start_guided_flow(
-    flow_name: str,
-    session_id: str,
-    user_id: str,
-    router: ChatRouter = Depends(get_router)
-):
+async def start_guided_flow(flow_name: str, session_id: str, user_id: str, router: ChatRouter = Depends(get_router)):
     """Start a specific guided flow"""
     try:
-        response = await router.guided.start_flow(
-            flow_name=flow_name,
-            session_id=session_id,
-            user_id=user_id
-        )
-        
+        response = await router.guided.start_flow(flow_name=flow_name, session_id=session_id, user_id=user_id)
+
         return response
-    
+
     except Exception as e:
         logger.error(f"Error starting guided flow: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/products/list")
-async def list_products(
-    category: Optional[str] = None,
-    matcher: ProductMatcher = Depends(lambda: product_matcher)
-):
+async def list_products(category: Optional[str] = None, matcher: ProductMatcher = Depends(lambda: product_matcher)):
     """Get list of products"""
     try:
         if category:
             products = matcher.get_products_by_category(category)
         else:
             products = list(matcher.product_index.values())
-        
-        return {
-            "products": products,
-            "count": len(products)
-        }
-    
+
+        return {"products": products, "count": len(products)}
+
     except Exception as e:
         logger.error(f"Error listing products: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -295,9 +245,7 @@ async def list_product_categories(
     List top-level product categories, e.g. 'personal', 'business'.
     """
     try:
-        categories = sorted(
-            {p.get("category_name") for p in matcher.product_index.values() if p.get("category_name")}
-        )
+        categories = sorted({p.get("category_name") for p in matcher.product_index.values() if p.get("category_name")})
         return {"categories": categories}
     except Exception as e:
         logger.error(f"Error listing product categories: {str(e)}", exc_info=True)
@@ -318,8 +266,7 @@ async def list_product_subcategories(
             {
                 p.get("sub_category_name")
                 for p in matcher.product_index.values()
-                if p.get("category_name", "").lower() == cat_lower
-                and p.get("sub_category_name")
+                if p.get("category_name", "").lower() == cat_lower and p.get("sub_category_name")
             }
         )
         if not subs:
@@ -352,8 +299,7 @@ async def list_products_in_subcategory(
                 "url": p.get("url"),
             }
             for p in matcher.product_index.values()
-            if p.get("category_name", "").lower() == cat_lower
-            and p.get("sub_category_name", "").lower() == sub_lower
+            if p.get("category_name", "").lower() == cat_lower and p.get("sub_category_name", "").lower() == sub_lower
         ]
         if not items:
             raise HTTPException(status_code=404, detail="No products found for this category/subcategory")
@@ -366,19 +312,16 @@ async def list_products_in_subcategory(
 
 
 @app.get("/products/{product_id}")
-async def get_product(
-    product_id: str,
-    include_details: bool = False
-):
+async def get_product(product_id: str, include_details: bool = False):
     """Get product information"""
     try:
         card = product_card_gen.generate_card(product_id, include_details)
-        
+
         if not card:
             raise HTTPException(status_code=404, detail="Product not found")
-        
+
         return card
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -391,12 +334,7 @@ def _load_product_sections(product_id: str) -> Dict[str, List[Dict[str, str]]]:
     Helper to load typed sections for a product directly from
     `website_chunks.jsonl`, grouped by `chunk_type`.
     """
-    chunks_path = (
-        Path(__file__).parent.parent.parent
-        / "data"
-        / "processed"
-        / "website_chunks.jsonl"
-    )
+    chunks_path = Path(__file__).parent.parent.parent / "data" / "processed" / "website_chunks.jsonl"
     if not chunks_path.exists():
         raise HTTPException(status_code=500, detail="Product chunks file not found")
 
@@ -454,66 +392,61 @@ async def get_product_structured(
         "faq": sections.get("faq", []),
     }
 
+
 @app.get("/products/{product_id}/details")
 async def get_product_details(product_id: str):
     """Get detailed product information (Learn More) via RAG/LLM."""
     try:
         details = await product_card_gen.get_product_details(product_id)
         return details
-    
+
     except Exception as e:
         logger.error(f"Error getting product details: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/quotes/generate", response_model=QuoteResponse)
-async def generate_quote(
-    request: QuoteRequest,
-    db: PostgresDB = Depends(get_db)
-):
+async def generate_quote(request: QuoteRequest, db: PostgresDB = Depends(get_db)):
     """Generate insurance quote"""
     try:
         # This would use the quotation flow
         from src.chatbot.flows.quotation import QuotationFlow
-        
+
         quotation_flow = QuotationFlow(product_matcher, db)
         quote_data = await quotation_flow._calculate_premium(request.underwriting_data)
-        
+
         # Save quote to database
         quote = db.create_quote(
             user_id=request.user_id,
             product_id=request.product_id,
-            premium_amount=quote_data['monthly_premium'],
-            sum_assured=quote_data['sum_assured'],
+            premium_amount=quote_data["monthly_premium"],
+            sum_assured=quote_data["sum_assured"],
             underwriting_data=request.underwriting_data,
-            pricing_breakdown=quote_data['breakdown']
+            pricing_breakdown=quote_data["breakdown"],
         )
-        
+
         return QuoteResponse(
             quote_id=str(quote.id),
-            product_name=quote_data['product_name'],
-            monthly_premium=quote_data['monthly_premium'],
-            sum_assured=quote_data['sum_assured'],
-            valid_until=quote.valid_until.isoformat()
+            product_name=quote_data["product_name"],
+            monthly_premium=quote_data["monthly_premium"],
+            sum_assured=quote_data["sum_assured"],
+            valid_until=quote.valid_until.isoformat(),
         )
-    
+
     except Exception as e:
         logger.error(f"Error generating quote: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/quotes/{quote_id}")
-async def get_quote(
-    quote_id: str,
-    db: PostgresDB = Depends(get_db)
-):
+async def get_quote(quote_id: str, db: PostgresDB = Depends(get_db)):
     """Get quote by ID"""
     try:
         quote = db.get_quote(quote_id)
-        
+
         if not quote:
             raise HTTPException(status_code=404, detail="Quote not found")
-        
+
         return {
             "quote_id": str(quote.id),
             "product_id": quote.product_id,
@@ -522,9 +455,9 @@ async def get_quote(
             "sum_assured": float(quote.sum_assured) if quote.sum_assured else None,
             "status": quote.status,
             "valid_until": quote.valid_until.isoformat() if quote.valid_until else None,
-            "generated_at": quote.generated_at.isoformat()
+            "generated_at": quote.generated_at.isoformat(),
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -533,34 +466,21 @@ async def get_quote(
 
 
 @app.get("/sessions/{session_id}/history")
-async def get_conversation_history(
-    session_id: str,
-    limit: int = 50
-):
+async def get_conversation_history(session_id: str, limit: int = 50):
     """Get conversation history"""
     try:
         session = state_manager.get_session(session_id)
-        
+
         if not session:
             raise HTTPException(status_code=404, detail="Session not found")
-        
-        messages = postgres_db.get_conversation_history(
-            session['conversation_id'],
-            limit=limit
-        )
-        
+
+        messages = postgres_db.get_conversation_history(session["conversation_id"], limit=limit)
+
         return {
             "session_id": session_id,
-            "messages": [
-                {
-                    "role": msg.role,
-                    "content": msg.content,
-                    "timestamp": msg.timestamp.isoformat()
-                }
-                for msg in reversed(messages)
-            ]
+            "messages": [{"role": msg.role, "content": msg.content, "timestamp": msg.timestamp.isoformat()} for msg in reversed(messages)],
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
@@ -574,7 +494,7 @@ async def end_session(session_id: str):
     try:
         state_manager.end_session(session_id)
         return {"message": "Session ended successfully"}
-    
+
     except Exception as e:
         logger.error(f"Error ending session: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -584,18 +504,19 @@ async def end_session(session_id: str):
 # STARTUP/SHUTDOWN EVENTS
 # ============================================================================
 
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize on startup"""
     logger.info("Starting Old Mutual Chatbot API...")
-    
+
     # Create database tables if they don't exist
     try:
         postgres_db.create_tables()
         logger.info("Database tables initialized")
     except Exception as e:
         logger.error(f"Error initializing database: {str(e)}")
-    
+
     # Test Redis connection
     if redis_cache.ping():
         logger.info("Redis connection successful")

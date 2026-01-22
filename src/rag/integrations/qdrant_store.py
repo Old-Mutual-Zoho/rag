@@ -56,10 +56,7 @@ class QdrantVectorStore:
         # qdrant-client local storage (and some server configs) may require UUID point IDs.
         # Convert stable string IDs into deterministic UUIDv5.
         point_ids = [str(uuid.uuid5(uuid.NAMESPACE_URL, _id)) for _id in ids]
-        points = [
-            qm.PointStruct(id=_id, vector=vec, payload=payload)
-            for _id, vec, payload in zip(point_ids, vectors, payloads, strict=True)
-        ]
+        points = [qm.PointStruct(id=_id, vector=vec, payload=payload) for _id, vec, payload in zip(point_ids, vectors, payloads, strict=True)]
         self.client.upsert(collection_name=self.collection, points=points)
 
     def search(self, *, query_vector: List[float], limit: int = 8) -> list[dict[str, Any]]:
@@ -74,4 +71,3 @@ class QdrantVectorStore:
                 }
             )
         return out
-

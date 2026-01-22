@@ -41,4 +41,3 @@ class RedisCache:
         Redis as "connected" in local/dev mode.
         """
         return True
-

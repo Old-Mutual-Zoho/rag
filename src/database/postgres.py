@@ -52,9 +52,7 @@ class Quote:
     pricing_breakdown: Optional[Dict[str, Any]] = None
     status: str = "pending"
     generated_at: datetime = field(default_factory=datetime.utcnow)
-    valid_until: datetime = field(
-        default_factory=lambda: datetime.utcnow() + timedelta(days=30)
-    )
+    valid_until: datetime = field(default_factory=lambda: datetime.utcnow() + timedelta(days=30))
 
 
 class PostgresDB:
@@ -167,4 +165,3 @@ class PostgresDB:
 
     def get_quote(self, quote_id: str) -> Optional[Quote]:
         return self._quotes.get(str(quote_id))
-
