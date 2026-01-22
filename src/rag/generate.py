@@ -5,8 +5,10 @@ Answer generation utilities (LLM) for the RAG pipeline.
 from __future__ import annotations
 
 import os
+import time
 from typing import Any, Dict, List
-
+import google.generativeai as genai
+from google.api_core import exceptions
 
 def build_context(hits: List[Dict[str, Any]], *, max_chars: int = 6000) -> str:
     """
@@ -27,19 +29,16 @@ def build_context(hits: List[Dict[str, Any]], *, max_chars: int = 6000) -> str:
         used += len(block)
     return "\n".join(parts).strip()
 
-
 def generate_with_gemini(
     *,
     question: str,
     hits: List[Dict[str, Any]],
-    model: str,
+    model: str,  # Named 'model' to fix the TypeError
     api_key_env: str = "GEMINI_API_KEY",
 ) -> str:
     """
-    Generate an answer using Gemini, grounded on retrieved context.
+    Generate an answer using Gemini with basic retry logic for 429 errors.
     """
-    import google.generativeai as genai
-
     key = os.environ.get(api_key_env)
     if not key:
         raise RuntimeError(f"{api_key_env} is not set")
@@ -50,12 +49,25 @@ def generate_with_gemini(
     prompt = (
         "You are a helpful assistant for Old Mutual Uganda.\n"
         "Answer the question using ONLY the context below.\n"
-        "If the context does not contain enough information, say that clearly and suggest what page/topic is missing.\n\n"
+        "If the context does not contain enough information, say that clearly.\n\n"
         f"Question:\n{question}\n\n"
         f"Context:\n{context}\n"
     )
 
+    # Use a specific model instance
     m = genai.GenerativeModel(model)
-    resp = m.generate_content(prompt)
-    return (getattr(resp, "text", None) or "").strip()
-
+    
+    # Attempt generation with a single retry on rate limit
+    try:
+        resp = m.generate_content(prompt)
+        return (getattr(resp, "text", None) or "").strip()
+    except exceptions.ResourceExhausted:
+        # If we hit the 429 quota error, wait 5 seconds and try one last time
+        time.sleep(5)
+        try:
+            resp = m.generate_content(prompt)
+            return (getattr(resp, "text", None) or "").strip()
+        except Exception:
+            return "Error: API quota exceeded. Please try again in a moment."
+    except Exception as e:
+        return f"An error occurred: {str(e)}"
