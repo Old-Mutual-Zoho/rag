@@ -1,0 +1,100 @@
+"""
+Guided mode - Structured conversation flows
+"""
+from typing import Dict, Optional
+from ..flows.product_discovery import ProductDiscoveryFlow
+from ..flows.underwriting import UnderwritingFlow
+from ..flows.quotation import QuotationFlow
+from ..flows.payment import PaymentFlow
+
+
+class GuidedMode:
+    def __init__(self, state_manager, product_catalog, db):
+        self.state_manager = state_manager
+        self.catalog = product_catalog
+        self.db = db
+        
+        # Initialize flows
+        self.flows = {
+            'discovery': ProductDiscoveryFlow(product_catalog),
+            'underwriting': UnderwritingFlow(db),
+            'quotation': QuotationFlow(product_catalog, db),
+            'payment': PaymentFlow(db)
+        }
+    
+    async def process(
+        self,
+        message: str,
+        session_id: str,
+        user_id: str
+    ) -> Dict:
+        """Process message in guided mode"""
+        
+        # Get current state
+        session = self.state_manager.get_session(session_id)
+        
+        if not session or not session.get('current_flow'):
+            return {
+                'error': 'No active flow. Please start a flow first.'
+            }
+        
+        # Get the active flow
+        flow = self.flows[session['current_flow']]
+        
+        # Process current step
+        result = await flow.process_step(
+            user_input=message,
+            current_step=session['current_step'],
+            collected_data=session.get('collected_data', {}),
+            user_id=user_id
+        )
+        
+        # Update state based on result
+        if result.get('complete'):
+            # Flow is complete, transition or end
+            if result.get('next_flow'):
+                self.state_manager.set_flow(session_id, result['next_flow'])
+            else:
+                self.state_manager.switch_mode(session_id, 'conversational')
+        elif result.get('next_step') is not None:
+            # Advance to next step
+            self.state_manager.update_session(session_id, {
+                'current_step': result['next_step'],
+                'collected_data': result.get('collected_data', session.get('collected_data', {}))
+            })
+        
+        return {
+            'mode': 'guided',
+            'flow': session['current_flow'],
+            'step': result.get('next_step', session['current_step']),
+            'response': result.get('response'),
+            'complete': result.get('complete', False),
+            'data': result.get('data')
+        }
+    
+    async def start_flow(
+        self,
+        flow_name: str,
+        session_id: str,
+        user_id: str,
+        initial_data: Dict = None
+    ) -> Dict:
+        """Start a new guided flow"""
+        
+        if flow_name not in self.flows:
+            return {'error': f'Unknown flow: {flow_name}'}
+        
+        # Switch to guided mode
+        self.state_manager.switch_mode(session_id, 'guided', flow=flow_name)
+        
+        # Initialize flow
+        flow = self.flows[flow_name]
+        result = await flow.start(user_id, initial_data or {})
+        
+        return {
+            'mode': 'guided',
+            'flow': flow_name,
+            'step': 0,
+            'response': result.get('response'),
+            'data': result.get('data')
+        }

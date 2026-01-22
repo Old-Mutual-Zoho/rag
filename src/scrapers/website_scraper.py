@@ -518,8 +518,14 @@ class OldMutualWebsiteScraper:
 
         return pricing
 
-    def _extract_structured_content(self, soup) -> List[Dict[str, str]]:
-        """Extract structured content as heading-content pairs (similar to FAQs)"""
+    def _extract_structured_content(self, soup, *, enable_strong_headings: bool = False) -> List[Dict[str, str]]:
+        """
+        Extract structured content as heading-content pairs (similar to FAQs).
+
+        enable_strong_headings:
+            When True, treat <strong> elements inside slot="text-content" as section headings.
+            This is intended for article pages where headings are embedded as <strong> in the body.
+        """
         content_items = []
         processed_elements = set()
 
@@ -599,86 +605,81 @@ class OldMutualWebsiteScraper:
 
             processed_elements.add(id(grid_wrapper))
 
-        # Extract from slot="text-content" with <strong> tags as headings (for articles)
-        # This handles the case where headings are <strong> tags within text-content
-        text_content_slots = soup.find_all(["span", "div"], slot=re.compile(r"text-content", re.IGNORECASE))
+        if enable_strong_headings:
+            # Extract from slot="text-content" with <strong> tags as headings (for articles)
+            # This handles the case where headings are <strong> tags within text-content
+            text_content_slots = soup.find_all(["span", "div"], slot=re.compile(r"text-content", re.IGNORECASE))
 
-        for content_slot in text_content_slots:
-            if id(content_slot) in processed_elements:
-                continue
+            for content_slot in text_content_slots:
+                if id(content_slot) in processed_elements:
+                    continue
 
-            # Find all <strong> tags within this content slot
-            strong_tags = content_slot.find_all("strong")
+                # Find all <strong> tags within this content slot
+                strong_tags = content_slot.find_all("strong")
 
-            if strong_tags:
-                # Process each strong tag as a heading
-                for i, strong_tag in enumerate(strong_tags):
-                    heading_text = strong_tag.get_text(strip=True)
-                    if not heading_text:
-                        continue
+                if strong_tags:
+                    # Process each strong tag as a heading
+                    for strong_tag in strong_tags:
+                        heading_text = strong_tag.get_text(strip=True)
+                        if not heading_text:
+                            continue
 
-                    # Collect content following this strong tag until next strong tag
-                    content_parts = []
+                        # Collect content following this strong tag until next strong tag
+                        content_parts = []
 
-                    # Get the parent element (usually <p>)
-                    parent_elem = strong_tag.parent
+                        # Get the parent element (usually <p>)
+                        parent_elem = strong_tag.parent
 
-                    if parent_elem:
-                        # Get text after the strong tag in the same parent element
-                        # Find all text nodes and elements after the strong tag
-                        strong_found = False
-                        for child in parent_elem.children:
-                            # Check if this child contains or is the strong tag
-                            if child == strong_tag:
-                                strong_found = True
-                                continue
+                        if parent_elem:
+                            # Get text after the strong tag in the same parent element
+                            strong_found = False
+                            for child in parent_elem.children:
+                                # Check if this child contains or is the strong tag
+                                if child == strong_tag:
+                                    strong_found = True
+                                    continue
 
-                            # Check if this child element contains the strong tag
-                            if hasattr(child, "find") and child.find("strong") == strong_tag:
-                                strong_found = True
-                                # Get text after the strong tag in this child
-                                strong_in_child = child.find("strong")
-                                if strong_in_child:
-                                    # Get all siblings after strong in this child
-                                    for sibling in strong_in_child.next_siblings:
-                                        if hasattr(sibling, "get_text"):
-                                            text = sibling.get_text(separator=" ", strip=True)
-                                            if text:
-                                                content_parts.append(text)
-                                        elif isinstance(sibling, str) and sibling.strip():
-                                            content_parts.append(sibling.strip())
-                                continue
+                                # Check if this child element contains the strong tag
+                                if hasattr(child, "find") and child.find("strong") == strong_tag:
+                                    strong_found = True
+                                    # Get text after the strong tag in this child
+                                    strong_in_child = child.find("strong")
+                                    if strong_in_child:
+                                        for sibling in strong_in_child.next_siblings:
+                                            if hasattr(sibling, "get_text"):
+                                                text = sibling.get_text(separator=" ", strip=True)
+                                                if text:
+                                                    content_parts.append(text)
+                                            elif isinstance(sibling, str) and sibling.strip():
+                                                content_parts.append(sibling.strip())
+                                    continue
 
-                            if strong_found:
-                                # Collect text from remaining children in this parent
-                                if hasattr(child, "get_text"):
-                                    text = child.get_text(separator=" ", strip=True)
-                                    if text:
-                                        content_parts.append(text)
-                                elif isinstance(child, str) and child.strip():
-                                    content_parts.append(child.strip())
+                                if strong_found:
+                                    if hasattr(child, "get_text"):
+                                        text = child.get_text(separator=" ", strip=True)
+                                        if text:
+                                            content_parts.append(text)
+                                    elif isinstance(child, str) and child.strip():
+                                        content_parts.append(child.strip())
 
-                        # Get all following sibling elements until next strong tag
-                        next_elem = parent_elem.find_next_sibling()
-                        while next_elem:
-                            # Stop if this element or any child contains a strong tag
-                            if next_elem.find("strong"):
-                                break
+                            # Get all following sibling elements until next strong tag
+                            next_elem = parent_elem.find_next_sibling()
+                            while next_elem:
+                                # Stop if this element or any child contains a strong tag
+                                if next_elem.find("strong"):
+                                    break
 
-                            # Collect text from this element
-                            text = next_elem.get_text(separator=" ", strip=True)
-                            if text:
-                                content_parts.append(text)
+                                text = next_elem.get_text(separator=" ", strip=True)
+                                if text:
+                                    content_parts.append(text)
 
-                            next_elem = next_elem.find_next_sibling()
+                                next_elem = next_elem.find_next_sibling()
 
-                    # Combine content parts
-                    content_text = " ".join(content_parts).strip()
+                        content_text = " ".join(content_parts).strip()
+                        if content_text:
+                            content_items.append({"heading": heading_text, "content": content_text})
 
-                    if content_text:
-                        content_items.append({"heading": heading_text, "content": content_text})
-
-                processed_elements.add(id(content_slot))
+                    processed_elements.add(id(content_slot))
 
         # Extract text-heading and text-content pairs (fallback for non-nested-grid-wrapper structures)
         text_headings = soup.find_all(["span", "div"], slot=re.compile(r"text-heading", re.IGNORECASE))
@@ -1358,7 +1359,7 @@ class OldMutualWebsiteScraper:
             content_text, soup, validation, content_hash = result
 
             # Extract structured content (same as products)
-            content = self._extract_structured_content(soup)
+            content = self._extract_structured_content(soup, enable_strong_headings=True)
 
             # Extract FAQs if any
             faqs = self._extract_faqs(soup)

@@ -1,0 +1,24 @@
+embeddings:
+  backend: "sentence_transformers"  # sentence_transformers | gemini | ollama | openai
+  model: "sentence-transformers/all-MiniLM-L6-v2"
+  batch_size: 32
+  base_url: "http://localhost:11434"
+  api_key_env: "GEMINI_API_KEY"
+
+vector_store:
+  provider: "qdrant_local"  # qdrant_local | qdrant_http
+  collection: "oldmutual_website"
+  # For qdrant_local:
+  path: "data/embeddings/qdrant"
+  # For qdrant_http:
+  host: "localhost"
+  port: 6333
+
+retrieval:
+  top_k: 3
+
+generation:
+  enabled: true
+  backend: "gemini"
+  model: "models/gemini-flash-latest"
+  api_key_env: "GEMINI_API_KEY"
