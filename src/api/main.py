@@ -65,8 +65,7 @@ class APIRAGAdapter:
         self.cfg = rag_cfg
 
     async def retrieve(self, query: str, filters: Optional[Dict] = None, top_k: int = 5):
-        # Current retrieve_context does not support filters; we ignore them for now.
-        return retrieve_context(question=query, cfg=self.cfg, top_k=top_k)
+        return retrieve_context(question=query, cfg=self.cfg, top_k=top_k, filters=filters)
 
     async def generate(self, query: str, context_docs: List[Dict], conversation_history: List[Dict]):
         """

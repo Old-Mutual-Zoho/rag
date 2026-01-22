@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 
 from src.utils.rag_config_loader import load_rag_config
 from src.rag.ingest import ingest_chunks_to_qdrant
+from src.rag.keyword_search import BM25KeywordSearch
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -40,6 +41,16 @@ def main() -> int:
     cfg = load_rag_config(args.config)
     total = ingest_chunks_to_qdrant(args.chunks_file, cfg, limit=args.limit)
     logger.info("Embedded and stored %s chunks into Qdrant collection '%s'", total, cfg.vector_store.collection)
+
+    # Also build BM25 keyword search index if hybrid search is enabled
+    if cfg.retrieval.hybrid.enabled:
+        logger.info("Building BM25 keyword search index...")
+        keyword_search = BM25KeywordSearch()
+        keyword_total = keyword_search.build_index(args.chunks_file)
+        logger.info("Built BM25 index with %s chunks", keyword_total)
+    else:
+        logger.info("Hybrid search is disabled, skipping BM25 index build")
+
     return 0
 
 

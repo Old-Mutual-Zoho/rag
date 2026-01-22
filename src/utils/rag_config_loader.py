@@ -30,8 +30,20 @@ class VectorStoreConfig(BaseModel):
     port: int = Field(default=6333, ge=1, le=65535)
 
 
+class QueryExpansionConfig(BaseModel):
+    enabled: bool = True
+
+
+class HybridRetrievalConfig(BaseModel):
+    enabled: bool = False
+    semantic_weight: float = Field(default=0.7, ge=0.0, le=1.0)
+    keyword_weight: float = Field(default=0.3, ge=0.0, le=1.0)
+
+
 class RetrievalConfig(BaseModel):
     top_k: int = Field(default=8, ge=1, le=100)
+    query_expansion: QueryExpansionConfig = Field(default_factory=QueryExpansionConfig)
+    hybrid: HybridRetrievalConfig = Field(default_factory=HybridRetrievalConfig)
 
 
 class GenerationConfig(BaseModel):

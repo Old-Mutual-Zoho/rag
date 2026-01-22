@@ -1,0 +1,42 @@
+# Keyword/Synonym mappings for query expansion
+# Format: keyword -> list of synonyms/related terms
+
+synonyms:
+  # Product names to categories/descriptions
+  serenicare:
+    - health care
+    - health insurance
+    - medical insurance
+    - healthcare
+    - medical cover
+
+  # Add more mappings as needed
+  family life protection:
+    - life insurance
+    - term life
+    - death benefit
+
+  motor private:
+    - car insurance
+    - vehicle insurance
+    - auto insurance
+    - motor insurance
+
+# Category mappings
+categories:
+  health:
+    - medical
+    - healthcare
+    - hospital
+    - clinic
+
+  life:
+    - death benefit
+    - term life
+    - whole life
+
+# Common abbreviations
+abbreviations:
+  hi: health insurance
+  li: life insurance
+  mi: motor insurance

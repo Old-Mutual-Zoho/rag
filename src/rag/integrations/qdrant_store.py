@@ -59,8 +59,27 @@ class QdrantVectorStore:
         points = [qm.PointStruct(id=_id, vector=vec, payload=payload) for _id, vec, payload in zip(point_ids, vectors, payloads, strict=True)]
         self.client.upsert(collection_name=self.collection, points=points)
 
-    def search(self, *, query_vector: List[float], limit: int = 8) -> list[dict[str, Any]]:
-        res = self.client.search(collection_name=self.collection, query_vector=query_vector, limit=limit)
+    def search(
+        self,
+        *,
+        query_vector: List[float],
+        limit: int = 8,
+        filter: qm.Filter | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Search for similar vectors in Qdrant.
+
+        Args:
+            query_vector: The query embedding vector
+            limit: Maximum number of results to return
+            filter: Optional Qdrant filter for metadata filtering
+        """
+        res = self.client.search(
+            collection_name=self.collection,
+            query_vector=query_vector,
+            limit=limit,
+            query_filter=filter,
+        )
         out: list[dict[str, Any]] = []
         for p in res:
             out.append(
