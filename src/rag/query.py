@@ -98,13 +98,13 @@ def retrieve_context(
     embedder = _embedder_from_config(cfg)
     store = _vector_store_from_config(cfg)
 
-    store_class = type(store).__name__
-    if store_class == "PgVectorStore" and hasattr(store, "ensure_table"):
-        store.ensure_table(embedder.dim)
-
     # Fetch extra candidates so we can re-rank by product-term overlap (e.g. "Somesa" in chunk)
     fetch_k = min(top_k * 2, 20)
     qvec = embedder.embed_query(search_query)
+
+    store_class = type(store).__name__
+    if store_class == "PgVectorStore" and hasattr(store, "ensure_table"):
+        store.ensure_table(len(qvec))
     if store_class == "PgVectorStore":
         hits = store.search(query_vector=qvec, limit=fetch_k, filters=filters)
     elif store_class == "QdrantVectorStore":
