@@ -147,10 +147,21 @@ class PgVectorStore:
             LIMIT %s
         """
 
-        with self._conn() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, exec_params)
-                rows = cur.fetchall()
+        try:
+            with self._conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql, exec_params)
+                    rows = cur.fetchall()
+        except Exception as e:
+            err = str(e)
+            if "different vector dimensions" in err or "dimension" in err.lower():
+                raise RuntimeError(
+                    f"Vector dimension mismatch: {err}. "
+                    "Ensure the table was created and filled with the same embedding size as queries. "
+                    "Run: python scripts/recreate_vector_table.py --yes && python scripts/generate_embeddings.py "
+                    "(use the same DATABASE_URL as the app). If the app runs on Railway, redeploy after updating config."
+                ) from e
+            raise
         return [{"id": r["id"], "score": float(r["score"]), "payload": (r["payload"] or {})} for r in rows]
 
     def count(self) -> int:

@@ -20,6 +20,7 @@ class EmbeddingsConfig(BaseModel):
     model: str = "all-MiniLM-L6-v2"
     api_key_env: str = "GEMINI_API_KEY"
     base_url: str = "http://localhost:11434"
+    output_dimensionality: Optional[int] = None  # Gemini: 768, 1536, or 3072; use 1536 for pgvector (ivfflat <= 2000)
 
 
 class VectorStoreConfig(BaseModel):

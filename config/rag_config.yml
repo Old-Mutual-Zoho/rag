@@ -1,11 +1,14 @@
 # RAG pipeline configuration (embeddings, vector store, retrieval, generation)
 # Vector store provider: pgvector (Neon/Postgres) or qdrant_* (local/remote Qdrant)
+# If you change the embedder (e.g. 384-dim -> 3072-dim), run:
+#   python scripts/recreate_vector_table.py --yes && python scripts/generate_embeddings.py
 
 embeddings:
   provider: gemini  # sentence_transformers | openai | gemini | ollama
   model: models/gemini-embedding-001
+  output_dimensionality: 1536  # keep <= 2000 for pgvector ivfflat index; 768/1536/3072 supported
   # For OpenAI: model: text-embedding-3-small
-  # For Gemini: models/gemini-embedding-001 (text-embedding-004 no longer supported for embedContent)
+  # For Gemini: models/gemini-embedding-001; use output_dimensionality 1536 for pgvector
   # For Ollama: model: nomic-embed-text, base_url: http://localhost:11434
 
 vector_store:

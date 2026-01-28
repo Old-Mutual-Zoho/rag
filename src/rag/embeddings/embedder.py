@@ -155,10 +155,13 @@ class GeminiEmbedder:
 
     Requires env var with your API key, e.g. GEMINI_API_KEY.
     Use model "models/gemini-embedding-001" (text-embedding-004 is deprecated for embedContent).
+    Free tier: 100 embed requests/min; embed_texts throttles and retries on 429.
     """
 
     model: str
     api_key_env: str = "GEMINI_API_KEY"
+    requests_per_minute: int = 90  # stay under free-tier 100/min when embedding many texts
+    output_dimensionality: int | None = 1536  # default 1536 for pgvector ivfflat (max 2000); 768/1536/3072 supported
 
     def __post_init__(self) -> None:
         import os
@@ -179,22 +182,54 @@ class GeminiEmbedder:
         return self._dim
 
     def embed_texts(self, texts: Sequence[str]) -> List[List[float]]:
+        import time
+
+        delay = 60.0 / self.requests_per_minute if self.requests_per_minute else 0.0
         out: List[List[float]] = []
-        for t in texts:
-            v = self.embed_query(t)
+        for i, t in enumerate(texts):
+            if i > 0 and delay > 0:
+                time.sleep(delay)
+            v = self._embed_query_with_retry(t)
             out.append(v)
         return out
 
     def embed_query(self, text: str) -> List[float]:
-        # task_type improves retrieval embeddings
-        resp = self._genai.embed_content(
-            model=self.model,
-            content=text,
-            task_type="retrieval_query",
-        )
-        v = resp.get("embedding")
-        if not isinstance(v, list):
-            raise RuntimeError(f"Unexpected Gemini embedding response: {resp}")
-        if self._dim is None:
-            self._dim = len(v)
-        return v
+        return self._embed_query_with_retry(text)
+
+    def _embed_query_with_retry(self, text: str) -> List[float]:
+        import time
+
+        last_err = None
+        for attempt in range(4):
+            try:
+                kwargs = {
+                    "model": self.model,
+                    "content": text,
+                    "task_type": "retrieval_query",
+                }
+                # Default 1536 for pgvector ivfflat limit; explicitly pass to API
+                kwargs["output_dimensionality"] = (
+                    1536 if self.output_dimensionality is None else self.output_dimensionality
+                )
+                resp = self._genai.embed_content(**kwargs)
+                v = resp.get("embedding")
+                if not isinstance(v, list):
+                    raise RuntimeError(f"Unexpected Gemini embedding response: {resp}")
+                if self._dim is None:
+                    self._dim = len(v)
+                return v
+            except Exception as e:
+                last_err = e
+                is_rate_limit = (
+                    "429" in str(e)
+                    or "quota" in str(e).lower()
+                    or "ResourceExhausted" in type(e).__name__
+                )
+                if is_rate_limit and attempt < 3:
+                    wait = 50  # seconds; API often suggests ~45s
+                    time.sleep(wait)
+                    continue
+                raise
+        if last_err is not None:
+            raise last_err
+        return []  # unreachable

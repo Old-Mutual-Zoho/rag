@@ -29,7 +29,11 @@ def _embedder_from_config(cfg: RAGConfig):
     if p == "openai":
         return OpenAIEmbedder(model=cfg.embeddings.model)
     if p == "gemini":
-        return GeminiEmbedder(model=cfg.embeddings.model, api_key_env=cfg.embeddings.api_key_env)
+        return GeminiEmbedder(
+            model=cfg.embeddings.model,
+            api_key_env=cfg.embeddings.api_key_env,
+            output_dimensionality=cfg.embeddings.output_dimensionality,
+        )
     if p == "ollama":
         return OllamaEmbedder(model=cfg.embeddings.model, base_url=cfg.embeddings.base_url or "http://localhost:11434")
     raise ValueError(f"Unknown embeddings provider: {cfg.embeddings.provider}")
