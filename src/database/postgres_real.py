@@ -90,7 +90,7 @@ class PostgresDB:
                 conversation_id=conversation_id,
                 role=role,
                 content=content,
-                metadata=metadata or {},
+                message_metadata=metadata or {},
             )
             s.add(m)
             s.flush()

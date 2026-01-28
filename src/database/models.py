@@ -48,7 +48,7 @@ class Message(Base):
     conversation_id: Mapped[str] = mapped_column(String(36), ForeignKey("conversations.id"), nullable=False, index=True)
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    metadata: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    message_metadata: Mapped[Dict[str, Any]] = mapped_column("metadata", JSON, default=dict, nullable=False)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="messages")
