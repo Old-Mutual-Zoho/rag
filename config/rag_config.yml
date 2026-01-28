@@ -2,8 +2,8 @@
 # Vector store provider: pgvector (Neon/Postgres) or qdrant_* (local/remote Qdrant)
 
 embeddings:
-  provider: sentence_transformers  # sentence_transformers | openai | gemini | ollama
-  model: all-MiniLM-L6-v2
+  provider: gemini  # sentence_transformers | openai | gemini | ollama
+  model: models/text-embedding-004
   # For OpenAI: model: text-embedding-3-small
   # For Gemini: model: models/text-embedding-004, api_key_env: GEMINI_API_KEY
   # For Ollama: model: nomic-embed-text, base_url: http://localhost:11434
