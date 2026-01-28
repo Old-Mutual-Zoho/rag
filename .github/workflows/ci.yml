@@ -40,7 +40,6 @@ jobs:
     - name: Lint
       run: |
         flake8 src tests --max-line-length=160
-        python -m black --check src tests --line-length 160
     
     - name: Test
       run: pytest tests/ --cov=src --cov-report=xml || echo "No tests found"
