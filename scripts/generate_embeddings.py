@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Generate embeddings from processed chunks and store them in Qdrant.
+Generate embeddings from processed chunks and store in the configured vector store (pgvector or Qdrant).
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ def setup_logging(verbose: bool = False) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Embed processed chunks and store in Qdrant")
+    parser = argparse.ArgumentParser(description="Embed processed chunks into configured vector store (pgvector or Qdrant)")
     parser.add_argument("--config", type=Path, default=None, help="Path to rag_config.yml (default: config/rag_config.yml)")
     parser.add_argument("--chunks-file", type=Path, default=Path("data/processed/website_chunks.jsonl"), help="Input chunks JSONL")
     parser.add_argument("--verbose", "-v", action="store_true")
@@ -40,7 +40,7 @@ def main() -> int:
 
     cfg = load_rag_config(args.config)
     total = ingest_chunks_to_qdrant(args.chunks_file, cfg, limit=args.limit)
-    logger.info("Embedded and stored %s chunks into Qdrant collection '%s'", total, cfg.vector_store.collection)
+    logger.info("Embedded and stored %s chunks into %s collection '%s'", total, cfg.vector_store.provider, cfg.vector_store.collection)
 
     # Also build BM25 keyword search index if hybrid search is enabled
     if cfg.retrieval.hybrid.enabled:

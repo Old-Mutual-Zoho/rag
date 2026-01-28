@@ -6,6 +6,7 @@ __pycache__/
 .Python
 env/
 venv/
+.venv/
 ENV/
 build/
 dist/
@@ -52,6 +53,11 @@ Thumbs.db
 *.faiss
 
 # helper docs
+DEPLOYMENT_CHECKLIST.md
+FRONTEND_API.md
+RAILWAY_DEPLOYMENT.md
+SESSIONS_AND_STORAGE.md
+NEON_SETUP.md
 IMPLEMENTATION_SUMMARY.md
 LOOPHOLES_ANALYSIS.md
 scripts/test_extraction.py

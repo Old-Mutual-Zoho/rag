@@ -2,27 +2,29 @@
 FastAPI application - Main entry point
 """
 
-from fastapi import FastAPI, HTTPException, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import Optional, Dict, List
+from dotenv import load_dotenv
+load_dotenv()
+
+import json
 import logging
+import os
 from datetime import datetime
 from pathlib import Path
-import json
+from typing import Any, Dict, List, Optional
 
-# Import our modules
-from src.database.postgres import PostgresDB
-from src.database.redis import RedisCache
-from src.chatbot.state_manager import StateManager
-from src.chatbot.router import ChatRouter
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
 from src.chatbot.modes.conversational import ConversationalMode
 from src.chatbot.modes.guided import GuidedMode
 from src.chatbot.product_cards import ProductCardGenerator
+from src.chatbot.router import ChatRouter
+from src.chatbot.state_manager import StateManager
+from src.rag.generate import generate_with_gemini
+from src.rag.query import retrieve_context
 from src.utils.product_matcher import ProductMatcher
 from src.utils.rag_config_loader import load_rag_config
-from src.rag.query import retrieve_context
-from src.rag.generate import generate_with_gemini
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -44,9 +46,20 @@ app.add_middleware(
 # DEPENDENCY INJECTION
 # ============================================================================
 
-# Initialize databases (singleton pattern)
-postgres_db = PostgresDB()
-redis_cache = RedisCache()
+# Initialize databases: use real Postgres/Redis when env is set, else in-memory stubs
+if os.getenv("DATABASE_URL") and os.getenv("USE_POSTGRES_CONVERSATIONS", "").lower() in ("1", "true", "yes"):
+    from src.database.postgres_real import PostgresDB
+    postgres_db = PostgresDB(connection_string=os.environ["DATABASE_URL"])
+else:
+    from src.database.postgres import PostgresDB
+    postgres_db = PostgresDB()
+
+if os.getenv("REDIS_URL"):
+    from src.database.redis_real import RedisCache
+    redis_cache = RedisCache(url=os.environ["REDIS_URL"])
+else:
+    from src.database.redis import RedisCache
+    redis_cache = RedisCache()
 
 # Initialize components
 state_manager = StateManager(redis_cache, postgres_db)
@@ -64,8 +77,9 @@ class APIRAGAdapter:
     def __init__(self):
         self.cfg = rag_cfg
 
-    async def retrieve(self, query: str, filters: Optional[Dict] = None, top_k: int = 5):
-        return retrieve_context(question=query, cfg=self.cfg, top_k=top_k, filters=filters)
+    async def retrieve(self, query: str, filters: Optional[Dict] = None, top_k: Optional[int] = None):
+        k = (self.cfg.retrieval.top_k if top_k is None else top_k)
+        return retrieve_context(question=query, cfg=self.cfg, top_k=k, filters=filters)
 
     async def generate(self, query: str, context_docs: List[Dict], conversation_history: List[Dict]):
         """
@@ -129,10 +143,12 @@ def get_router():
 
 
 class ChatMessage(BaseModel):
-    message: str
+    """Chat request. Use form_data when the frontend submits a step form (e.g. Personal Accident)."""
+    message: str = ""
     session_id: Optional[str] = None
     user_id: str
     metadata: Optional[Dict] = None
+    form_data: Optional[Dict] = None  # Step form payload; when set, used as user_input in guided flows
 
 
 class ChatResponse(BaseModel):
@@ -156,6 +172,24 @@ class QuoteResponse(BaseModel):
     valid_until: str
 
 
+class CreateSessionRequest(BaseModel):
+    """Create a new chatbot session (e.g. when user opens the app)."""
+    user_id: str = Field(..., description="User identifier (e.g. phone number or auth id)")
+
+
+class CreateSessionResponse(BaseModel):
+    session_id: str
+    user_id: str
+
+
+class StartGuidedRequest(BaseModel):
+    """Start a guided flow (e.g. Personal Accident). Session is created if session_id is omitted."""
+    flow_name: str = Field(..., description="Flow id, e.g. 'personal_accident'")
+    user_id: str
+    session_id: Optional[str] = None
+    initial_data: Optional[Dict] = Field(default_factory=dict, description="Optional pre-filled data for the flow")
+
+
 # ============================================================================
 # ENDPOINTS
 # ============================================================================
@@ -173,35 +207,56 @@ async def health_check():
     return {"status": "healthy", "database": {"postgres": "connected", "redis": redis_cache.ping()}, "timestamp": datetime.now().isoformat()}
 
 
+async def _handle_chat_message(
+    request: ChatMessage, router: ChatRouter, db: PostgresDB
+) -> ChatResponse:
+    """Shared logic for chat message. In conversational mode uses same RAG retrieval as run_rag (config top_k, synonyms, re-ranking)."""
+    # Get or create session
+    session_id = request.session_id
+
+    if not session_id:
+        user = db.get_or_create_user(phone_number=request.user_id)
+        session_id = state_manager.create_session(str(user.id))
+
+    # Route message (form_data from frontend is used as user_input in guided flows)
+    # Conversational path uses APIRAGAdapter.retrieve() with cfg.retrieval.top_k, synonym expansion, re-ranking
+    response = await router.route(
+        message=request.message or "",
+        session_id=session_id,
+        user_id=request.user_id,
+        form_data=request.form_data,
+    )
+
+    # Save message to database
+    session = state_manager.get_session(session_id)
+    if session:
+        user_content = json.dumps(request.form_data) if request.form_data else request.message
+        db.add_message(
+            conversation_id=session["conversation_id"],
+            role="user",
+            content=user_content,
+            metadata=request.metadata or {},
+        )
+        resp_val = response.get("response")
+        if isinstance(resp_val, dict):
+            assistant_content = resp_val.get("response") or resp_val.get("message") or str(resp_val)
+        else:
+            assistant_content = str(resp_val)
+        db.add_message(
+            conversation_id=session["conversation_id"],
+            role="assistant",
+            content=assistant_content,
+            metadata={"mode": response.get("mode")},
+        )
+
+    return ChatResponse(response=response, session_id=session_id, mode=response.get("mode", "conversational"), timestamp=datetime.now().isoformat())
+
+
 @app.post("/chat/message", response_model=ChatResponse)
 async def send_message(request: ChatMessage, router: ChatRouter = Depends(get_router), db: PostgresDB = Depends(get_db)):
-    """
-    Send a message to the chatbot
-    Automatically routes to conversational or guided mode
-    """
+    """Send a message to the chatbot. Routes to conversational or guided mode."""
     try:
-        # Get or create session
-        session_id = request.session_id
-
-        if not session_id:
-            # Create new session
-            user = db.get_or_create_user(phone_number=request.user_id)
-            session_id = state_manager.create_session(str(user.id))
-
-        # Route message
-        response = await router.route(message=request.message, session_id=session_id, user_id=request.user_id)
-
-        # Save message to database
-        session = state_manager.get_session(session_id)
-        if session:
-            db.add_message(conversation_id=session["conversation_id"], role="user", content=request.message, metadata=request.metadata)
-
-            db.add_message(
-                conversation_id=session["conversation_id"], role="assistant", content=str(response.get("response", "")), metadata={"mode": response.get("mode")}
-            )
-
-        return ChatResponse(response=response, session_id=session_id, mode=response.get("mode", "conversational"), timestamp=datetime.now().isoformat())
-
+        return await _handle_chat_message(request, router, db)
     except Exception as e:
         logger.error(f"Error processing message: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -209,15 +264,339 @@ async def send_message(request: ChatMessage, router: ChatRouter = Depends(get_ro
 
 @app.post("/chat/start-guided")
 async def start_guided_flow(flow_name: str, session_id: str, user_id: str, router: ChatRouter = Depends(get_router)):
-    """Start a specific guided flow"""
+    """Start a specific guided flow (query params). Prefer POST /api/chat/start-guided with JSON body."""
     try:
         response = await router.guided.start_flow(flow_name=flow_name, session_id=session_id, user_id=user_id)
-
         return response
-
     except Exception as e:
         logger.error(f"Error starting guided flow: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------- API router (prefix /api) for frontend ----------
+api_router = APIRouter()
+
+
+@api_router.post("/session", response_model=CreateSessionResponse)
+async def create_session(
+    body: CreateSessionRequest,
+    db: PostgresDB = Depends(get_db),
+):
+    """Create a new chat session. Returns session_id for later requests."""
+    try:
+        user = db.get_or_create_user(phone_number=body.user_id)
+        session_id = state_manager.create_session(str(user.id))
+        return CreateSessionResponse(session_id=session_id, user_id=body.user_id)
+    except Exception as e:
+        logger.error(f"Error creating session: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/session/{session_id}")
+async def get_session_state(session_id: str):
+    """Return current session state for the frontend (mode, flow, step, step name)."""
+    try:
+        session = state_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+        step = session.get("current_step", 0)
+        step_name = None
+        steps_total = None
+        if session.get("current_flow") == "personal_accident":
+            from src.chatbot.flows.personal_accident import PersonalAccidentFlow
+            step_names = PersonalAccidentFlow.STEPS
+            step_name = step_names[step] if step < len(step_names) else None
+            steps_total = len(step_names)
+        return {
+            "session_id": session_id,
+            "mode": session.get("mode", "conversational"),
+            "current_flow": session.get("current_flow"),
+            "current_step": step,
+            "step_name": step_name,
+            "steps_total": steps_total,
+            "collected_keys": list((session.get("collected_data") or {}).keys()),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting session: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/chat/start-guided")
+async def start_guided_body(
+    body: StartGuidedRequest,
+    router: ChatRouter = Depends(get_router),
+    db: PostgresDB = Depends(get_db),
+):
+    """Start a guided flow. If session_id is omitted, a new session is created."""
+    try:
+        session_id = body.session_id
+        if not session_id:
+            user = db.get_or_create_user(phone_number=body.user_id)
+            session_id = state_manager.create_session(str(user.id))
+        response = await router.guided.start_flow(
+            flow_name=body.flow_name,
+            session_id=session_id,
+            user_id=body.user_id,
+            initial_data=body.initial_data or {},
+        )
+        return {"session_id": session_id, **response}
+    except Exception as e:
+        logger.error(f"Error starting guided flow: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/flows/personal_accident/schema")
+async def get_personal_accident_schema():
+    """Return step and field schema for Personal Accident so the frontend can build forms."""
+    from src.chatbot.flows.personal_accident import (
+        PERSONAL_ACCIDENT_COVERAGE_PLANS,
+        PERSONAL_ACCIDENT_RISKY_ACTIVITIES,
+        PersonalAccidentFlow,
+    )
+    steps = []
+    for i, name in enumerate(PersonalAccidentFlow.STEPS):
+        entry = {"index": i, "name": name}
+        if name == "personal_details":
+            entry["form"] = {
+                "type": "form",
+                "fields": [
+                    {"name": "surname", "label": "Surname", "type": "text", "required": True},
+                    {"name": "first_name", "label": "First Name", "type": "text", "required": True},
+                    {"name": "middle_name", "label": "Middle Name", "type": "text", "required": False},
+                    {"name": "date_of_birth", "label": "Date of Birth", "type": "date", "required": True},
+                    {"name": "email", "label": "Email Address", "type": "email", "required": True},
+                    {"name": "mobile_number", "label": "Mobile Number", "type": "tel", "required": True},
+                    {"name": "national_id_number", "label": "National ID Number", "type": "text", "required": True},
+                    {"name": "nationality", "label": "Nationality", "type": "text", "required": True},
+                    {"name": "tax_identification_number", "label": "Tax ID", "type": "text", "required": False},
+                    {"name": "occupation", "label": "Occupation", "type": "text", "required": True},
+                    {"name": "gender", "label": "Gender", "type": "select", "options": ["Male", "Female", "Other"], "required": True},
+                    {"name": "country_of_residence", "label": "Country of Residence", "type": "text", "required": True},
+                    {"name": "physical_address", "label": "Physical Address", "type": "text", "required": True},
+                ],
+            }
+        elif name == "next_of_kin":
+            entry["form"] = {
+                "type": "form",
+                "fields": [
+                    {"name": "nok_first_name", "label": "First Name", "type": "text", "required": True},
+                    {"name": "nok_last_name", "label": "Last Name", "type": "text", "required": True},
+                    {"name": "nok_middle_name", "label": "Middle Name", "type": "text", "required": False},
+                    {"name": "nok_phone_number", "label": "Phone Number", "type": "tel", "required": True},
+                    {"name": "nok_relationship", "label": "Relationship", "type": "text", "required": True},
+                    {"name": "nok_address", "label": "Address", "type": "text", "required": True},
+                    {"name": "nok_id_number", "label": "ID Number", "type": "text", "required": False},
+                ],
+            }
+        elif name == "previous_pa_policy":
+            entry["form"] = {"type": "yes_no_details", "question_id": "previous_pa_policy", "details_field": {"name": "previous_insurer_name", "show_when": "yes"}}
+        elif name == "physical_disability":
+            entry["form"] = {"type": "yes_no_details", "question_id": "physical_disability", "details_field": {"name": "disability_details", "show_when": "no"}}
+        elif name == "risky_activities":
+            entry["form"] = {"type": "checkbox", "options": PERSONAL_ACCIDENT_RISKY_ACTIVITIES, "other_field": {"name": "risky_activity_other"}}
+        elif name == "coverage_selection":
+            entry["form"] = {"type": "options", "options": [{"id": p["id"], "label": p["label"], "sum_assured": p["sum_assured"]} for p in PERSONAL_ACCIDENT_COVERAGE_PLANS]}
+        elif name == "upload_national_id":
+            entry["form"] = {"type": "file_upload", "field_name": "national_id_file_ref", "accept": "application/pdf"}
+        elif name in ("premium_and_download", "choose_plan_and_pay"):
+            entry["form"] = {"type": "premium_summary", "actions": ["view_all_plans", "proceed_to_pay"]}
+        steps.append(entry)
+    return {"flow_id": "personal_accident", "steps": steps}
+
+
+@api_router.post("/chat/message", response_model=ChatResponse)
+async def api_send_message(
+    request: ChatMessage,
+    router: ChatRouter = Depends(get_router),
+    db: PostgresDB = Depends(get_db),
+):
+    """
+    Send a message or form_data (frontend). Uses same RAG retrieval as run_rag:
+    config-driven top_k, synonym expansion, re-ranking. Routes to conversational or guided mode.
+    """
+    try:
+        return await _handle_chat_message(request, router, db)
+    except Exception as e:
+        logger.error(f"Error processing message: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------- Product routes under /api (for frontend). Use /api/products/by-id/{id} to avoid conflict with /api/products/{category} ----------
+@api_router.get("/products/list")
+async def api_list_products(category: Optional[str] = None, matcher: ProductMatcher = Depends(lambda: product_matcher)):
+    """Get list of products. Optional ?category=personal."""
+    try:
+        if category:
+            products = matcher.get_products_by_category(category)
+        else:
+            products = list(matcher.product_index.values())
+        return {"products": products, "count": len(products)}
+    except Exception as e:
+        logger.error(f"Error listing products: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/products/categories")
+async def api_list_product_categories(matcher: ProductMatcher = Depends(lambda: product_matcher)):
+    """List top-level categories, e.g. 'personal', 'business'."""
+    try:
+        categories = sorted({p.get("category_name") for p in matcher.product_index.values() if p.get("category_name")})
+        return {"categories": categories}
+    except Exception as e:
+        logger.error(f"Error listing product categories: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/products/by-id/{product_id:path}")
+async def api_get_product_by_id(
+    product_id: str,
+    include_details: bool = False,
+    matcher: ProductMatcher = Depends(lambda: product_matcher),
+):
+    """
+    Get product info from chunks: overview, benefits, general. When include_details=true, also returns faq.
+    product_id is the full doc_id (e.g. website:product:personal/save-and-invest/sure-deal-savings-plan).
+    """
+    try:
+        product = matcher.get_product_by_id(product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        sections = _load_product_sections(product_id)
+        out = {
+            "product_id": product_id,
+            "name": product.get("name"),
+            "category": product.get("category_name"),
+            "subcategory": product.get("sub_category_name"),
+            "url": product.get("url"),
+            "overview": sections.get("overview", []),
+            "benefits": sections.get("benefits", []),
+            "general": sections.get("general", []),
+        }
+        if include_details:
+            out["faq"] = sections.get("faq", [])
+        return out
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting product: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/products/by-id/{product_id:path}/details")
+async def api_get_product_details_by_id(
+    product_id: str,
+    matcher: ProductMatcher = Depends(lambda: product_matcher),
+):
+    """Same as by-id with include_details=true: overview, benefits, general, and faq."""
+    try:
+        product = matcher.get_product_by_id(product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        sections = _load_product_sections(product_id)
+        return {
+            "product_id": product_id,
+            "name": product.get("name"),
+            "category": product.get("category_name"),
+            "subcategory": product.get("sub_category_name"),
+            "url": product.get("url"),
+            "overview": sections.get("overview", []),
+            "benefits": sections.get("benefits", []),
+            "general": sections.get("general", []),
+            "faq": sections.get("faq", []),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting product details: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/products/{category}")
+async def api_list_product_subcategories_or_products(
+    category: str, matcher: ProductMatcher = Depends(lambda: product_matcher)
+):
+    """
+    List subcategories under a business unit (category), or products if category has none.
+    Frontend: if subcategories is non-empty show them; else show products (or 404 if invalid category).
+    """
+    try:
+        cat_lower = category.lower()
+        subs = sorted(
+            {
+                p.get("sub_category_name")
+                for p in matcher.product_index.values()
+                if p.get("category_name", "").lower() == cat_lower and p.get("sub_category_name")
+            }
+        )
+        products: List[Dict[str, Any]] = []
+        if not subs:
+            products = [
+                {"product_id": p["product_id"], "name": p["name"], "url": p.get("url")}
+                for p in matcher.product_index.values()
+                if p.get("category_name", "").lower() == cat_lower
+            ]
+            if not products:
+                raise HTTPException(status_code=404, detail="Category not found or has no products")
+        return {"category": category, "subcategories": subs, "products": products}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing category: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/products/{category}/{subcategory}")
+async def api_list_products_in_subcategory(
+    category: str, subcategory: str, matcher: ProductMatcher = Depends(lambda: product_matcher)
+):
+    """List products in a category/subcategory. product_id in each item is the full doc_id for by-id endpoints."""
+    try:
+        cat_lower = category.lower()
+        sub_lower = subcategory.lower()
+        items = [
+            {"product_id": p["product_id"], "name": p["name"], "url": p.get("url")}
+            for p in matcher.product_index.values()
+            if p.get("category_name", "").lower() == cat_lower
+            and p.get("sub_category_name", "").lower() == sub_lower
+        ]
+        if not items:
+            raise HTTPException(status_code=404, detail="No products found for this category/subcategory")
+        return {"category": category, "subcategory": subcategory, "products": items}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing products in subcategory: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/products/{category}/{subcategory}/{product_slug}")
+async def api_get_product_structured(
+    category: str, subcategory: str, product_slug: str,
+    matcher: ProductMatcher = Depends(lambda: product_matcher),
+):
+    """Structured product sections (overview, benefits, faq, etc.) by category/subcategory/slug."""
+    doc_id = f"website:product:{category}/{subcategory}/{product_slug}"
+    product = matcher.get_product_by_id(doc_id)
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    sections = _load_product_sections(doc_id)
+    return {
+        "product_id": doc_id,
+        "name": product.get("name"),
+        "category": product.get("category_name"),
+        "subcategory": product.get("sub_category_name"),
+        "url": product.get("url"),
+        "overview": sections.get("overview", []),
+        "benefits": sections.get("benefits", []),
+        "payment_methods": sections.get("payment_methods", []),
+        "general": sections.get("general", []),
+        "faq": sections.get("faq", []),
+    }
+
+
+app.include_router(api_router, prefix="/api")
 
 
 @app.get("/products/list")
@@ -310,17 +689,30 @@ async def list_products_in_subcategory(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/products/{product_id}")
-async def get_product(product_id: str, include_details: bool = False):
-    """Get product information"""
+@app.get("/products/by-id/{product_id:path}")
+async def get_product_by_id(product_id: str, include_details: bool = False):
+    """
+    Product info from chunks: overview, benefits, general. With ?include_details=true also returns faq.
+    Example id: website:product:personal/save-and-invest/sure-deal-savings-plan
+    """
     try:
-        card = product_card_gen.generate_card(product_id, include_details)
-
-        if not card:
+        product = product_matcher.get_product_by_id(product_id)
+        if not product:
             raise HTTPException(status_code=404, detail="Product not found")
-
-        return card
-
+        sections = _load_product_sections(product_id)
+        out = {
+            "product_id": product_id,
+            "name": product.get("name"),
+            "category": product.get("category_name"),
+            "subcategory": product.get("sub_category_name"),
+            "url": product.get("url"),
+            "overview": sections.get("overview", []),
+            "benefits": sections.get("benefits", []),
+            "general": sections.get("general", []),
+        }
+        if include_details:
+            out["faq"] = sections.get("faq", [])
+        return out
     except HTTPException:
         raise
     except Exception as e:
@@ -328,10 +720,80 @@ async def get_product(product_id: str, include_details: bool = False):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/products/by-id/{product_id:path}/details")
+async def get_product_details_by_id(product_id: str):
+    """Product details: overview, benefits, general, and faq (same as by-id?include_details=true)."""
+    try:
+        product = product_matcher.get_product_by_id(product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail="Product not found")
+        sections = _load_product_sections(product_id)
+        return {
+            "product_id": product_id,
+            "name": product.get("name"),
+            "category": product.get("category_name"),
+            "subcategory": product.get("sub_category_name"),
+            "url": product.get("url"),
+            "overview": sections.get("overview", []),
+            "benefits": sections.get("benefits", []),
+            "general": sections.get("general", []),
+            "faq": sections.get("faq", []),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting product details: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/products/{product_id}")
+async def get_product(product_id: str, include_details: bool = False):
+    """Get product by id. Prefer /products/by-id/{product_id:path} when id contains slashes."""
+    try:
+        card = product_card_gen.generate_card(product_id, False)
+        if not card:
+            raise HTTPException(status_code=404, detail="Product not found")
+        if include_details:
+            card["details"] = await product_card_gen.get_product_details(product_id)
+        return card
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting product: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def _strip_heading_from_text(text: str, heading: str) -> str:
+    """
+    Remove duplicated heading from the start of text so the API returns
+    content-only in "text" when "heading" is already present.
+    Handles "Heading\\ncontent", "Q: Heading\\nA: answer" (FAQ), and similar.
+    """
+    if not text or not heading:
+        return text
+    t, h = text.strip(), heading.strip()
+    if not h:
+        return text
+    # "Heading\ncontent" or "Heading content"
+    if t.lower().startswith(h.lower()):
+        rest = t[len(h) :].lstrip("\n\t ")
+        if rest.upper().startswith("A:") and "Q:" in t[:4]:
+            rest = rest[2:].lstrip()
+        return rest if rest else t
+    # FAQ: "Q: Heading\nA: answer" -> return just the answer
+    q_prefix = "Q: " + h
+    if t.lower().startswith(q_prefix.lower()):
+        after = t[len(q_prefix) :].lstrip()
+        if after.upper().startswith("A:"):
+            return after[2:].lstrip()
+        return after
+    return text
+
+
 def _load_product_sections(product_id: str) -> Dict[str, List[Dict[str, str]]]:
     """
-    Helper to load typed sections for a product directly from
-    `website_chunks.jsonl`, grouped by `chunk_type`.
+    Load typed sections for a product from website_chunks.jsonl.
+    Each entry's "text" is trimmed so it does not repeat the "heading".
     """
     chunks_path = Path(__file__).parent.parent.parent / "data" / "processed" / "website_chunks.jsonl"
     if not chunks_path.exists():
@@ -348,10 +810,10 @@ def _load_product_sections(product_id: str) -> Dict[str, List[Dict[str, str]]]:
             if data.get("doc_id") != product_id:
                 continue
             ctype = data.get("chunk_type") or "general"
-            entry = {
-                "heading": data.get("section_heading") or "",
-                "text": data.get("text") or "",
-            }
+            heading = data.get("section_heading") or ""
+            raw_text = data.get("text") or ""
+            text = _strip_heading_from_text(raw_text, heading)
+            entry = {"heading": heading, "text": text}
             sections.setdefault(ctype, []).append(entry)
     return sections
 
@@ -394,11 +856,9 @@ async def get_product_structured(
 
 @app.get("/products/{product_id}/details")
 async def get_product_details(product_id: str):
-    """Get detailed product information (Learn More) via RAG/LLM."""
+    """Get detailed product information (Learn More) via RAG/LLM. Prefer /products/by-id/{id}/details when id contains slashes."""
     try:
-        details = await product_card_gen.get_product_details(product_id)
-        return details
-
+        return await product_card_gen.get_product_details(product_id)
     except Exception as e:
         logger.error(f"Error getting product details: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

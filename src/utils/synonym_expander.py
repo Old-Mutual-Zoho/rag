@@ -58,25 +58,34 @@ class SynonymExpander:
             Expanded query with synonyms added
         """
         query_lower = query.lower()
-        expanded_terms: Set[str] = set(query.split())
+        # Keep original word order; append new terms (no alphabetical sort)
+        seen: Set[str] = set()
+        out: List[str] = []
+        for w in query.split():
+            if w.lower() not in seen:
+                seen.add(w.lower())
+                out.append(w)
 
-        # Check for direct synonym matches
         for keyword, synonyms in self.synonyms.items():
             if keyword.lower() in query_lower:
-                expanded_terms.update(synonyms)
+                for s in synonyms:
+                    if s and s.lower() not in seen:
+                        seen.add(s.lower())
+                        out.append(s)
 
-        # Check for category matches
         for category, terms in self.categories.items():
             if category.lower() in query_lower:
-                expanded_terms.update(terms)
+                for t in terms:
+                    if t and t.lower() not in seen:
+                        seen.add(t.lower())
+                        out.append(t)
 
-        # Check for abbreviations
         for abbrev, full_term in self.abbreviations.items():
-            if abbrev.lower() in query_lower:
-                expanded_terms.add(full_term)
+            if abbrev.lower() in query_lower and full_term.lower() not in seen:
+                seen.add(full_term.lower())
+                out.append(full_term)
 
-        # Return expanded query (original + synonyms)
-        expanded = " ".join(sorted(expanded_terms))
+        expanded = " ".join(out)
         if expanded != query:
             logger.debug("Expanded query '%s' -> '%s'", query, expanded)
         return expanded

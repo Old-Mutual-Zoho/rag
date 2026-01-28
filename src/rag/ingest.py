@@ -1,107 +1,109 @@
 """
-Ingestion pipeline: from processed chunks JSONL -> embeddings -> Qdrant.
+Ingest processed chunks into the configured vector store (pgvector or Qdrant).
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Any, Dict, List, Optional
 
-from src.rag.embeddings.embedder import GeminiEmbedder, OllamaEmbedder, OpenAIEmbedder, SentenceTransformersEmbedder
-from src.rag.integrations.qdrant_store import QdrantVectorStore
 from src.utils.rag_config_loader import RAGConfig
 
 logger = logging.getLogger(__name__)
 
 
-def _iter_jsonl(path: Path) -> Iterable[dict]:
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
+def _embedder_from_config(cfg: RAGConfig):
+    from src.rag.embeddings.embedder import (
+        GeminiEmbedder,
+        OllamaEmbedder,
+        OpenAIEmbedder,
+        SentenceTransformersEmbedder,
+    )
+
+    p = cfg.embeddings.provider.lower()
+    if p == "sentence_transformers":
+        return SentenceTransformersEmbedder(model_name=cfg.embeddings.model)
+    if p == "openai":
+        return OpenAIEmbedder(model=cfg.embeddings.model)
+    if p == "gemini":
+        return GeminiEmbedder(model=cfg.embeddings.model, api_key_env=cfg.embeddings.api_key_env)
+    if p == "ollama":
+        return OllamaEmbedder(model=cfg.embeddings.model, base_url=cfg.embeddings.base_url or "http://localhost:11434")
+    raise ValueError(f"Unknown embeddings provider: {cfg.embeddings.provider}")
+
+
+def _vector_store_from_config(cfg: RAGConfig):
+    from src.rag.integrations.pgvector_store import PgVectorStore
+    from src.rag.integrations.qdrant_store import QdrantVectorStore
+
+    p = cfg.vector_store.provider.lower()
+    coll = cfg.vector_store.collection or "old_mutual_chunks"
+    if p == "pgvector":
+        url = os.environ.get("DATABASE_URL")
+        if not url:
+            raise RuntimeError("DATABASE_URL is required when vector_store.provider is pgvector")
+        return PgVectorStore(table_name=coll, connection_string=url)
+    if p in ("qdrant_local", "qdrant_http"):
+        path = (cfg.vector_store.path or "data/qdrant") if p == "qdrant_local" else None
+        host = cfg.vector_store.host or "localhost"
+        port = cfg.vector_store.port or 6333
+        if path:
+            return QdrantVectorStore.from_local_path(collection=coll, path=path)
+        return QdrantVectorStore.from_http(collection=coll, host=host, port=port)
+    raise ValueError(f"Unknown vector_store.provider: {cfg.vector_store.provider}")
+
+
+def ingest_chunks_to_qdrant(
+    chunks_file: Path,
+    cfg: RAGConfig,
+    *,
+    limit: Optional[int] = None,
+) -> int:
+    """
+    Load chunks from JSONL, embed, and upsert into the configured vector store
+    (pgvector or Qdrant). Returns number of chunks written.
+    """
+    embedder = _embedder_from_config(cfg)
+    store = _vector_store_from_config(cfg)
+
+    rows: List[Dict[str, Any]] = []
+    with open(chunks_file, "r", encoding="utf-8") as f:
+        for i, line in enumerate(f):
+            if limit is not None and i >= limit:
+                break
             line = line.strip()
             if not line:
                 continue
-            yield json.loads(line)
+            try:
+                obj = json.loads(line)
+            except json.JSONDecodeError as e:
+                logger.warning("Skip invalid JSON line %s: %s", i + 1, e)
+                continue
+            text = obj.get("text") or ""
+            if not text:
+                continue
+            chunk_id = obj.get("id") or f"{obj.get('doc_id', 'doc')}_{i}"
+            rows.append({"id": chunk_id, "text": text, "payload": {k: v for k, v in obj.items() if k != "text" and v is not None}})
 
+    if not rows:
+        logger.warning("No chunks to ingest from %s", chunks_file)
+        return 0
 
-def ingest_chunks_to_qdrant(chunks_file: Path, cfg: RAGConfig, *, limit: Optional[int] = None) -> int:
-    """
-    Read chunks JSONL, embed texts, and upsert into Qdrant.
+    texts = [r["text"] for r in rows]
+    vectors = embedder.embed_texts(texts)
+    ids = [r["id"] for r in rows]
+    payloads = [r["payload"] for r in rows]
 
-    Returns number of chunks ingested.
-    """
-    if cfg.embeddings.backend == "openai":
-        embedder = OpenAIEmbedder(model=cfg.embeddings.model)
-    elif cfg.embeddings.backend == "gemini":
-        embedder = GeminiEmbedder(model=cfg.embeddings.model, api_key_env=cfg.embeddings.api_key_env)
-    elif cfg.embeddings.backend == "ollama":
-        embedder = OllamaEmbedder(model=cfg.embeddings.model, base_url=cfg.embeddings.base_url)
+    store_class = type(store).__name__
+    if store_class == "PgVectorStore":
+        store.ensure_table(embedder.dim)
+        store.upsert(ids=ids, vectors=vectors, payloads=payloads)
     else:
-        embedder = SentenceTransformersEmbedder(model_name=cfg.embeddings.model)
+        store.ensure_collection(vector_size=embedder.dim)
+        store.upsert(ids=ids, vectors=vectors, payloads=payloads)
 
-    if cfg.vector_store.provider == "qdrant_http":
-        store = QdrantVectorStore.from_http(
-            collection=cfg.vector_store.collection,
-            host=cfg.vector_store.host,
-            port=cfg.vector_store.port,
-        )
-    else:
-        store = QdrantVectorStore.from_local_path(
-            collection=cfg.vector_store.collection,
-            path=cfg.vector_store.path,
-        )
-
-    batch_texts: list[str] = []
-    batch_ids: list[str] = []
-    batch_payloads: list[dict] = []
-    total = 0
-
-    def flush() -> None:
-        nonlocal batch_texts, batch_ids, batch_payloads
-        if not batch_texts:
-            return
-        vectors = embedder.embed_texts(batch_texts)
-        if not vectors:
-            batch_texts.clear()
-            batch_ids.clear()
-            batch_payloads.clear()
-            return
-        # Ensure Qdrant collection exists once we know embedding dimension
-        store.ensure_collection(vector_size=len(vectors[0]))
-        store.upsert(ids=batch_ids, vectors=vectors, payloads=batch_payloads)
-        batch_texts.clear()
-        batch_ids.clear()
-        batch_payloads.clear()
-
-    for obj in _iter_jsonl(chunks_file):
-        chunk_id = obj.get("id")
-        text = obj.get("text", "")
-        if not chunk_id or not text:
-            continue
-
-        payload = {
-            "text": text,
-            "doc_id": obj.get("doc_id"),
-            "type": obj.get("type"),
-            "chunk_type": obj.get("chunk_type"),
-            "url": obj.get("url"),
-            "title": obj.get("title"),
-            "category": obj.get("category"),
-            "subcategory": obj.get("subcategory"),
-            "section_heading": obj.get("section_heading"),
-        }
-
-        batch_ids.append(str(chunk_id))
-        batch_texts.append(text)
-        batch_payloads.append(payload)
-        total += 1
-
-        if limit and total >= limit:
-            break
-        if len(batch_texts) >= cfg.embeddings.batch_size:
-            flush()
-
-    flush()
-    logger.info("Embedded and stored %s chunks into Qdrant collection '%s'", total, cfg.vector_store.collection)
-    return total
+    logger.info("Ingested %d chunks into %s (%s)", len(ids), cfg.vector_store.collection, store_class)
+    return len(ids)

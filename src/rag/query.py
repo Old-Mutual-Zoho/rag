@@ -1,212 +1,153 @@
 """
-Query pipeline: embed question -> retrieve from Qdrant.
-Supports both semantic (vector) and hybrid (semantic + keyword) retrieval.
+RAG retrieval: embed query, run vector search (and optional hybrid), return hits.
+Supports pgvector and Qdrant via config.
 """
 
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from qdrant_client.http import models as qm
-
-from src.rag.embeddings.embedder import GeminiEmbedder, OllamaEmbedder, OpenAIEmbedder, SentenceTransformersEmbedder
-from src.rag.integrations.qdrant_store import QdrantVectorStore
-from src.rag.keyword_search import BM25KeywordSearch
-from src.utils.rag_config_loader import RAGConfig
-from src.utils.synonym_expander import SynonymExpander
+from src.utils.rag_config_loader import RAGConfig, load_rag_config
 
 logger = logging.getLogger(__name__)
 
+# Minimum length for a "term" when re-ranking by overlap (skip "a", "is", etc.)
+_MIN_TERM_LEN = 2
 
-def _build_clients(cfg: RAGConfig):
-    if cfg.embeddings.backend == "openai":
-        embedder = OpenAIEmbedder(model=cfg.embeddings.model)
-    elif cfg.embeddings.backend == "gemini":
-        embedder = GeminiEmbedder(model=cfg.embeddings.model, api_key_env=cfg.embeddings.api_key_env)
-    elif cfg.embeddings.backend == "ollama":
-        embedder = OllamaEmbedder(model=cfg.embeddings.model, base_url=cfg.embeddings.base_url)
-    else:
-        embedder = SentenceTransformersEmbedder(model_name=cfg.embeddings.model)
 
-    if cfg.vector_store.provider == "qdrant_http":
-        store = QdrantVectorStore.from_http(
-            collection=cfg.vector_store.collection,
-            host=cfg.vector_store.host,
-            port=cfg.vector_store.port,
-        )
-    else:
-        store = QdrantVectorStore.from_local_path(
-            collection=cfg.vector_store.collection,
-            path=cfg.vector_store.path,
-        )
-    return embedder, store
+def _rerank_by_term_overlap(hits: List[Dict[str, Any]], search_query: str) -> None:
+    """Sort hits in place: prefer chunks whose title/text/doc_id contain more query terms."""
+    if not hits or not search_query.strip():
+        return
+    terms = {t.lower() for t in search_query.split() if len(t) >= _MIN_TERM_LEN}
+
+    def overlap_score(h: Dict[str, Any]) -> float:
+        p = h.get("payload") or {}
+        combined = " ".join(
+            str(p.get(k, "")) for k in ("title", "text", "doc_id", "section_heading")
+        ).lower()
+        return sum(1 for t in terms if t in combined)
+
+    def sort_key(h: Dict[str, Any]) -> tuple:
+        ov = overlap_score(h)
+        sc = float(h.get("score") or 0)
+        return (-ov, -sc)
+
+    hits.sort(key=sort_key)
+
+
+def _embedder_from_config(cfg: RAGConfig):
+    from src.rag.embeddings.embedder import (
+        GeminiEmbedder,
+        OllamaEmbedder,
+        OpenAIEmbedder,
+        SentenceTransformersEmbedder,
+    )
+
+    p = cfg.embeddings.provider.lower()
+    if p == "sentence_transformers":
+        return SentenceTransformersEmbedder(model_name=cfg.embeddings.model)
+    if p == "openai":
+        return OpenAIEmbedder(model=cfg.embeddings.model)
+    if p == "gemini":
+        return GeminiEmbedder(model=cfg.embeddings.model, api_key_env=cfg.embeddings.api_key_env)
+    if p == "ollama":
+        return OllamaEmbedder(model=cfg.embeddings.model, base_url=cfg.embeddings.base_url or "http://localhost:11434")
+    raise ValueError(f"Unknown embeddings provider: {cfg.embeddings.provider}")
+
+
+def _vector_store_from_config(cfg: RAGConfig):
+    from src.rag.integrations.pgvector_store import PgVectorStore
+    from src.rag.integrations.qdrant_store import QdrantVectorStore
+
+    p = cfg.vector_store.provider.lower()
+    coll = cfg.vector_store.collection or "old_mutual_chunks"
+    if p == "pgvector":
+        url = os.environ.get("DATABASE_URL")
+        if not url:
+            raise RuntimeError("DATABASE_URL is required when vector_store.provider is pgvector")
+        return PgVectorStore(table_name=coll, connection_string=url)
+    if p in ("qdrant_local", "qdrant_http"):
+        path = (cfg.vector_store.path or "data/qdrant") if p == "qdrant_local" else None
+        host = cfg.vector_store.host or "localhost"
+        port = cfg.vector_store.port or 6333
+        if path:
+            return QdrantVectorStore.from_local_path(collection=coll, path=path)
+        return QdrantVectorStore.from_http(collection=coll, host=host, port=port)
+    raise ValueError(f"Unknown vector_store.provider: {cfg.vector_store.provider}")
 
 
 def retrieve_context(
     question: str,
     cfg: RAGConfig,
     *,
-    top_k: int | None = None,
+    top_k: int = 5,
     filters: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Retrieve top-k chunks using semantic search, or hybrid search if enabled.
-
-    Args:
-        question: The user's question
-        cfg: RAG configuration
-        top_k: Override default top_k from config
-        filters: Optional filters dict with keys like:
-            - "category": filter by category
-            - "type": filter by document type (product, article, info_page)
-            - "chunk_type": filter by chunk type (overview, benefits, faq, etc.)
-            - "products": list of product IDs to filter by
-
-    Returns:
-        List of retrieved chunks with scores and payloads
+    Embed the question, run vector search, optionally merge with BM25 (hybrid), return hits.
+    Each hit is {"id", "score", "payload"}.
+    Expands the query with synonym/keyword mappings so e.g. "Somesa Plan" also matches
+    "Somesa Education Plan" / "SOMESA Plus" in the index.
     """
-    k = top_k or cfg.retrieval.top_k
+    from src.utils.synonym_expander import SynonymExpander
 
-    # Check if hybrid search is enabled
+    expander = SynonymExpander()
+    search_query = expander.expand_query(question)
+
+    embedder = _embedder_from_config(cfg)
+    store = _vector_store_from_config(cfg)
+
+    store_class = type(store).__name__
+    if store_class == "PgVectorStore" and hasattr(store, "ensure_table"):
+        store.ensure_table(embedder.dim)
+
+    # Fetch extra candidates so we can re-rank by product-term overlap (e.g. "Somesa" in chunk)
+    fetch_k = min(top_k * 2, 20)
+    qvec = embedder.embed_query(search_query)
+    if store_class == "PgVectorStore":
+        hits = store.search(query_vector=qvec, limit=fetch_k, filters=filters)
+    elif store_class == "QdrantVectorStore":
+        kw: Dict[str, Any] = {"query_vector": qvec, "limit": fetch_k}
+        if filters:
+            from qdrant_client.http import models as qm
+
+            conditions = [qm.FieldCondition(key=k, match=qm.MatchValue(value=v)) for k, v in filters.items() if v is not None]
+            if conditions:
+                kw["filter"] = qm.Filter(must=conditions)
+        hits = store.search(**kw)
+    else:
+        hits = store.search(query_vector=qvec, limit=fetch_k, filters=filters or {})
+
     if cfg.retrieval.hybrid.enabled:
-        return _hybrid_retrieve(question, cfg, top_k=k, filters=filters)
+        from src.rag.keyword_search import BM25KeywordSearch
 
-    # Standard semantic search
-    return _semantic_retrieve(question, cfg, top_k=k, filters=filters)
+        bm25 = BM25KeywordSearch()
+        if bm25.load_index():
+            bm25_hits = bm25.search(query=search_query, top_k=fetch_k, filters=filters)
+            seen = {h["id"] for h in hits}
+            for h in bm25_hits:
+                if h["id"] not in seen and len(hits) < fetch_k:
+                    hits.append(h)
+                    seen.add(h["id"])
+            hits = hits[:fetch_k]
 
-
-def _semantic_retrieve(
-    question: str,
-    cfg: RAGConfig,
-    *,
-    top_k: int,
-    filters: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
-    """Retrieve using semantic (vector) search with optional query expansion."""
-    embedder, store = _build_clients(cfg)
-
-    # Expand query with synonyms if enabled
-    search_query = question
-    if cfg.retrieval.query_expansion.enabled:
-        expander = SynonymExpander()
-        search_query = expander.expand_query(question)
-        if search_query != question:
-            logger.debug("Expanded semantic query: '%s' -> '%s'", question, search_query)
-
-    qv = embedder.embed_query(search_query)
-
-    # Build Qdrant filter if filters are provided
-    qdrant_filter = None
-    if filters:
-        conditions = []
-
-        if "category" in filters:
-            conditions.append(qm.FieldCondition(key="category", match=qm.MatchValue(value=filters["category"])))
-
-        if "type" in filters:
-            conditions.append(qm.FieldCondition(key="type", match=qm.MatchValue(value=filters["type"])))
-
-        if "chunk_type" in filters:
-            conditions.append(qm.FieldCondition(key="chunk_type", match=qm.MatchValue(value=filters["chunk_type"])))
-
-        if "products" in filters and filters["products"]:
-            # Filter by doc_id matching any of the product IDs
-            product_ids = filters["products"]
-            conditions.append(
-                qm.FieldCondition(
-                    key="doc_id",
-                    match=qm.MatchAny(any=product_ids),
-                )
-            )
-
-        if conditions:
-            if len(conditions) == 1:
-                qdrant_filter = qm.Filter(must=conditions)
-            else:
-                qdrant_filter = qm.Filter(must=conditions)
-
-    hits = store.search(query_vector=qv, limit=top_k, filter=qdrant_filter)
-    return hits
+    # Re-rank: prefer chunks that contain query/product terms (e.g. "Somesa" in title/text)
+    _rerank_by_term_overlap(hits, search_query)
+    return hits[:top_k]
 
 
-def _hybrid_retrieve(
-    question: str,
-    cfg: RAGConfig,
-    *,
-    top_k: int,
-    filters: Optional[Dict[str, Any]] = None,
-) -> List[Dict[str, Any]]:
-    """
-    Hybrid retrieval: combine semantic and keyword search results.
-
-    Uses weighted combination of scores from both methods.
-    """
-    # Get semantic results
-    semantic_hits = _semantic_retrieve(question, cfg, top_k=top_k * 2, filters=filters)
-
-    # Get keyword results
-    use_synonyms = cfg.retrieval.query_expansion.enabled
-    keyword_search = BM25KeywordSearch(use_synonyms=use_synonyms)
-    chunks_file = Path("data/processed/website_chunks.jsonl")
-    if not keyword_search.load_index() and chunks_file.exists():
-        # Build index if it doesn't exist
-        keyword_search.build_index(chunks_file)
-
-    keyword_hits = keyword_search.search(question, top_k=top_k * 2, filters=filters)
-
-    # Normalize scores and combine
-    semantic_scores = {h["id"]: h["score"] for h in semantic_hits}
-    keyword_scores = {h["id"]: h["score"] for h in keyword_hits}
-
-    # Normalize scores to [0, 1] range
-    def normalize_scores(scores: Dict[str, float]) -> Dict[str, float]:
-        if not scores:
-            return {}
-        max_score = max(scores.values())
-        min_score = min(scores.values())
-        if max_score == min_score:
-            return {k: 0.5 for k in scores}
-        return {k: (v - min_score) / (max_score - min_score) for k, v in scores.items()}
-
-    semantic_norm = normalize_scores(semantic_scores)
-    keyword_norm = normalize_scores(keyword_scores)
-
-    # Combine scores with weights
-    combined_scores: Dict[str, float] = {}
-    all_ids = set(semantic_scores.keys()) | set(keyword_scores.keys())
-
-    for chunk_id in all_ids:
-        sem_score = semantic_norm.get(chunk_id, 0.0)
-        kw_score = keyword_norm.get(chunk_id, 0.0)
-        combined = cfg.retrieval.hybrid.semantic_weight * sem_score + cfg.retrieval.hybrid.keyword_weight * kw_score
-        combined_scores[chunk_id] = combined
-
-    # Get metadata from both sources
-    all_hits: Dict[str, Dict[str, Any]] = {}
-    for h in semantic_hits:
-        all_hits[h["id"]] = h
-    for h in keyword_hits:
-        if h["id"] not in all_hits:
-            all_hits[h["id"]] = h
-
-    # Sort by combined score and return top_k
-    sorted_ids = sorted(combined_scores.items(), key=lambda x: x[1], reverse=True)[:top_k]
-
-    results: List[Dict[str, Any]] = []
-    for chunk_id, combined_score in sorted_ids:
-        hit = all_hits.get(chunk_id)
-        if hit:
-            # Update score to combined score
-            hit["score"] = combined_score
-            results.append(hit)
-
-    logger.debug(
-        "Hybrid retrieval: %d semantic, %d keyword, %d combined results",
-        len(semantic_hits),
-        len(keyword_hits),
-        len(results),
-    )
-
-    return results
+def get_vector_table_count(cfg: RAGConfig) -> Optional[int]:
+    """Return row count for the vector table when using pgvector (for diagnostics)."""
+    try:
+        if cfg.vector_store.provider.lower() != "pgvector":
+            return None
+        store = _vector_store_from_config(cfg)
+        if hasattr(store, "count"):
+            return store.count()
+    except Exception:
+        pass
+    return None

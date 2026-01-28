@@ -3,12 +3,30 @@
 
 synonyms:
   # Product names to categories/descriptions
+  what is in it for you:
+    - benefits
+    - value
+    - advantages
+    - gains
+    - rewards
+    - usefulness
+
   serenicare:
     - health care
     - health insurance
     - medical insurance
     - healthcare
     - medical cover
+
+  somesa:
+    - Somesa Education Plan
+    - SOMESA Plus
+    - somesa education plan
+    - education savings
+  "somesa plan":
+    - Somesa Education Plan
+    - SOMESA Plus
+    - somesa education
 
   # Add more mappings as needed
   family life protection:

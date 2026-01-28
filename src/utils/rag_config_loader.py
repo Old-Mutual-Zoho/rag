@@ -1,55 +1,50 @@
 """
-RAG configuration loader (embeddings, vector store, retrieval, generation).
+Load and validate RAG configuration (embeddings, vector store, retrieval, generation).
+Supports pgvector and Qdrant as vector store providers.
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Any, Dict, Optional
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 
 class EmbeddingsConfig(BaseModel):
-    backend: Literal["sentence_transformers", "openai", "ollama", "gemini"] = "sentence_transformers"
-    model: str = "sentence-transformers/all-MiniLM-L6-v2"
-    batch_size: int = Field(default=32, ge=1, le=1024)
-    base_url: str = "http://localhost:11434"
+    provider: str = "sentence_transformers"
+    model: str = "all-MiniLM-L6-v2"
     api_key_env: str = "GEMINI_API_KEY"
+    base_url: str = "http://localhost:11434"
 
 
 class VectorStoreConfig(BaseModel):
-    provider: Literal["qdrant_local", "qdrant_http"] = "qdrant_local"
-    collection: str = "oldmutual_website"
-    path: str = "data/embeddings/qdrant"
-    host: str = "localhost"
-    port: int = Field(default=6333, ge=1, le=65535)
-
-
-class QueryExpansionConfig(BaseModel):
-    enabled: bool = True
+    provider: str = "pgvector"
+    collection: str = "old_mutual_chunks"
+    path: Optional[str] = None
+    host: Optional[str] = None
+    port: Optional[int] = None
 
 
 class HybridRetrievalConfig(BaseModel):
     enabled: bool = False
-    semantic_weight: float = Field(default=0.7, ge=0.0, le=1.0)
-    keyword_weight: float = Field(default=0.3, ge=0.0, le=1.0)
+    dense_weight: float = 0.7
+    sparse_weight: float = 0.3
 
 
 class RetrievalConfig(BaseModel):
-    top_k: int = Field(default=8, ge=1, le=100)
-    query_expansion: QueryExpansionConfig = Field(default_factory=QueryExpansionConfig)
+    top_k: int = 5
     hybrid: HybridRetrievalConfig = Field(default_factory=HybridRetrievalConfig)
 
 
 class GenerationConfig(BaseModel):
-    enabled: bool = False
-    backend: Literal["openai", "gemini"] = "openai"
-    model: str = "gpt-4o-mini"
+    enabled: bool = True
+    backend: str = "gemini"
+    model: str = "gemini-1.5-flash"
     api_key_env: str = "GEMINI_API_KEY"
 
 
@@ -61,19 +56,14 @@ class RAGConfig(BaseModel):
 
 
 def load_rag_config(config_path: Optional[Path] = None) -> RAGConfig:
+    """
+    Load RAG config from YAML. Default path: config/rag_config.yml.
+    """
     if config_path is None:
-        config_path = Path(__file__).parent.parent.parent / "config" / "rag_config.yml"
-
+        config_path = Path(__file__).resolve().parent.parent.parent / "config" / "rag_config.yml"
     if not config_path.exists():
-        raise FileNotFoundError(f"RAG config file not found: {config_path}")
-
+        logger.warning("RAG config not found at %s, using defaults", config_path)
+        return RAGConfig()
     with open(config_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
-
-    try:
-        cfg = RAGConfig(**data)
-        logger.info("Successfully loaded RAG config from %s", config_path)
-        return cfg
-    except ValidationError as e:
-        logger.error("RAG config validation failed: %s", e)
-        raise
+    return RAGConfig(**data)
