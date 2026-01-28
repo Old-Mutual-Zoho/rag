@@ -217,19 +217,20 @@ async def health_check():
 
 async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: PostgresDB) -> ChatResponse:
     """Shared logic for chat message. In conversational mode uses same RAG retrieval as run_rag (config top_k, synonyms, re-ranking)."""
-    # Get or create session
-    session_id = request.session_id
+    # Resolve external identifier (e.g. phone) to internal user UUID so session/conversation creation never hits FK violation
+    user = db.get_or_create_user(phone_number=request.user_id)
+    internal_user_id = str(user.id)
 
+    session_id = request.session_id
     if not session_id:
-        user = db.get_or_create_user(phone_number=request.user_id)
-        session_id = state_manager.create_session(str(user.id))
+        session_id = state_manager.create_session(internal_user_id)
 
     # Route message (form_data from frontend is used as user_input in guided flows)
     # Conversational path uses APIRAGAdapter.retrieve() with cfg.retrieval.top_k, synonym expansion, re-ranking
     response = await router.route(
         message=request.message or "",
         session_id=session_id,
-        user_id=request.user_id,
+        user_id=internal_user_id,
         form_data=request.form_data,
     )
 
@@ -269,10 +270,17 @@ async def send_message(request: ChatMessage, router: ChatRouter = Depends(get_ro
 
 
 @app.post("/chat/start-guided")
-async def start_guided_flow(flow_name: str, session_id: str, user_id: str, router: ChatRouter = Depends(get_router)):
+async def start_guided_flow(
+    flow_name: str,
+    session_id: str,
+    user_id: str,
+    router: ChatRouter = Depends(get_router),
+    db: PostgresDB = Depends(get_db),
+):
     """Start a specific guided flow (query params). Prefer POST /api/chat/start-guided with JSON body."""
     try:
-        response = await router.guided.start_flow(flow_name=flow_name, session_id=session_id, user_id=user_id)
+        user = db.get_or_create_user(phone_number=user_id)
+        response = await router.guided.start_flow(flow_name=flow_name, session_id=session_id, user_id=str(user.id))
         return response
     except Exception as e:
         logger.error(f"Error starting guided flow: {str(e)}", exc_info=True)
@@ -339,13 +347,14 @@ async def start_guided_body(
     """Start a guided flow. If session_id is omitted, a new session is created."""
     try:
         session_id = body.session_id
+        user = db.get_or_create_user(phone_number=body.user_id)
+        internal_user_id = str(user.id)
         if not session_id:
-            user = db.get_or_create_user(phone_number=body.user_id)
-            session_id = state_manager.create_session(str(user.id))
+            session_id = state_manager.create_session(internal_user_id)
         response = await router.guided.start_flow(
             flow_name=body.flow_name,
             session_id=session_id,
-            user_id=body.user_id,
+            user_id=internal_user_id,
             initial_data=body.initial_data or {},
         )
         return {"session_id": session_id, **response}

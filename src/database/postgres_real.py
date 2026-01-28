@@ -69,6 +69,11 @@ class PostgresDB:
             stmt = select(User).where(User.phone_number == phone_number)
             return s.execute(stmt).scalar_one_or_none()
 
+    def get_user_by_id(self, user_id: str) -> Optional[User]:
+        with self._session() as s:
+            stmt = select(User).where(User.id == user_id)
+            return s.execute(stmt).scalar_one_or_none()
+
     def create_conversation(self, user_id: str, mode: str) -> Conversation:
         with self._session() as s:
             c = Conversation(id=str(uuid4()), user_id=user_id, mode=mode)

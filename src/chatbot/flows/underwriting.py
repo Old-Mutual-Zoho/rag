@@ -12,9 +12,9 @@ class UnderwritingFlow:
         self.steps = ["personal_info", "coverage_details", "health_questions", "lifestyle_questions", "review_and_submit"]
 
     async def start(self, user_id: str, initial_data: Dict) -> Dict:
-        """Start underwriting flow"""
-        # Get user info from database
-        user = self.db.get_user_by_phone(user_id)
+        """Start underwriting flow. user_id is the internal user UUID from the API."""
+        # Get user info from database (by internal id; API resolves external id to UUID before calling flows)
+        user = self.db.get_user_by_id(user_id)
 
         if user and user.kyc_completed:
             # Skip personal info if we have it

@@ -99,6 +99,9 @@ class PostgresDB:
             return None
         return self._users.get(user_id)
 
+    def get_user_by_id(self, user_id: str) -> Optional[User]:
+        return self._users.get(user_id)
+
     # ------------------------------------------------------------------ #
     # Conversations & messages
     # ------------------------------------------------------------------ #
