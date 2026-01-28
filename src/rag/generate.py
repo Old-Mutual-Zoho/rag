@@ -40,7 +40,7 @@ def _analyze_context(hits: List[Dict[str, Any]], question: str) -> Dict[str, Any
 
     Args:
         hits: Retrieved chunks
-        question: Original user question (to check if it's asking for general definition)
+        question: Original user question
 
     Returns:
         Dict with analysis: has_general_info, product_names, categories, etc.
@@ -49,40 +49,22 @@ def _analyze_context(hits: List[Dict[str, Any]], question: str) -> Dict[str, Any
     categories = set()
     has_general_info = False
     has_specific_products = False
-    general_info_indicators = 0
 
     question_lower = question.lower()
     is_general_question = any(phrase in question_lower for phrase in ["what is", "what are", "explain", "define", "tell me about", "how does"])
 
     for h in hits:
         payload = h.get("payload") or {}
-        text = payload.get("text", "").lower()
+        # text = payload.get("text", "").lower()
         doc_type = payload.get("type", "")
         chunk_type = payload.get("chunk_type", "")
 
-        # Check if this looks like a general information page/article
-        # Look for general definitions, not product-specific info
-        if doc_type in ("article", "info_page"):
-            # Check if the text actually contains a general definition
-            if any(
-                phrase in text[:500]
-                for phrase in [
-                    "is a type of",
-                    "refers to",
-                    "is defined as",
-                    "generally",
-                    "in general",
-                    "typically",
-                ]
-            ):
-                has_general_info = True
-                general_info_indicators += 1
+        # Check for general information
+        if doc_type in ("article", "info_page", "overview"):
+            has_general_info = True
 
-        # Check for FAQ or overview chunks that might have general info
-        if chunk_type in ("faq", "overview") and doc_type != "product":
-            if any(phrase in text[:300] for phrase in ["what is", "what are", "refers to"]):
-                has_general_info = True
-                general_info_indicators += 1
+        if chunk_type in ("faq", "overview", "definition"):
+            has_general_info = True
 
         # Check for specific products
         if doc_type == "product":
@@ -94,8 +76,8 @@ def _analyze_context(hits: List[Dict[str, Any]], question: str) -> Dict[str, Any
             if category:
                 categories.add(category)
 
-    # If user asked a general question but we only have specific products, flag it
-    only_specific_products = is_general_question and has_specific_products and not has_general_info and general_info_indicators == 0
+    # Determine if we only have specific products for a general question
+    only_specific_products = is_general_question and has_specific_products and not has_general_info
 
     return {
         "has_general_info": has_general_info,
@@ -107,114 +89,128 @@ def _analyze_context(hits: List[Dict[str, Any]], question: str) -> Dict[str, Any
     }
 
 
+def _build_prompt(question: str, context: str, analysis: Dict[str, Any]) -> str:
+    """
+    Build an appropriate prompt based on context analysis.
+    """
+
+    if analysis["only_specific_products"]:
+        # User asked general question but we only have specific product info
+        product_list = ", ".join(analysis["product_names"][:3])
+        if len(analysis["product_names"]) > 3:
+            product_list += f", and {len(analysis['product_names']) - 3} more"
+
+        return f"""You are a helpful assistant for Old Mutual Uganda.
+
+The user asked a general question, but the available information is about specific products.
+
+Question: {question}
+
+Available Products: {product_list}
+
+Context:
+{context}
+
+Instructions:
+- Provide helpful information about the relevant Old Mutual Uganda products
+- Use clear headings and bullet points where appropriate
+- Be concise and professional
+- End with a helpful question to assist the user further, such as:
+  "Would you like details about any specific product?"
+  "Which of these products would you like to know more about?"
+
+Answer:"""
+
+    else:
+        # Standard case: answer from available context
+        return f"""You are a helpful assistant for Old Mutual Uganda.
+
+Answer the question using the context provided below. Be accurate, concise, and helpful.
+
+Question: {question}
+
+Context:
+{context}
+
+Instructions:
+- Answer directly and naturally
+- Use clear formatting with headings and bullet points where helpful
+- If the context doesn't fully answer the question, state what information is available and what's missing
+- Be professional and friendly
+- Keep responses focused and relevant
+
+Answer:"""
+
+
 def generate_with_gemini(
     *,
     question: str,
     hits: List[Dict[str, Any]],
-    model: str,  # Named 'model' to fix the TypeError
+    model: str,
     api_key_env: str = "GEMINI_API_KEY",
 ) -> str:
     """
-    Generate an answer using Gemini with improved handling for partial information
-    and clarification questions.
+    Generate an answer using Gemini with context-aware prompting.
+
+    Args:
+        question: User's question
+        hits: Retrieved context chunks from Qdrant
+        model: Gemini model name (e.g., 'gemini-1.5-flash')
+        api_key_env: Environment variable name for API key
+
+    Returns:
+        Generated answer text or error message
     """
     key = os.environ.get(api_key_env)
     if not key:
         raise RuntimeError(f"{api_key_env} is not set")
 
     genai.configure(api_key=key)
-    context = build_context(hits)
 
-    # Analyze the context to understand what information is available
+    # Build context and analyze it
+    context = build_context(hits)
     analysis = _analyze_context(hits, question)
 
-    # Build a smarter prompt based on context analysis
-    if analysis["only_specific_products"]:
-        # Only specific products found, no general definition
-        product_list = ", ".join(analysis["product_names"][:3])
-        if len(analysis["product_names"]) > 3:
-            product_list += f", and {len(analysis['product_names']) - 3} more"
+    # Build appropriate prompt
+    prompt = _build_prompt(question, context, analysis)
 
-        prompt = (
-            "You are a helpful assistant for Old Mutual Uganda.\n"
-            "The user asked a general question, but you only have information about specific "
-            "Old Mutual Uganda products, not a general definition.\n\n"
-            f"Question: {question}\n\n"
-            f"Available context (specific products only):\n{context}\n\n"
-            f"Products mentioned in context: {product_list}\n\n"
-            "Instructions:\n"
-            "1. Start directly with the product name and information. DO NOT include introductory statements "
-            "like 'We are happy to provide...' or 'This product is designed to...' at the beginning. "
-            "Just start with '[Product Name] is...' or similar direct statements.\n"
-            "2. Provide a natural, well-formatted answer about the specific products available.\n"
-            "3. Format your answer clearly with sections, but DO NOT use question headers like "
-            "'What is X:' or 'Who is eligible:'. Instead, write naturally in paragraph form or use "
-            "clear section headings like 'Overview', 'Eligibility', 'Benefits'.\n"
-            "4. DO NOT start with phrases like 'Based on the context provided' or 'According to the context'. "
-            "Just provide the information directly and naturally.\n"
-            "5. At the end, ask an encouraging, product-focused question that motivates the user to learn more, "
-            "such as:\n"
-            "   - 'Would you like to explore how [product name] can help you achieve your goals?'\n"
-            "   - 'I'd be happy to help you understand how [product name] could benefit you. What would you like to know?'\n"
-            "   - 'Ready to learn more about [product name] and see if it's right for you?'\n"
-            "6. Be friendly, professional, and encouraging - focus on helping the user discover value.\n\n"
-            "Your response:"
-        )
-    else:
-        # Standard prompt for when we have general info or no products
-        prompt = (
-            "You are a helpful assistant for Old Mutual Uganda.\n"
-            "Answer the question using ONLY the context below.\n\n"
-            "Formatting guidelines:\n"
-            "1. Start directly with the answer. DO NOT include introductory statements "
-            "like 'We are happy to provide...' or 'This product is designed to...' at the beginning. "
-            "Just start with the information directly (e.g., '[Product/Topic] is...').\n"
-            "2. DO NOT start with phrases like 'Based on the context provided' or 'According to the context'. "
-            "Just provide the information directly and naturally.\n"
-            "3. Format your answer clearly with sections, but DO NOT use question headers like "
-            "'What is X:' or 'Who is eligible:'. Instead, write naturally in paragraph form or use "
-            "clear section headings like 'Overview', 'Eligibility', 'Benefits'.\n"
-            "4. If the context does not contain enough information to fully answer the question:\n"
-            "   - Acknowledge what information IS available\n"
-            "   - Clearly state what information is missing\n"
-            "   - Ask an encouraging, helpful question to better assist the user\n"
-            "5. Be friendly, professional, and encouraging - focus on helping the user discover value.\n\n"
-            f"Question:\n{question}\n\n"
-            f"Context:\n{context}\n"
-        )
-
-    # Use a specific model instance
+    # Initialize model
     m = genai.GenerativeModel(model)
 
-    # Attempt generation with a single retry on rate limit
+    # Generation with retry logic for rate limits
     try:
         resp = m.generate_content(prompt)
         return (getattr(resp, "text", None) or "").strip()
+
     except exceptions.ResourceExhausted as e:
         first_err = str(e).strip()
         logger.warning("Gemini ResourceExhausted on first call: %s", first_err)
-        # 429 / resource exhausted: wait and retry once (may be rate limit or quota/billing)
+
+        # Wait and retry once
         time.sleep(5)
         try:
             resp = m.generate_content(prompt)
             return (getattr(resp, "text", None) or "").strip()
+
         except exceptions.ResourceExhausted as retry_e:
             msg = str(retry_e).strip() or first_err
             logger.warning("Gemini ResourceExhausted on retry: %s", msg)
-            # Free-tier limit 0 = billing not enabled or no free quota for this project
+
+            # Check for free-tier quota issue
             if "limit: 0" in msg and "free_tier" in msg.lower():
                 return (
-                    "Error: Your Gemini free-tier quota is 0 for this API key. "
-                    "Enable billing for your project in Google AI Studio (https://aistudio.google.com) "
-                    "or use an API key from a project that has free quota. "
-                    "See https://ai.google.dev/gemini-api/docs/rate-limits"
+                    "Error: Your Gemini free-tier quota is exhausted. "
+                    "Please enable billing in Google AI Studio (https://aistudio.google.com) "
+                    "or use an API key with available quota. "
+                    "See: https://ai.google.dev/gemini-api/docs/rate-limits"
                 )
-            return (
-                "Error: Gemini API returned a resource-exhausted or quota error. "
-                "Details: " + msg[:500] + ("..." if len(msg) > 500 else "") + " "
-                "Check API key, billing, and quota in Google AI Studio."
-            )
+
+            return f"Error: Gemini API quota exceeded. {msg[:500]}" + ("..." if len(msg) > 500 else "") + " Check your quota in Google AI Studio."
+
         except Exception as retry_err:
+            logger.error("Retry failed: %s", retry_err)
             return f"Error: Request failed after retry. {type(retry_err).__name__}: {retry_err}"
+
     except Exception as e:
-        return f"An error occurred: {str(e)}"
+        logger.error("Generation error: %s", e)
+        return f"Error generating answer: {type(e).__name__}: {str(e)}"

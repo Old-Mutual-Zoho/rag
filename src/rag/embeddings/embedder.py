@@ -208,9 +208,7 @@ class GeminiEmbedder:
                     "task_type": "retrieval_query",
                 }
                 # Default 1536 for pgvector ivfflat limit; explicitly pass to API
-                kwargs["output_dimensionality"] = (
-                    1536 if self.output_dimensionality is None else self.output_dimensionality
-                )
+                kwargs["output_dimensionality"] = 1536 if self.output_dimensionality is None else self.output_dimensionality
                 resp = self._genai.embed_content(**kwargs)
                 v = resp.get("embedding")
                 if not isinstance(v, list):
@@ -220,11 +218,7 @@ class GeminiEmbedder:
                 return v
             except Exception as e:
                 last_err = e
-                is_rate_limit = (
-                    "429" in str(e)
-                    or "quota" in str(e).lower()
-                    or "ResourceExhausted" in type(e).__name__
-                )
+                is_rate_limit = "429" in str(e) or "quota" in str(e).lower() or "ResourceExhausted" in type(e).__name__
                 if is_rate_limit and attempt < 3:
                     wait = 50  # seconds; API often suggests ~45s
                     time.sleep(wait)
