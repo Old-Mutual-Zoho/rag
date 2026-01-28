@@ -3,6 +3,7 @@ FastAPI application - Main entry point
 """
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
 import json
@@ -49,16 +50,20 @@ app.add_middleware(
 # Initialize databases: use real Postgres/Redis when env is set, else in-memory stubs
 if os.getenv("DATABASE_URL") and os.getenv("USE_POSTGRES_CONVERSATIONS", "").lower() in ("1", "true", "yes"):
     from src.database.postgres_real import PostgresDB
+
     postgres_db = PostgresDB(connection_string=os.environ["DATABASE_URL"])
 else:
     from src.database.postgres import PostgresDB
+
     postgres_db = PostgresDB()
 
 if os.getenv("REDIS_URL"):
     from src.database.redis_real import RedisCache
+
     redis_cache = RedisCache(url=os.environ["REDIS_URL"])
 else:
     from src.database.redis import RedisCache
+
     redis_cache = RedisCache()
 
 # Initialize components
@@ -78,7 +83,7 @@ class APIRAGAdapter:
         self.cfg = rag_cfg
 
     async def retrieve(self, query: str, filters: Optional[Dict] = None, top_k: Optional[int] = None):
-        k = (self.cfg.retrieval.top_k if top_k is None else top_k)
+        k = self.cfg.retrieval.top_k if top_k is None else top_k
         return retrieve_context(question=query, cfg=self.cfg, top_k=k, filters=filters)
 
     async def generate(self, query: str, context_docs: List[Dict], conversation_history: List[Dict]):
@@ -144,6 +149,7 @@ def get_router():
 
 class ChatMessage(BaseModel):
     """Chat request. Use form_data when the frontend submits a step form (e.g. Personal Accident)."""
+
     message: str = ""
     session_id: Optional[str] = None
     user_id: str
@@ -174,6 +180,7 @@ class QuoteResponse(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     """Create a new chatbot session (e.g. when user opens the app)."""
+
     user_id: str = Field(..., description="User identifier (e.g. phone number or auth id)")
 
 
@@ -184,6 +191,7 @@ class CreateSessionResponse(BaseModel):
 
 class StartGuidedRequest(BaseModel):
     """Start a guided flow (e.g. Personal Accident). Session is created if session_id is omitted."""
+
     flow_name: str = Field(..., description="Flow id, e.g. 'personal_accident'")
     user_id: str
     session_id: Optional[str] = None
@@ -207,9 +215,7 @@ async def health_check():
     return {"status": "healthy", "database": {"postgres": "connected", "redis": redis_cache.ping()}, "timestamp": datetime.now().isoformat()}
 
 
-async def _handle_chat_message(
-    request: ChatMessage, router: ChatRouter, db: PostgresDB
-) -> ChatResponse:
+async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: PostgresDB) -> ChatResponse:
     """Shared logic for chat message. In conversational mode uses same RAG retrieval as run_rag (config top_k, synonyms, re-ranking)."""
     # Get or create session
     session_id = request.session_id
@@ -304,6 +310,7 @@ async def get_session_state(session_id: str):
         steps_total = None
         if session.get("current_flow") == "personal_accident":
             from src.chatbot.flows.personal_accident import PersonalAccidentFlow
+
             step_names = PersonalAccidentFlow.STEPS
             step_name = step_names[step] if step < len(step_names) else None
             steps_total = len(step_names)
@@ -355,6 +362,7 @@ async def get_personal_accident_schema():
         PERSONAL_ACCIDENT_RISKY_ACTIVITIES,
         PersonalAccidentFlow,
     )
+
     steps = []
     for i, name in enumerate(PersonalAccidentFlow.STEPS):
         entry = {"index": i, "name": name}
@@ -391,13 +399,28 @@ async def get_personal_accident_schema():
                 ],
             }
         elif name == "previous_pa_policy":
-            entry["form"] = {"type": "yes_no_details", "question_id": "previous_pa_policy", "details_field": {"name": "previous_insurer_name", "show_when": "yes"}}
+            entry["form"] = {
+                "type": "yes_no_details",
+                "question_id": "previous_pa_policy",
+                "details_field": {"name": "previous_insurer_name", "show_when": "yes"},
+            }
         elif name == "physical_disability":
-            entry["form"] = {"type": "yes_no_details", "question_id": "physical_disability", "details_field": {"name": "disability_details", "show_when": "no"}}
+            entry["form"] = {
+                "type": "yes_no_details",
+                "question_id": "physical_disability",
+                "details_field": {"name": "disability_details", "show_when": "no"},
+            }
         elif name == "risky_activities":
-            entry["form"] = {"type": "checkbox", "options": PERSONAL_ACCIDENT_RISKY_ACTIVITIES, "other_field": {"name": "risky_activity_other"}}
+            entry["form"] = {
+                "type": "checkbox",
+                "options": PERSONAL_ACCIDENT_RISKY_ACTIVITIES,
+                "other_field": {"name": "risky_activity_other"},
+            }
         elif name == "coverage_selection":
-            entry["form"] = {"type": "options", "options": [{"id": p["id"], "label": p["label"], "sum_assured": p["sum_assured"]} for p in PERSONAL_ACCIDENT_COVERAGE_PLANS]}
+            entry["form"] = {
+                "type": "options",
+                "options": [{"id": p["id"], "label": p["label"], "sum_assured": p["sum_assured"]} for p in PERSONAL_ACCIDENT_COVERAGE_PLANS],
+            }
         elif name == "upload_national_id":
             entry["form"] = {"type": "file_upload", "field_name": "national_id_file_ref", "accept": "application/pdf"}
         elif name in ("premium_and_download", "choose_plan_and_pay"):
@@ -514,9 +537,7 @@ async def api_get_product_details_by_id(
 
 
 @api_router.get("/products/{category}")
-async def api_list_product_subcategories_or_products(
-    category: str, matcher: ProductMatcher = Depends(lambda: product_matcher)
-):
+async def api_list_product_subcategories_or_products(category: str, matcher: ProductMatcher = Depends(lambda: product_matcher)):
     """
     List subcategories under a business unit (category), or products if category has none.
     Frontend: if subcategories is non-empty show them; else show products (or 404 if invalid category).
@@ -548,9 +569,7 @@ async def api_list_product_subcategories_or_products(
 
 
 @api_router.get("/products/{category}/{subcategory}")
-async def api_list_products_in_subcategory(
-    category: str, subcategory: str, matcher: ProductMatcher = Depends(lambda: product_matcher)
-):
+async def api_list_products_in_subcategory(category: str, subcategory: str, matcher: ProductMatcher = Depends(lambda: product_matcher)):
     """List products in a category/subcategory. product_id in each item is the full doc_id for by-id endpoints."""
     try:
         cat_lower = category.lower()
@@ -558,8 +577,7 @@ async def api_list_products_in_subcategory(
         items = [
             {"product_id": p["product_id"], "name": p["name"], "url": p.get("url")}
             for p in matcher.product_index.values()
-            if p.get("category_name", "").lower() == cat_lower
-            and p.get("sub_category_name", "").lower() == sub_lower
+            if p.get("category_name", "").lower() == cat_lower and p.get("sub_category_name", "").lower() == sub_lower
         ]
         if not items:
             raise HTTPException(status_code=404, detail="No products found for this category/subcategory")
@@ -573,7 +591,9 @@ async def api_list_products_in_subcategory(
 
 @api_router.get("/products/{category}/{subcategory}/{product_slug}")
 async def api_get_product_structured(
-    category: str, subcategory: str, product_slug: str,
+    category: str,
+    subcategory: str,
+    product_slug: str,
     matcher: ProductMatcher = Depends(lambda: product_matcher),
 ):
     """Structured product sections (overview, benefits, faq, etc.) by category/subcategory/slug."""

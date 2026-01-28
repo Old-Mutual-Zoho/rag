@@ -7,10 +7,9 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from src.utils.rag_config_loader import RAGConfig, load_rag_config
+from src.utils.rag_config_loader import RAGConfig
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +25,7 @@ def _rerank_by_term_overlap(hits: List[Dict[str, Any]], search_query: str) -> No
 
     def overlap_score(h: Dict[str, Any]) -> float:
         p = h.get("payload") or {}
-        combined = " ".join(
-            str(p.get(k, "")) for k in ("title", "text", "doc_id", "section_heading")
-        ).lower()
+        combined = " ".join(str(p.get(k, "")) for k in ("title", "text", "doc_id", "section_heading")).lower()
         return sum(1 for t in terms if t in combined)
 
     def sort_key(h: Dict[str, Any]) -> tuple:

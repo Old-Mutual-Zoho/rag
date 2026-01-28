@@ -151,10 +151,7 @@ class PgVectorStore:
             with conn.cursor() as cur:
                 cur.execute(sql, exec_params)
                 rows = cur.fetchall()
-        return [
-            {"id": r["id"], "score": float(r["score"]), "payload": (r["payload"] or {})}
-            for r in rows
-        ]
+        return [{"id": r["id"], "score": float(r["score"]), "payload": (r["payload"] or {})} for r in rows]
 
     def count(self) -> int:
         """Return number of rows in the table (for diagnostics when retrieval is empty)."""

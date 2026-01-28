@@ -99,12 +99,7 @@ class PostgresDB:
 
     def get_conversation_history(self, conversation_id: str, limit: int = 50) -> List[Message]:
         with self._session() as s:
-            stmt = (
-                select(Message)
-                .where(Message.conversation_id == conversation_id)
-                .order_by(Message.timestamp.desc())
-                .limit(limit)
-            )
+            stmt = select(Message).where(Message.conversation_id == conversation_id).order_by(Message.timestamp.desc()).limit(limit)
             return list(s.execute(stmt).scalars().all())
 
     def create_quote(

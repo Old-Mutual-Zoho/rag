@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from datetime import datetime
 
@@ -99,9 +99,7 @@ class PersonalAccidentFlow:
 
         return {"error": "Invalid step"}
 
-    async def _step_personal_details(
-        self, payload: Dict, data: Dict, user_id: str
-    ) -> Dict:
+    async def _step_personal_details(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
             data["personal_details"] = {
                 "surname": payload.get("surname", ""),
@@ -143,9 +141,7 @@ class PersonalAccidentFlow:
             "collected_data": data,
         }
 
-    async def _step_next_of_kin(
-        self, payload: Dict, data: Dict, user_id: str
-    ) -> Dict:
+    async def _step_next_of_kin(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
             data["next_of_kin"] = {
                 "first_name": payload.get("nok_first_name", ""),
@@ -175,9 +171,7 @@ class PersonalAccidentFlow:
             "collected_data": data,
         }
 
-    async def _step_previous_pa_policy(
-        self, payload: Dict, data: Dict, user_id: str
-    ) -> Dict:
+    async def _step_previous_pa_policy(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         raw = (payload.get("_raw") or "").strip().lower() if payload else ""
         if payload:
             had = payload.get("had_previous_pa_policy") in ("yes", "Yes", True) or raw in ("yes", "y")
@@ -202,9 +196,7 @@ class PersonalAccidentFlow:
             "collected_data": data,
         }
 
-    async def _step_physical_disability(
-        self, payload: Dict, data: Dict, user_id: str
-    ) -> Dict:
+    async def _step_physical_disability(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         raw = (payload.get("_raw") or "").strip().lower() if payload else ""
         if payload:
             free = payload.get("free_from_disability") in ("yes", "Yes", True) or raw in ("yes", "y")
@@ -229,9 +221,7 @@ class PersonalAccidentFlow:
             "collected_data": data,
         }
 
-    async def _step_risky_activities(
-        self, payload: Dict, data: Dict, user_id: str
-    ) -> Dict:
+    async def _step_risky_activities(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
             activities = payload.get("risky_activities") or []
             if isinstance(activities, str):
@@ -253,9 +243,7 @@ class PersonalAccidentFlow:
             "collected_data": data,
         }
 
-    async def _step_coverage_selection(
-        self, payload: Dict, data: Dict, user_id: str
-    ) -> Dict:
+    async def _step_coverage_selection(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
             plan_id = payload.get("coverage_plan") or payload.get("_raw", "").strip()
             if plan_id:
@@ -280,9 +268,7 @@ class PersonalAccidentFlow:
             "collected_data": data,
         }
 
-    async def _step_upload_national_id(
-        self, payload: Dict, data: Dict, user_id: str
-    ) -> Dict:
+    async def _step_upload_national_id(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
             data["national_id_upload"] = {
                 "file_ref": payload.get("file_ref") or payload.get("national_id_file_ref", ""),
@@ -302,9 +288,7 @@ class PersonalAccidentFlow:
             "collected_data": data,
         }
 
-    async def _step_premium_and_download(
-        self, payload: Dict, data: Dict, user_id: str
-    ) -> Dict:
+    async def _step_premium_and_download(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         # Accept file_ref from previous step if not yet stored
         if payload and payload.get("national_id_file_ref") and not data.get("national_id_upload"):
             data["national_id_upload"] = {
@@ -336,9 +320,7 @@ class PersonalAccidentFlow:
             "collected_data": data,
         }
 
-    async def _step_choose_plan_and_pay(
-        self, payload: Dict, data: Dict, user_id: str
-    ) -> Dict:
+    async def _step_choose_plan_and_pay(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         action = (payload.get("action") or payload.get("_raw") or "").strip().lower()
 
         if "view" in action or "plan" in action:

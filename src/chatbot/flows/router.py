@@ -51,8 +51,21 @@ class ChatRouter:
     def _is_guided_trigger(self, message: str) -> bool:
         """Check if message should trigger guided flow"""
         triggers = [
-            "quote", "buy", "apply", "purchase", "get insurance", "how much", "price", "cost", "premium",
-            "i want", "i need", "help me choose", "personal accident", "pa cover", "accident insurance",
+            "quote",
+            "buy",
+            "apply",
+            "purchase",
+            "get insurance",
+            "how much",
+            "price",
+            "cost",
+            "premium",
+            "i want",
+            "i need",
+            "help me choose",
+            "personal accident",
+            "pa cover",
+            "accident insurance",
         ]
         message_lower = message.lower()
         return any(trigger in message_lower for trigger in triggers)
