@@ -32,15 +32,11 @@ class SentenceTransformersEmbedder:
         return self._dim
 
     def embed_texts(self, texts: Sequence[str]) -> List[List[float]]:
-        vectors = self._model.encode(
-            list(texts), normalize_embeddings=True, show_progress_bar=False
-        )
+        vectors = self._model.encode(list(texts), normalize_embeddings=True, show_progress_bar=False)
         return [v.tolist() for v in vectors]
 
     def embed_query(self, text: str) -> List[float]:
-        v = self._model.encode(
-            [text], normalize_embeddings=True, show_progress_bar=False
-        )[0]
+        v = self._model.encode([text], normalize_embeddings=True, show_progress_bar=False)[0]
         return v.tolist()
 
 
