@@ -4,14 +4,17 @@ Answer generation utilities (LLM) for the RAG pipeline.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 from typing import Any, Dict, List
 import google.generativeai as genai
 from google.api_core import exceptions
 
+logger = logging.getLogger(__name__)
 
-def build_context(hits: List[Dict[str, Any]], *, max_chars: int = 6000) -> str:
+
+def build_context(hits: List[Dict[str, Any]], *, max_chars: int = 10000) -> str:
     """
     Build a compact context string from retrieved Qdrant hits.
     """
@@ -187,13 +190,31 @@ def generate_with_gemini(
     try:
         resp = m.generate_content(prompt)
         return (getattr(resp, "text", None) or "").strip()
-    except exceptions.ResourceExhausted:
-        # If we hit the 429 quota error, wait 5 seconds and try one last time
+    except exceptions.ResourceExhausted as e:
+        first_err = str(e).strip()
+        logger.warning("Gemini ResourceExhausted on first call: %s", first_err)
+        # 429 / resource exhausted: wait and retry once (may be rate limit or quota/billing)
         time.sleep(5)
         try:
             resp = m.generate_content(prompt)
             return (getattr(resp, "text", None) or "").strip()
-        except Exception:
-            return "Error: API quota exceeded. Please try again in a moment."
+        except exceptions.ResourceExhausted as retry_e:
+            msg = str(retry_e).strip() or first_err
+            logger.warning("Gemini ResourceExhausted on retry: %s", msg)
+            # Free-tier limit 0 = billing not enabled or no free quota for this project
+            if "limit: 0" in msg and "free_tier" in msg.lower():
+                return (
+                    "Error: Your Gemini free-tier quota is 0 for this API key. "
+                    "Enable billing for your project in Google AI Studio (https://aistudio.google.com) "
+                    "or use an API key from a project that has free quota. "
+                    "See https://ai.google.dev/gemini-api/docs/rate-limits"
+                )
+            return (
+                "Error: Gemini API returned a resource-exhausted or quota error. "
+                "Details: " + msg[:500] + ("..." if len(msg) > 500 else "") + " "
+                "Check API key, billing, and quota in Google AI Studio."
+            )
+        except Exception as retry_err:
+            return f"Error: Request failed after retry. {type(retry_err).__name__}: {retry_err}"
     except Exception as e:
         return f"An error occurred: {str(e)}"

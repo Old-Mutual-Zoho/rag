@@ -28,8 +28,8 @@ class ConversationalMode:
         if products:
             filters["products"] = [p[2]["product_id"] for p in products]
 
-        # Retrieve relevant documents
-        retrieval_results = await self.rag.retrieve(query=message, top_k=5, filters=filters)
+        # Retrieve relevant documents (top_k from RAG config when not specified)
+        retrieval_results = await self.rag.retrieve(query=message, filters=filters)
 
         # Generate response
         response = await self.rag.generate(query=message, context_docs=retrieval_results, conversation_history=self._get_recent_history(session_id))

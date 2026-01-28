@@ -7,6 +7,7 @@ from ..flows.product_discovery import ProductDiscoveryFlow
 from ..flows.underwriting import UnderwritingFlow
 from ..flows.quotation import QuotationFlow
 from ..flows.payment import PaymentFlow
+from ..flows.personal_accident import PersonalAccidentFlow
 
 
 class GuidedMode:
@@ -21,10 +22,11 @@ class GuidedMode:
             "underwriting": UnderwritingFlow(db),
             "quotation": QuotationFlow(product_catalog, db),
             "payment": PaymentFlow(db),
+            "personal_accident": PersonalAccidentFlow(product_catalog, db),
         }
 
-    async def process(self, message: str, session_id: str, user_id: str) -> Dict:
-        """Process message in guided mode"""
+    async def process(self, user_input, session_id: str, user_id: str) -> Dict:
+        """Process one step in guided mode. user_input can be a string or a dict (form_data from frontend)."""
 
         # Get current state
         session = self.state_manager.get_session(session_id)
@@ -37,7 +39,10 @@ class GuidedMode:
 
         # Process current step
         result = await flow.process_step(
-            user_input=message, current_step=session["current_step"], collected_data=session.get("collected_data", {}), user_id=user_id
+            user_input=user_input,
+            current_step=session["current_step"],
+            collected_data=session.get("collected_data", {}),
+            user_id=user_id,
         )
 
         # Update state based on result
@@ -45,6 +50,9 @@ class GuidedMode:
             # Flow is complete, transition or end
             if result.get("next_flow"):
                 self.state_manager.set_flow(session_id, result["next_flow"])
+                # Pass data needed by next flow (e.g. quote_id for payment)
+                if result.get("collected_data"):
+                    self.state_manager.update_session(session_id, {"collected_data": result["collected_data"]})
             else:
                 self.state_manager.switch_mode(session_id, "conversational")
         elif result.get("next_step") is not None:

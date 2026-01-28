@@ -33,9 +33,18 @@ class PaymentFlow:
         """Process payment flow"""
 
         quote = collected_data.get("quote")
+        if not quote and collected_data.get("quote_id"):
+            quote = self.db.get_quote(collected_data["quote_id"])
+        if quote:
+            collected_data["quote"] = quote
         premium_amount = float(quote.premium_amount) if quote else 0
 
         if current_step == 0:  # Payment method selection
+            if not quote:
+                return {
+                    "response": {"type": "error", "message": "Quote not found. Please start again from the product flow."},
+                    "complete": True,
+                }
             # Check if amount requires agent assistance
             requires_agent = premium_amount >= self.AUTO_PAYMENT_THRESHOLD
 

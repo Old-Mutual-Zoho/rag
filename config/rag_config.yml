@@ -1,30 +1,30 @@
+# RAG pipeline configuration (embeddings, vector store, retrieval, generation)
+# Vector store provider: pgvector (Neon/Postgres) or qdrant_* (local/remote Qdrant)
+
 embeddings:
-  backend: "sentence_transformers"  # sentence_transformers | gemini | ollama | openai
-  model: "sentence-transformers/all-MiniLM-L6-v2"
-  batch_size: 32
-  base_url: "http://localhost:11434"
-  api_key_env: "GEMINI_API_KEY"
+  provider: sentence_transformers  # sentence_transformers | openai | gemini | ollama
+  model: all-MiniLM-L6-v2
+  # For OpenAI: model: text-embedding-3-small
+  # For Gemini: model: models/text-embedding-004, api_key_env: GEMINI_API_KEY
+  # For Ollama: model: nomic-embed-text, base_url: http://localhost:11434
 
 vector_store:
-  provider: "qdrant_local"  # qdrant_local | qdrant_http
-  collection: "oldmutual_website"
-  # For qdrant_local:
-  path: "data/embeddings/qdrant"
-  # For qdrant_http:
-  host: "localhost"
-  port: 6333
+  provider: pgvector   # pgvector | qdrant_local | qdrant_http
+  collection: old_mutual_chunks
+  # pgvector: uses DATABASE_URL from environment
+  # qdrant_local: path: data/qdrant
+  # qdrant_http: host: localhost, port: 6333
 
 retrieval:
-  top_k: 3
-  query_expansion:
-    enabled: true  # Enable synonym/keyword expansion (e.g., "serenicare" -> "health care")
+  top_k: 10   # fetch more chunks so product-specific queries (e.g. Somesa Plan) get relevant context
   hybrid:
-    enabled: false  # Set to true to enable hybrid search (semantic + keyword)
-    semantic_weight: 0.7  # Weight for semantic search scores (0.0-1.0)
-    keyword_weight: 0.3  # Weight for keyword search scores (0.0-1.0)
+    enabled: false
+    dense_weight: 0.7
+    sparse_weight: 0.3
 
 generation:
   enabled: true
-  backend: "gemini"
+  backend: gemini
+  # If you see "free_tier ... limit: 0", enable billing in Google AI Studio for this project
   model: "models/gemini-flash-latest"
-  api_key_env: "GEMINI_API_KEY"
+  api_key_env: GEMINI_API_KEY
