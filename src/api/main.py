@@ -935,10 +935,8 @@ async def get_conversation_history(session_id: str, limit: int = 50):
 
         messages = postgres_db.get_conversation_history(session["conversation_id"], limit=limit)
 
-        return {
-            "session_id": session_id,
-            "messages": [{"role": msg.role, "content": msg.content, "timestamp": msg.timestamp.isoformat()} for msg in reversed(messages)],
-        }
+        msg_list = [{"role": msg.role, "content": msg.content, "timestamp": msg.timestamp.isoformat()} for msg in reversed(messages)]
+        return {"session_id": session_id, "messages": msg_list}
 
     except HTTPException:
         raise
