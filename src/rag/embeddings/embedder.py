@@ -154,7 +154,7 @@ class GeminiEmbedder:
     Google Gemini embeddings via google-generativeai (AI Studio).
 
     Requires env var with your API key, e.g. GEMINI_API_KEY.
-    Recommended embedding model: "models/text-embedding-004"
+    Use model "models/gemini-embedding-001" (text-embedding-004 is deprecated for embedContent).
     """
 
     model: str

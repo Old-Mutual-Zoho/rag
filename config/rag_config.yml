@@ -3,9 +3,9 @@
 
 embeddings:
   provider: gemini  # sentence_transformers | openai | gemini | ollama
-  model: models/text-embedding-004
+  model: models/gemini-embedding-001
   # For OpenAI: model: text-embedding-3-small
-  # For Gemini: model: models/text-embedding-004, api_key_env: GEMINI_API_KEY
+  # For Gemini: models/gemini-embedding-001 (text-embedding-004 no longer supported for embedContent)
   # For Ollama: model: nomic-embed-text, base_url: http://localhost:11434
 
 vector_store:
