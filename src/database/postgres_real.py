@@ -35,7 +35,9 @@ class PostgresDB:
     def __init__(self, connection_string: str) -> None:
         connection_string = _normalize_connection_string(connection_string)
         self.engine = create_engine(connection_string, pool_pre_ping=True, pool_size=5, max_overflow=10)
-        self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        self.SessionLocal = sessionmaker(
+            autocommit=False, autoflush=False, bind=self.engine, expire_on_commit=False
+        )
 
     def create_tables(self) -> None:
         Base.metadata.create_all(bind=self.engine)
