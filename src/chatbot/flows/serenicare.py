@@ -8,14 +8,45 @@ from __future__ import annotations
 import json
 from decimal import Decimal
 from typing import Any, Dict
-from datetime import datetime
 
 SERENICARE_OPTIONAL_BENEFITS = [
-    {"id": "outpatient", "label": "Outpatient", "description": "Clinic visits, diagnostics, and treatments without a hospital stay (Up to UGX 3,000,000.00 per person)"},
-    {"id": "maternity", "label": "Maternity Cover", "description": "Maternity benefits for checkups, scans, delivery, and immediate newborn care (Up to UGX 3,000,000.00 per family)"},
-    {"id": "dental", "label": "Dental Cover", "description": "Dental treatment for checkups, X-rays, fillings, and extractions (Up to UGX 300,000.00 per person)"},
-    {"id": "optical", "label": "Optical Cover", "description": "Vision care including eye tests, prescription glasses or contact lenses (Up to UGX 350,000.00 per person)"},
-    {"id": "covid19", "label": "COVID-19 Cover", "description": "Care for COVID-19 from diagnosis to recovery"},
+    {
+        "id": "outpatient",
+        "label": "Outpatient",
+        "description": (
+            "Clinic visits, diagnostics, and treatments without a hospital stay "
+            "(Up to UGX 3,000,000.00 per person)"
+        ),
+    },
+    {
+        "id": "maternity",
+        "label": "Maternity Cover",
+        "description": (
+            "Maternity benefits for checkups, scans, delivery, and immediate newborn care "
+            "(Up to UGX 3,000,000.00 per family)"
+        ),
+    },
+    {
+        "id": "dental",
+        "label": "Dental Cover",
+        "description": (
+            "Dental treatment for checkups, X-rays, fillings, and extractions "
+            "(Up to UGX 300,000.00 per person)"
+        ),
+    },
+    {
+        "id": "optical",
+        "label": "Optical Cover",
+        "description": (
+            "Vision care including eye tests, prescription glasses or contact lenses "
+            "(Up to UGX 350,000.00 per person)"
+        ),
+    },
+    {
+        "id": "covid19",
+        "label": "COVID-19 Cover",
+        "description": "Care for COVID-19 from diagnosis to recovery",
+    },
 ]
 
 SERENICARE_PLANS = [
@@ -28,8 +59,8 @@ SERENICARE_PLANS = [
             "Outpatient limit per person": "UGX 1,500,000",
             "Maternity cover per family": "UGX 1,500,000",
             "Optical limit per person": "UGX 200,000",
-            "Dental limit per person": "UGX 150,000"
-        }
+            "Dental limit per person": "UGX 150,000",
+        },
     },
     {
         "id": "classic",
@@ -40,8 +71,8 @@ SERENICARE_PLANS = [
             "Outpatient limit per person": "UGX 2,000,000",
             "Maternity cover per family": "UGX 2,500,000",
             "Optical limit per person": "UGX 300,000",
-            "Dental limit per person": "UGX 200,000"
-        }
+            "Dental limit per person": "UGX 200,000",
+        },
     },
     {
         "id": "comprehensive",
@@ -52,8 +83,8 @@ SERENICARE_PLANS = [
             "Outpatient limit per person": "UGX 3,000,000",
             "Maternity cover per family": "UGX 3,000,000",
             "Optical limit per person": "UGX 350,000",
-            "Dental limit per person": "UGX 300,000"
-        }
+            "Dental limit per person": "UGX 300,000",
+        },
     },
     {
         "id": "premium",
@@ -64,8 +95,8 @@ SERENICARE_PLANS = [
             "Outpatient limit per person": "UGX 5,000,000",
             "Maternity cover per family": "UGX 4,000,000",
             "Optical limit per person": "UGX 400,000",
-            "Dental limit per person": "UGX 400,000"
-        }
+            "Dental limit per person": "UGX 400,000",
+        },
     }
 ]
 
@@ -142,9 +173,26 @@ class SerenicareFlow:
                 "message": "👤 Cover Personalization",
                 "fields": [
                     {"name": "date_of_birth", "label": "Date of Birth", "type": "date", "required": True},
-                    {"name": "include_spouse", "label": "Include Spouse/Partner", "type": "checkbox", "required": False, "description": "Add your spouse or partner to your cover"},
-                    {"name": "include_children", "label": "Include Child/Children", "type": "checkbox", "required": False, "description": "Add your child or children to your cover"},
-                    {"name": "add_another_main_member", "label": "Add another main member", "type": "checkbox", "required": False},
+                    {
+                        "name": "include_spouse",
+                        "label": "Include Spouse/Partner",
+                        "type": "checkbox",
+                        "required": False,
+                        "description": "Add your spouse or partner to your cover",
+                    },
+                    {
+                        "name": "include_children",
+                        "label": "Include Child/Children",
+                        "type": "checkbox",
+                        "required": False,
+                        "description": "Add your child or children to your cover",
+                    },
+                    {
+                        "name": "add_another_main_member",
+                        "label": "Add another main member",
+                        "type": "checkbox",
+                        "required": False,
+                    },
                 ],
             },
             "next_step": 1,
