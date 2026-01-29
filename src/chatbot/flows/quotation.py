@@ -2,8 +2,11 @@
 Quotation flow - Generate and present insurance quote
 """
 
-from typing import Dict
+import logging
 from decimal import Decimal
+from typing import Dict
+
+logger = logging.getLogger(__name__)
 
 
 class QuotationFlow:
@@ -13,8 +16,13 @@ class QuotationFlow:
 
     async def start(self, user_id: str, initial_data: Dict) -> Dict:
         """Start quotation flow"""
+        logger.info("[Quotation] start user_id=%s underwriting_keys=%s", user_id, list(initial_data.keys()))
         # Calculate premium based on underwriting data
         quote_data = await self._calculate_premium(initial_data)
+        logger.info(
+            "[Quotation] quote: monthly_premium=%s annual_premium=%s sum_assured=%s",
+            quote_data.get("monthly_premium"), quote_data.get("annual_premium"), quote_data.get("sum_assured"),
+        )
 
         return {
             "response": {"type": "quote_presentation", "message": "💰 Here's your personalized quote", "quote": quote_data},
@@ -24,9 +32,15 @@ class QuotationFlow:
 
     async def process_step(self, user_input: str, current_step: int, collected_data: Dict, user_id: str) -> Dict:
         """Process quotation flow"""
+        logger.info("[Quotation] process_step current_step=%s user_input=%s", current_step, str(user_input)[:80])
 
         if current_step == 0:  # Present quote
             quote_data = await self._calculate_premium(collected_data)
+            logger.info(
+                "[Quotation] Presenting quote: product=%s monthly=%s annual=%s breakdown=%s",
+                quote_data.get("product_name"), quote_data.get("monthly_premium"),
+                quote_data.get("annual_premium"), quote_data.get("breakdown"),
+            )
 
             return {
                 "response": {
@@ -43,10 +57,12 @@ class QuotationFlow:
             }
 
         elif current_step == 1:  # Handle user action
-            action = user_input.lower()
+            action = (user_input or "").strip().lower() if isinstance(user_input, str) else str(user_input).lower()
+            logger.info("[Quotation] User action: %s", action)
 
             if action == "accept":
                 # Save quote to database
+                logger.info("[Quotation] Accept: saving quote to DB (premium=%s)", collected_data.get("monthly_premium"))
                 quote = self.db.create_quote(
                     user_id=user_id,
                     product_id=collected_data.get("product_id", "li_002"),
@@ -55,6 +71,7 @@ class QuotationFlow:
                     underwriting_data=collected_data,
                 )
 
+                logger.info("[Quotation] Quote saved: quote_id=%s next_flow=payment", quote.id)
                 return {
                     "response": {
                         "type": "quote_accepted",
@@ -69,6 +86,7 @@ class QuotationFlow:
                 }
 
             elif action == "modify":
+                logger.info("[Quotation] User chose modify coverage")
                 return {
                     "response": {
                         "type": "modification",
@@ -84,6 +102,7 @@ class QuotationFlow:
                 }
 
             else:  # decline
+                logger.info("[Quotation] User declined quote")
                 return {
                     "response": {
                         "type": "declined",
@@ -98,6 +117,7 @@ class QuotationFlow:
         # Base premium calculation
         sum_assured = Decimal(str(data.get("sum_assured", 10000000)))
         term = int(data.get("policy_term", 20))
+        logger.info("[Quotation] _calculate_premium input: sum_assured=%s policy_term=%s", sum_assured, term)
 
         # Get base rate (per 1000 of sum assured per year)
         base_rate = Decimal("2.50")  # UGX 2.50 per 1000 per year
@@ -134,7 +154,7 @@ class QuotationFlow:
         # Total premium over term
         total_premium = annual_premium * term
 
-        return {
+        result = {
             "product_name": "Family Life Protection",
             "sum_assured": float(sum_assured),
             "policy_term": term,
@@ -149,3 +169,8 @@ class QuotationFlow:
             },
             "features": ["Death benefit to beneficiaries", "Terminal illness cover", "Funeral benefit included", "Optional riders available"],
         }
+        logger.info(
+            "[Quotation] _calculate_premium output: monthly=%s annual=%s breakdown=%s",
+            result["monthly_premium"], result["annual_premium"], result["breakdown"],
+        )
+        return result
