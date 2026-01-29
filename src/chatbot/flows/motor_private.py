@@ -1,0 +1,322 @@
+"""
+Motor Private flow - Collect vehicle details, excess parameters, additional benefits,
+premium calculation, user details, then proceed to payment.
+"""
+
+from __future__ import annotations
+
+import json
+from decimal import Decimal
+from typing import Any, Dict
+from datetime import datetime
+
+MOTOR_PRIVATE_EXCESS_PARAMETERS = [
+    {
+        "id": "excess_1",
+        "label": "10% of claim, UGX 1,000,000 to UGX 3,000,000\n10% of total premium"
+    },
+    {
+        "id": "excess_2",
+        "label": "10% of claim, UGX 3,000,001 to UGX 4,000,000\n15% of total premium"
+    },
+    {
+        "id": "excess_3",
+        "label": "10% of claim, UGX 4,000,001 to UGX 5,000,000\n25% of total premium"
+    }
+]
+
+MOTOR_PRIVATE_ADDITIONAL_BENEFITS = [
+    {
+        "id": "political_violence",
+        "label": "Political violence and terrorism\n0.25% of Total Premium"
+    },
+    {
+        "id": "alternative_accommodation",
+        "label": "Alternative accommodation\nUGX 300,000 x days x 10%"
+    },
+    {
+        "id": "car_hire",
+        "label": "Car hire\nUGX 100,000 x days x 10%"
+    }
+]
+
+MOTOR_PRIVATE_BENEFITS = [
+    {"label": "Limit of liability: third party bodily injury per occurrence", "value": "UGX 20M"},
+    {"label": "Limit of liability: third party bodily injury in aggregate", "value": "UGX 50M"},
+    {"label": "Limit of liability: third party property damage per occurrence", "value": "UGX 20M"},
+    {"label": "Limit of liability: third party property damage in aggregate", "value": "UGX 50M"},
+    {"label": "Section 2: passenger liability per occurrence", "value": "UGX 20M"},
+    {"label": "Section 2: passenger liability in aggregate per policy period", "value": "UGX 50M"},
+    {"label": "Windscreen extension", "value": "UGX 2M"},
+    {"label": "Authorized repair limit", "value": "UGX 2M"},
+    {"label": "Towing/wreckage removal charges", "value": "UGX 2M"},
+    {"label": "Locks and keys extension", "value": "UGX 2M"},
+    {"label": "Fire extinguishing charges", "value": "UGX 2M"},
+    {"label": "Protection and removal", "value": "UGX 2M"},
+    {"label": "Claims preparation costs", "value": "UGX 1M"},
+    {"label": "Personal effects excluding cash", "value": "UGX 500,000/="},
+    {"label": "Personal accident to driver", "value": "UGX 1M"},
+    {"label": "Unobtainable parts extension", "value": "UGX 2M"},
+    {"label": "Limit of liability; section 111 – medical expenses", "value": "UGX 2M"},
+    {"label": "Free Cleaning and Fumigation of Vehicles after Repair following an accident", "value": "UGX 1M"},
+    {"label": "Modification of motor vehicle in case of Permanent Incapacitation of the driver following an accident", "value": "N/A"},
+    {"label": "Rim Damage following a motor accident", "value": "UGX 1M"},
+    {"label": "Alternative accommodation", "value": "N/A"},
+    {"label": "Hire of replacement vehicle", "value": "N/A"},
+]
+
+class MotorPrivateFlow:
+    """
+    Guided flow for Motor Private: vehicle details, excess parameters, additional benefits,
+    premium calculation, user details, then payment.
+    """
+
+    STEPS = [
+        "vehicle_details",
+        "excess_parameters",
+        "additional_benefits",
+        "benefits_summary",
+        "premium_calculation",
+        "about_you",
+        "premium_and_download",
+        "choose_plan_and_pay",
+    ]
+
+    def __init__(self, product_catalog, db):
+        self.catalog = product_catalog
+        self.db = db
+
+    async def start(self, user_id: str, initial_data: Dict) -> Dict:
+        data = dict(initial_data or {})
+        data.setdefault("user_id", user_id)
+        data.setdefault("product_id", "motor_private")
+        return await self.process_step("", 0, data, user_id)
+
+    async def process_step(
+        self,
+        user_input: str,
+        current_step: int,
+        collected_data: Dict[str, Any],
+        user_id: str,
+    ) -> Dict:
+        try:
+            if user_input and isinstance(user_input, str) and user_input.strip().startswith("{"):
+                payload = json.loads(user_input)
+            elif user_input and isinstance(user_input, dict):
+                payload = user_input
+            else:
+                payload = {"_raw": user_input} if user_input else {}
+        except (json.JSONDecodeError, TypeError):
+            payload = {"_raw": user_input} if user_input else {}
+
+        if current_step == 0:
+            return await self._step_vehicle_details(payload, collected_data, user_id)
+        if current_step == 1:
+            return await self._step_excess_parameters(payload, collected_data, user_id)
+        if current_step == 2:
+            return await self._step_additional_benefits(payload, collected_data, user_id)
+        if current_step == 3:
+            return await self._step_benefits_summary(payload, collected_data, user_id)
+        if current_step == 4:
+            return await self._step_premium_calculation(payload, collected_data, user_id)
+        if current_step == 5:
+            return await self._step_about_you(payload, collected_data, user_id)
+        if current_step == 6:
+            return await self._step_premium_and_download(payload, collected_data, user_id)
+        if current_step == 7:
+            return await self._step_choose_plan_and_pay(payload, collected_data, user_id)
+        return {"error": "Invalid step"}
+
+    async def _step_vehicle_details(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+        if payload and "_raw" not in payload:
+            data["vehicle_details"] = {
+                "vehicle_make": payload.get("vehicle_make", ""),
+                "year_of_manufacture": payload.get("year_of_manufacture", ""),
+                "cover_start_date": payload.get("cover_start_date", ""),
+                "rare_model": payload.get("rare_model", ""),
+                "valuation_done": payload.get("valuation_done", ""),
+                "vehicle_value": payload.get("vehicle_value", ""),
+                "first_time_registration": payload.get("first_time_registration", ""),
+                "car_alarm_installed": payload.get("car_alarm_installed", ""),
+                "tracking_system_installed": payload.get("tracking_system_installed", ""),
+                "car_usage_region": payload.get("car_usage_region", ""),
+            }
+        return {
+            "response": {
+                "type": "form",
+                "message": "Premium Calculation - Vehicle Details",
+                "fields": [
+                    {"name": "vehicle_make", "label": "Choose vehicle make", "type": "select", "required": True},
+                    {"name": "year_of_manufacture", "label": "Year of manufacture", "type": "text", "required": True},
+                    {"name": "cover_start_date", "label": "Cover start date", "type": "date", "required": True},
+                    {"name": "rare_model", "label": "Is the car a rare model?", "type": "radio", "options": ["Yes", "No"], "required": True},
+                    {"name": "valuation_done", "label": "Has the vehicle undergone valuation?", "type": "radio", "options": ["Yes", "No"], "required": True},
+                    {"name": "vehicle_value", "label": "Value of Vehicle (UGX)", "type": "number", "required": True},
+                    {"name": "first_time_registration", "label": "Is this the first time this vehicle is being registered for this type of insurance?", "type": "radio", "options": ["Yes", "No"], "required": True},
+                    {"name": "car_alarm_installed", "label": "Do you have a car alarm installed?", "type": "radio", "options": ["Yes", "No"], "required": True},
+                    {"name": "tracking_system_installed", "label": "Do you have a tracking system installed?", "type": "radio", "options": ["Yes", "No"], "required": True},
+                    {"name": "car_usage_region", "label": "Do you use your car within Uganda or within/outside East Africa?", "type": "radio", "options": ["Within Uganda", "Within East Africa", "Outside East Africa"], "required": True},
+                ],
+            },
+            "next_step": 1,
+            "collected_data": data,
+        }
+
+    async def _step_excess_parameters(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+        if payload and "_raw" not in payload:
+            selected = payload.get("excess_parameters") or []
+            if isinstance(selected, str):
+                selected = [s.strip() for s in selected.split(",") if s.strip()]
+            data["excess_parameters"] = selected
+        return {
+            "response": {
+                "type": "checkbox",
+                "message": "Excess Parameters",
+                "options": MOTOR_PRIVATE_EXCESS_PARAMETERS,
+            },
+            "next_step": 2,
+            "collected_data": data,
+        }
+
+    async def _step_additional_benefits(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+        if payload and "_raw" not in payload:
+            selected = payload.get("additional_benefits") or []
+            if isinstance(selected, str):
+                selected = [s.strip() for s in selected.split(",") if s.strip()]
+            data["additional_benefits"] = selected
+        return {
+            "response": {
+                "type": "checkbox",
+                "message": "Additional Benefits",
+                "options": MOTOR_PRIVATE_ADDITIONAL_BENEFITS,
+            },
+            "next_step": 3,
+            "collected_data": data,
+        }
+
+    async def _step_benefits_summary(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+        return {
+            "response": {
+                "type": "benefits_summary",
+                "message": "Benefits",
+                "benefits": MOTOR_PRIVATE_BENEFITS,
+            },
+            "next_step": 4,
+            "collected_data": data,
+        }
+
+    async def _step_premium_calculation(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+        # Accept vehicle details and calculate base premium
+        if payload and "_raw" not in payload:
+            data["premium_calculation"] = {
+                "base_premium": payload.get("base_premium", ""),
+                "training_levy": payload.get("training_levy", ""),
+                "sticker_fees": payload.get("sticker_fees", ""),
+                "vat": payload.get("vat", ""),
+                "stamp_duty": payload.get("stamp_duty", ""),
+            }
+        # For demo, calculate a sample premium
+        premium = self._calculate_motor_private_premium(data)
+        return {
+            "response": {
+                "type": "premium_summary",
+                "message": "Premium Calculation",
+                "quote_summary": premium,
+                "actions": [
+                    {"type": "edit", "label": "Edit"},
+                    {"type": "download_quote", "label": "Download Quote"},
+                ],
+            },
+            "next_step": 5,
+            "collected_data": data,
+        }
+
+    async def _step_about_you(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+        if payload and "_raw" not in payload:
+            data["about_you"] = {
+                "first_name": payload.get("first_name", ""),
+                "middle_name": payload.get("middle_name", ""),
+                "surname": payload.get("surname", ""),
+                "phone_number": payload.get("phone_number", ""),
+                "email": payload.get("email", ""),
+            }
+        return {
+            "response": {
+                "type": "form",
+                "message": "About You",
+                "fields": [
+                    {"name": "first_name", "label": "First Name", "type": "text", "required": True},
+                    {"name": "middle_name", "label": "Middle Name (Optional)", "type": "text", "required": False},
+                    {"name": "surname", "label": "Surname", "type": "text", "required": True},
+                    {"name": "phone_number", "label": "Phone Number", "type": "text", "required": True},
+                    {"name": "email", "label": "Email", "type": "email", "required": True},
+                ],
+            },
+            "next_step": 6,
+            "collected_data": data,
+        }
+
+    async def _step_premium_and_download(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+        premium = self._calculate_motor_private_premium(data)
+        return {
+            "response": {
+                "type": "premium_summary",
+                "message": "Premium Calculation",
+                "quote_summary": premium,
+                "actions": [
+                    {"type": "edit", "label": "Edit"},
+                    {"type": "download_quote", "label": "Download Quote"},
+                    {"type": "proceed_to_pay", "label": "Proceed to Pay"},
+                ],
+            },
+            "next_step": 7,
+            "collected_data": data,
+        }
+
+    async def _step_choose_plan_and_pay(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+        action = (payload.get("action") or payload.get("_raw") or "").strip().lower()
+        if "edit" in action:
+            out = await self._step_vehicle_details(payload, data, user_id)
+            out["next_step"] = 0
+            return out
+        # Proceed to pay: create quote and hand off to payment flow
+        premium = self._calculate_motor_private_premium(data)
+        quote = self.db.create_quote(
+            user_id=user_id,
+            product_id=data.get("product_id", "motor_private"),
+            premium_amount=premium["total"],
+            sum_assured=None,
+            underwriting_data=data,
+            pricing_breakdown=premium,
+            product_name="Motor Private",
+        )
+        data["quote_id"] = str(quote.id)
+        return {
+            "response": {
+                "type": "proceed_to_payment",
+                "message": "Proceeding to payment. Choose your payment method.",
+                "quote_id": str(quote.id),
+            },
+            "complete": True,
+            "next_flow": "payment",
+            "collected_data": data,
+            "data": {"quote_id": str(quote.id)},
+        }
+
+    def _calculate_motor_private_premium(self, data: Dict) -> Dict:
+        """Sample premium calculation for Motor Private."""
+        # These are illustrative values, replace with actual logic as needed
+        base_premium = Decimal("1280000")
+        training_levy = Decimal("6400")
+        sticker_fees = Decimal("6000")
+        vat = Decimal("232632")
+        stamp_duty = Decimal("35000")
+        total = base_premium + training_levy + sticker_fees + vat + stamp_duty
+        return {
+            "base_premium": float(base_premium),
+            "training_levy": float(training_levy),
+            "sticker_fees": float(sticker_fees),
+            "vat": float(vat),
+            "stamp_duty": float(stamp_duty),
+            "total": float(total),
+        }
