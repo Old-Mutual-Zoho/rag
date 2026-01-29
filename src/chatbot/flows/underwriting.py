@@ -83,7 +83,7 @@ class UnderwritingFlow:
             return {
                 "response": {
                     "type": "health_questionnaire",
-                    "message": "🏥 A few health questions to assess your risk",
+                    "message": " A few health questions to assess your risk",
                     "questions": [
                         {
                             "id": "chronic_conditions",

@@ -259,35 +259,7 @@ async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: Pos
     return ChatResponse(response=response, session_id=session_id, mode=response.get("mode", "conversational"), timestamp=datetime.now().isoformat())
 
 
-@app.post("/chat/message", response_model=ChatResponse)
-async def send_message(request: ChatMessage, router: ChatRouter = Depends(get_router), db: PostgresDB = Depends(get_db)):
-    """Send a message to the chatbot. Routes to conversational or guided mode."""
-    try:
-        return await _handle_chat_message(request, router, db)
-    except Exception as e:
-        logger.error(f"Error processing message: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/chat/start-guided")
-async def start_guided_flow(
-    flow_name: str,
-    session_id: str,
-    user_id: str,
-    router: ChatRouter = Depends(get_router),
-    db: PostgresDB = Depends(get_db),
-):
-    """Start a specific guided flow (query params). Prefer POST /api/chat/start-guided with JSON body."""
-    try:
-        user = db.get_or_create_user(phone_number=user_id)
-        response = await router.guided.start_flow(flow_name=flow_name, session_id=session_id, user_id=str(user.id))
-        return response
-    except Exception as e:
-        logger.error(f"Error starting guided flow: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ---------- API router (prefix /api) for frontend ----------
+# ---------- API router (prefix /api) ----------
 api_router = APIRouter()
 
 
@@ -316,10 +288,23 @@ async def get_session_state(session_id: str):
         step = session.get("current_step", 0)
         step_name = None
         steps_total = None
-        if session.get("current_flow") == "personal_accident":
+        current_flow = session.get("current_flow")
+        if current_flow == "personal_accident":
             from src.chatbot.flows.personal_accident import PersonalAccidentFlow
 
             step_names = PersonalAccidentFlow.STEPS
+            step_name = step_names[step] if step < len(step_names) else None
+            steps_total = len(step_names)
+        elif current_flow == "motor_private":
+            from src.chatbot.flows.motor_private import MotorPrivateFlow
+
+            step_names = MotorPrivateFlow.STEPS
+            step_name = step_names[step] if step < len(step_names) else None
+            steps_total = len(step_names)
+        elif current_flow == "serenicare":
+            from src.chatbot.flows.serenicare import SerenicareFlow
+
+            step_names = SerenicareFlow.STEPS
             step_name = step_names[step] if step < len(step_names) else None
             steps_total = len(step_names)
         return {
@@ -363,79 +348,193 @@ async def start_guided_body(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@api_router.get("/flows/personal_accident/schema")
-async def get_personal_accident_schema():
-    """Return step and field schema for Personal Accident so the frontend can build forms."""
-    from src.chatbot.flows.personal_accident import (
-        PERSONAL_ACCIDENT_COVERAGE_PLANS,
-        PERSONAL_ACCIDENT_RISKY_ACTIVITIES,
-        PersonalAccidentFlow,
-    )
+def _build_flow_schema(flow_id: str) -> Dict:
+    """Build step and form schema for a guided flow. Raises KeyError for unknown flow_id."""
+    if flow_id == "personal_accident":
+        from src.chatbot.flows.personal_accident import (
+            PERSONAL_ACCIDENT_COVERAGE_PLANS,
+            PERSONAL_ACCIDENT_RISKY_ACTIVITIES,
+            PersonalAccidentFlow,
+        )
 
-    steps = []
-    for i, name in enumerate(PersonalAccidentFlow.STEPS):
-        entry = {"index": i, "name": name}
-        if name == "personal_details":
-            entry["form"] = {
-                "type": "form",
-                "fields": [
-                    {"name": "surname", "label": "Surname", "type": "text", "required": True},
-                    {"name": "first_name", "label": "First Name", "type": "text", "required": True},
-                    {"name": "middle_name", "label": "Middle Name", "type": "text", "required": False},
-                    {"name": "date_of_birth", "label": "Date of Birth", "type": "date", "required": True},
-                    {"name": "email", "label": "Email Address", "type": "email", "required": True},
-                    {"name": "mobile_number", "label": "Mobile Number", "type": "tel", "required": True},
-                    {"name": "national_id_number", "label": "National ID Number", "type": "text", "required": True},
-                    {"name": "nationality", "label": "Nationality", "type": "text", "required": True},
-                    {"name": "tax_identification_number", "label": "Tax ID", "type": "text", "required": False},
-                    {"name": "occupation", "label": "Occupation", "type": "text", "required": True},
-                    {"name": "gender", "label": "Gender", "type": "select", "options": ["Male", "Female", "Other"], "required": True},
-                    {"name": "country_of_residence", "label": "Country of Residence", "type": "text", "required": True},
-                    {"name": "physical_address", "label": "Physical Address", "type": "text", "required": True},
-                ],
-            }
-        elif name == "next_of_kin":
-            entry["form"] = {
-                "type": "form",
-                "fields": [
-                    {"name": "nok_first_name", "label": "First Name", "type": "text", "required": True},
-                    {"name": "nok_last_name", "label": "Last Name", "type": "text", "required": True},
-                    {"name": "nok_middle_name", "label": "Middle Name", "type": "text", "required": False},
-                    {"name": "nok_phone_number", "label": "Phone Number", "type": "tel", "required": True},
-                    {"name": "nok_relationship", "label": "Relationship", "type": "text", "required": True},
-                    {"name": "nok_address", "label": "Address", "type": "text", "required": True},
-                    {"name": "nok_id_number", "label": "ID Number", "type": "text", "required": False},
-                ],
-            }
-        elif name == "previous_pa_policy":
-            entry["form"] = {
-                "type": "yes_no_details",
-                "question_id": "previous_pa_policy",
-                "details_field": {"name": "previous_insurer_name", "show_when": "yes"},
-            }
-        elif name == "physical_disability":
-            entry["form"] = {
-                "type": "yes_no_details",
-                "question_id": "physical_disability",
-                "details_field": {"name": "disability_details", "show_when": "no"},
-            }
-        elif name == "risky_activities":
-            entry["form"] = {
-                "type": "checkbox",
-                "options": PERSONAL_ACCIDENT_RISKY_ACTIVITIES,
-                "other_field": {"name": "risky_activity_other"},
-            }
-        elif name == "coverage_selection":
-            entry["form"] = {
-                "type": "options",
-                "options": [{"id": p["id"], "label": p["label"], "sum_assured": p["sum_assured"]} for p in PERSONAL_ACCIDENT_COVERAGE_PLANS],
-            }
-        elif name == "upload_national_id":
-            entry["form"] = {"type": "file_upload", "field_name": "national_id_file_ref", "accept": "application/pdf"}
-        elif name in ("premium_and_download", "choose_plan_and_pay"):
-            entry["form"] = {"type": "premium_summary", "actions": ["view_all_plans", "proceed_to_pay"]}
-        steps.append(entry)
-    return {"flow_id": "personal_accident", "steps": steps}
+        steps = []
+        for i, name in enumerate(PersonalAccidentFlow.STEPS):
+            entry = {"index": i, "name": name}
+            if name == "personal_details":
+                entry["form"] = {
+                    "type": "form",
+                    "fields": [
+                        {"name": "surname", "label": "Surname", "type": "text", "required": True},
+                        {"name": "first_name", "label": "First Name", "type": "text", "required": True},
+                        {"name": "middle_name", "label": "Middle Name", "type": "text", "required": False},
+                        {"name": "date_of_birth", "label": "Date of Birth", "type": "date", "required": True},
+                        {"name": "email", "label": "Email Address", "type": "email", "required": True},
+                        {"name": "mobile_number", "label": "Mobile Number", "type": "tel", "required": True},
+                        {"name": "national_id_number", "label": "National ID Number", "type": "text", "required": True},
+                        {"name": "nationality", "label": "Nationality", "type": "text", "required": True},
+                        {"name": "tax_identification_number", "label": "Tax ID", "type": "text", "required": False},
+                        {"name": "occupation", "label": "Occupation", "type": "text", "required": True},
+                        {"name": "gender", "label": "Gender", "type": "select", "options": ["Male", "Female", "Other"], "required": True},
+                        {"name": "country_of_residence", "label": "Country of Residence", "type": "text", "required": True},
+                        {"name": "physical_address", "label": "Physical Address", "type": "text", "required": True},
+                    ],
+                }
+            elif name == "next_of_kin":
+                entry["form"] = {
+                    "type": "form",
+                    "fields": [
+                        {"name": "nok_first_name", "label": "First Name", "type": "text", "required": True},
+                        {"name": "nok_last_name", "label": "Last Name", "type": "text", "required": True},
+                        {"name": "nok_middle_name", "label": "Middle Name", "type": "text", "required": False},
+                        {"name": "nok_phone_number", "label": "Phone Number", "type": "tel", "required": True},
+                        {"name": "nok_relationship", "label": "Relationship", "type": "text", "required": True},
+                        {"name": "nok_address", "label": "Address", "type": "text", "required": True},
+                        {"name": "nok_id_number", "label": "ID Number", "type": "text", "required": False},
+                    ],
+                }
+            elif name == "previous_pa_policy":
+                entry["form"] = {
+                    "type": "yes_no_details",
+                    "question_id": "previous_pa_policy",
+                    "details_field": {"name": "previous_insurer_name", "show_when": "yes"},
+                }
+            elif name == "physical_disability":
+                entry["form"] = {
+                    "type": "yes_no_details",
+                    "question_id": "physical_disability",
+                    "details_field": {"name": "disability_details", "show_when": "no"},
+                }
+            elif name == "risky_activities":
+                entry["form"] = {
+                    "type": "checkbox",
+                    "options": PERSONAL_ACCIDENT_RISKY_ACTIVITIES,
+                    "other_field": {"name": "risky_activity_other"},
+                }
+            elif name == "coverage_selection":
+                entry["form"] = {
+                    "type": "options",
+                    "options": [{"id": p["id"], "label": p["label"], "sum_assured": p["sum_assured"]} for p in PERSONAL_ACCIDENT_COVERAGE_PLANS],
+                }
+            elif name == "upload_national_id":
+                entry["form"] = {"type": "file_upload", "field_name": "national_id_file_ref", "accept": "application/pdf"}
+            elif name in ("premium_and_download", "choose_plan_and_pay"):
+                entry["form"] = {"type": "premium_summary", "actions": ["view_all_plans", "proceed_to_pay"]}
+            steps.append(entry)
+        return {"flow_id": "personal_accident", "steps": steps}
+
+    if flow_id == "motor_private":
+        from src.chatbot.flows.motor_private import (
+            MOTOR_PRIVATE_ADDITIONAL_BENEFITS,
+            MOTOR_PRIVATE_EXCESS_PARAMETERS,
+            MotorPrivateFlow,
+        )
+
+        steps = []
+        for i, name in enumerate(MotorPrivateFlow.STEPS):
+            entry = {"index": i, "name": name}
+            if name == "vehicle_details":
+                entry["form"] = {
+                    "type": "form",
+                    "fields": [
+                        {"name": "vehicle_make", "label": "Choose vehicle make", "type": "select", "required": True},
+                        {"name": "year_of_manufacture", "label": "Year of manufacture", "type": "text", "required": True},
+                        {"name": "cover_start_date", "label": "Cover start date", "type": "date", "required": True},
+                        {"name": "rare_model", "label": "Is the car a rare model?", "type": "radio", "options": ["Yes", "No"], "required": True},
+                        {"name": "valuation_done", "label": "Has the vehicle undergone valuation?", "type": "radio",
+                         "options": ["Yes", "No"], "required": True},
+                        {"name": "vehicle_value", "label": "Value of Vehicle (UGX)", "type": "number", "required": True},
+                        {"name": "first_time_registration", "label": "First time registration for this type?", "type": "radio",
+                         "options": ["Yes", "No"], "required": True},
+                        {"name": "car_alarm_installed", "label": "Car alarm installed?", "type": "radio", "options": ["Yes", "No"], "required": True},
+                        {"name": "tracking_system_installed", "label": "Tracking system installed?", "type": "radio",
+                         "options": ["Yes", "No"], "required": True},
+                        {"name": "car_usage_region", "label": "Car usage region", "type": "radio",
+                         "options": ["Within Uganda", "Within East Africa", "Outside East Africa"], "required": True},
+                    ],
+                }
+            elif name == "excess_parameters":
+                entry["form"] = {"type": "checkbox", "options": MOTOR_PRIVATE_EXCESS_PARAMETERS}
+            elif name == "additional_benefits":
+                entry["form"] = {"type": "checkbox", "options": MOTOR_PRIVATE_ADDITIONAL_BENEFITS}
+            elif name == "benefits_summary":
+                entry["form"] = {"type": "benefits_summary"}
+            elif name == "premium_calculation":
+                entry["form"] = {"type": "premium_summary", "actions": ["edit", "download_quote"]}
+            elif name == "about_you":
+                entry["form"] = {
+                    "type": "form",
+                    "fields": [
+                        {"name": "first_name", "label": "First Name", "type": "text", "required": True},
+                        {"name": "middle_name", "label": "Middle Name (Optional)", "type": "text", "required": False},
+                        {"name": "surname", "label": "Surname", "type": "text", "required": True},
+                        {"name": "phone_number", "label": "Phone Number", "type": "text", "required": True},
+                        {"name": "email", "label": "Email", "type": "email", "required": True},
+                    ],
+                }
+            elif name in ("premium_and_download", "choose_plan_and_pay"):
+                entry["form"] = {"type": "premium_summary", "actions": ["edit", "download_quote", "proceed_to_pay"]}
+            steps.append(entry)
+        return {"flow_id": "motor_private", "steps": steps}
+
+    if flow_id == "serenicare":
+        from src.chatbot.flows.serenicare import SERENICARE_OPTIONAL_BENEFITS, SERENICARE_PLANS, SerenicareFlow
+
+        steps = []
+        for i, name in enumerate(SerenicareFlow.STEPS):
+            entry = {"index": i, "name": name}
+            if name == "cover_personalization":
+                entry["form"] = {
+                    "type": "form",
+                    "fields": [
+                        {"name": "date_of_birth", "label": "Date of Birth", "type": "date", "required": True},
+                        {"name": "include_spouse", "label": "Include Spouse/Partner", "type": "checkbox", "required": False},
+                        {"name": "include_children", "label": "Include Child/Children", "type": "checkbox", "required": False},
+                        {"name": "add_another_main_member", "label": "Add another main member", "type": "checkbox", "required": False},
+                    ],
+                }
+            elif name == "optional_benefits":
+                entry["form"] = {"type": "checkbox", "options": SERENICARE_OPTIONAL_BENEFITS}
+            elif name == "medical_conditions":
+                entry["form"] = {
+                    "type": "radio",
+                    "question_id": "medical_conditions",
+                    "options": [{"id": "yes", "label": "Yes"}, {"id": "no", "label": "No"}],
+                    "required": True,
+                }
+            elif name == "plan_selection":
+                entry["form"] = {
+                    "type": "options",
+                    "options": [
+                        {"id": p["id"], "label": p["label"], "description": p["description"], "benefits": p["benefits"]}
+                        for p in SERENICARE_PLANS
+                    ],
+                }
+            elif name == "about_you":
+                entry["form"] = {
+                    "type": "form",
+                    "fields": [
+                        {"name": "first_name", "label": "First Name", "type": "text", "required": True},
+                        {"name": "middle_name", "label": "Middle Name (Optional)", "type": "text", "required": False},
+                        {"name": "surname", "label": "Surname", "type": "text", "required": True},
+                        {"name": "phone_number", "label": "Phone Number", "type": "text", "required": True},
+                        {"name": "email", "label": "Email", "type": "email", "required": True},
+                    ],
+                }
+            elif name in ("premium_and_download", "choose_plan_and_pay"):
+                entry["form"] = {"type": "premium_summary", "actions": ["view_all_plans", "proceed_to_pay"]}
+            steps.append(entry)
+        return {"flow_id": "serenicare", "steps": steps}
+
+    raise KeyError(flow_id)
+
+
+@api_router.get("/flows/{flow_id}/schema")
+async def get_flow_schema(flow_id: str):
+    """Return step and field schema for a guided flow so the frontend can build forms. Supports personal_accident, motor_private, serenicare."""
+    try:
+        return _build_flow_schema(flow_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Unknown flow: {flow_id}")
 
 
 @api_router.post("/chat/message", response_model=ChatResponse)
@@ -625,159 +724,9 @@ async def api_get_product_structured(
     }
 
 
-app.include_router(api_router, prefix="/api")
-
-
-@app.get("/products/list")
-async def list_products(category: Optional[str] = None, matcher: ProductMatcher = Depends(lambda: product_matcher)):
-    """Get list of products"""
-    try:
-        if category:
-            products = matcher.get_products_by_category(category)
-        else:
-            products = list(matcher.product_index.values())
-
-        return {"products": products, "count": len(products)}
-
-    except Exception as e:
-        logger.error(f"Error listing products: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/products/categories")
-async def list_product_categories(
-    matcher: ProductMatcher = Depends(lambda: product_matcher),
-):
-    """
-    List top-level product categories, e.g. 'personal', 'business'.
-    """
-    try:
-        categories = sorted({p.get("category_name") for p in matcher.product_index.values() if p.get("category_name")})
-        return {"categories": categories}
-    except Exception as e:
-        logger.error(f"Error listing product categories: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/products/{category}")
-async def list_product_subcategories(
-    category: str,
-    matcher: ProductMatcher = Depends(lambda: product_matcher),
-):
-    """
-    List subcategories under a given category, e.g. 'personal' -> 'save-and-invest'.
-    """
-    try:
-        cat_lower = category.lower()
-        subs = sorted(
-            {
-                p.get("sub_category_name")
-                for p in matcher.product_index.values()
-                if p.get("category_name", "").lower() == cat_lower and p.get("sub_category_name")
-            }
-        )
-        if not subs:
-            raise HTTPException(status_code=404, detail="Category not found or has no subcategories")
-        return {"category": category, "subcategories": subs}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error listing subcategories: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/products/{category}/{subcategory}")
-async def list_products_in_subcategory(
-    category: str,
-    subcategory: str,
-    matcher: ProductMatcher = Depends(lambda: product_matcher),
-):
-    """
-    List products under a specific category/subcategory combination,
-    using the website index doc IDs as product IDs.
-    """
-    try:
-        cat_lower = category.lower()
-        sub_lower = subcategory.lower()
-        items = [
-            {
-                "product_id": p["product_id"],
-                "name": p["name"],
-                "url": p.get("url"),
-            }
-            for p in matcher.product_index.values()
-            if p.get("category_name", "").lower() == cat_lower and p.get("sub_category_name", "").lower() == sub_lower
-        ]
-        if not items:
-            raise HTTPException(status_code=404, detail="No products found for this category/subcategory")
-        return {"category": category, "subcategory": subcategory, "products": items}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error listing products in subcategory: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/products/by-id/{product_id:path}")
-async def get_product_by_id(product_id: str, include_details: bool = False):
-    """
-    Product info from chunks: overview, benefits, general. With ?include_details=true also returns faq.
-    Example id: website:product:personal/save-and-invest/sure-deal-savings-plan
-    """
-    try:
-        product = product_matcher.get_product_by_id(product_id)
-        if not product:
-            raise HTTPException(status_code=404, detail="Product not found")
-        sections = _load_product_sections(product_id)
-        out = {
-            "product_id": product_id,
-            "name": product.get("name"),
-            "category": product.get("category_name"),
-            "subcategory": product.get("sub_category_name"),
-            "url": product.get("url"),
-            "overview": sections.get("overview", []),
-            "benefits": sections.get("benefits", []),
-            "general": sections.get("general", []),
-        }
-        if include_details:
-            out["faq"] = sections.get("faq", [])
-        return out
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting product: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/products/by-id/{product_id:path}/details")
-async def get_product_details_by_id(product_id: str):
-    """Product details: overview, benefits, general, and faq (same as by-id?include_details=true)."""
-    try:
-        product = product_matcher.get_product_by_id(product_id)
-        if not product:
-            raise HTTPException(status_code=404, detail="Product not found")
-        sections = _load_product_sections(product_id)
-        return {
-            "product_id": product_id,
-            "name": product.get("name"),
-            "category": product.get("category_name"),
-            "subcategory": product.get("sub_category_name"),
-            "url": product.get("url"),
-            "overview": sections.get("overview", []),
-            "benefits": sections.get("benefits", []),
-            "general": sections.get("general", []),
-            "faq": sections.get("faq", []),
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting product details: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/products/{product_id}")
-async def get_product(product_id: str, include_details: bool = False):
-    """Get product by id. Prefer /products/by-id/{product_id:path} when id contains slashes."""
+@api_router.get("/products/card/{product_id:path}")
+async def api_get_product_card(product_id: str, include_details: bool = False):
+    """Product card (RAG summary). Use by-id when product_id contains slashes."""
     try:
         card = product_card_gen.generate_card(product_id, False)
         if not card:
@@ -790,6 +739,19 @@ async def get_product(product_id: str, include_details: bool = False):
     except Exception as e:
         logger.error(f"Error getting product: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/products/card/{product_id:path}/details")
+async def api_get_product_card_details(product_id: str):
+    """Detailed product information (Learn More) via RAG/LLM."""
+    try:
+        return await product_card_gen.get_product_details(product_id)
+    except Exception as e:
+        logger.error(f"Error getting product details: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+app.include_router(api_router, prefix="/api")
 
 
 def _strip_heading_from_text(text: str, heading: str) -> str:
@@ -845,52 +807,6 @@ def _load_product_sections(product_id: str) -> Dict[str, List[Dict[str, str]]]:
             entry = {"heading": heading, "text": text}
             sections.setdefault(ctype, []).append(entry)
     return sections
-
-
-@app.get("/products/{category}/{subcategory}/{product_slug}")
-async def get_product_structured(
-    category: str,
-    subcategory: str,
-    product_slug: str,
-    matcher: ProductMatcher = Depends(lambda: product_matcher),
-):
-    """
-    Get structured, typed sections for a single product WITHOUT going
-    through RAG/LLM – ideal for guided product discovery flows.
-
-    The `product_slug` is the URL slug, and the underlying product_id /
-    doc_id is in the form:
-    `website:product:{category}/{subcategory}/{product_slug}`.
-    """
-    doc_id = f"website:product:{category}/{subcategory}/{product_slug}"
-    product = matcher.get_product_by_id(doc_id)
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-
-    sections = _load_product_sections(doc_id)
-
-    return {
-        "product_id": doc_id,
-        "name": product.get("name"),
-        "category": product.get("category_name"),
-        "subcategory": product.get("sub_category_name"),
-        "url": product.get("url"),
-        "overview": sections.get("overview", []),
-        "benefits": sections.get("benefits", []),
-        "payment_methods": sections.get("payment_methods", []),
-        "general": sections.get("general", []),
-        "faq": sections.get("faq", []),
-    }
-
-
-@app.get("/products/{product_id}/details")
-async def get_product_details(product_id: str):
-    """Get detailed product information (Learn More) via RAG/LLM. Prefer /products/by-id/{id}/details when id contains slashes."""
-    try:
-        return await product_card_gen.get_product_details(product_id)
-    except Exception as e:
-        logger.error(f"Error getting product details: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/quotes/generate", response_model=QuoteResponse)
