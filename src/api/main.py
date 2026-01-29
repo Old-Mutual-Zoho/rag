@@ -203,15 +203,15 @@ class StartGuidedRequest(BaseModel):
 # ============================================================================
 
 
-@app.get("/")
+@app.get("/", tags=["Health"])
 async def root():
-    """Health check endpoint"""
+    """Health check endpoint."""
     return {"service": "Old Mutual Chatbot API", "status": "healthy", "version": "1.0.0", "timestamp": datetime.now().isoformat()}
 
 
-@app.get("/health")
+@app.get("/health", tags=["Health"])
 async def health_check():
-    """Detailed health check"""
+    """Detailed health check (Postgres, Redis)."""
     return {"status": "healthy", "database": {"postgres": "connected", "redis": redis_cache.ping()}, "timestamp": datetime.now().isoformat()}
 
 
@@ -263,7 +263,7 @@ async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: Pos
 api_router = APIRouter()
 
 
-@api_router.post("/session", response_model=CreateSessionResponse)
+@api_router.post("/session", response_model=CreateSessionResponse, tags=["Sessions"])
 async def create_session(
     body: CreateSessionRequest,
     db: PostgresDB = Depends(get_db),
@@ -323,7 +323,7 @@ async def get_session_state(session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@api_router.post("/chat/start-guided")
+@api_router.post("/chat/start-guided", tags=["Chat"])
 async def start_guided_body(
     body: StartGuidedRequest,
     router: ChatRouter = Depends(get_router),
@@ -528,16 +528,16 @@ def _build_flow_schema(flow_id: str) -> Dict:
     raise KeyError(flow_id)
 
 
-@api_router.get("/flows/{flow_id}/schema")
+@api_router.get("/flows/{flow_id}/schema", tags=["Guided Flows"])
 async def get_flow_schema(flow_id: str):
-    """Return step and field schema for a guided flow so the frontend can build forms. Supports personal_accident, motor_private, serenicare."""
+    """Return step and field schema for a guided flow (personal_accident, motor_private, serenicare)."""
     try:
         return _build_flow_schema(flow_id)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Unknown flow: {flow_id}")
 
 
-@api_router.post("/chat/message", response_model=ChatResponse)
+@api_router.post("/chat/message", response_model=ChatResponse, tags=["Chat"])
 async def api_send_message(
     request: ChatMessage,
     router: ChatRouter = Depends(get_router),
@@ -554,10 +554,10 @@ async def api_send_message(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ---------- Product routes under /api (for frontend). Use /api/products/by-id/{id} to avoid conflict with /api/products/{category} ----------
-@api_router.get("/products/list")
+# ---------- Product routes ----------
+@api_router.get("/products/list", tags=["Products"])
 async def api_list_products(category: Optional[str] = None, matcher: ProductMatcher = Depends(lambda: product_matcher)):
-    """Get list of products. Optional ?category=personal."""
+    """List all products. Optional ?category=personal."""
     try:
         if category:
             products = matcher.get_products_by_category(category)
@@ -569,9 +569,9 @@ async def api_list_products(category: Optional[str] = None, matcher: ProductMatc
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@api_router.get("/products/categories")
+@api_router.get("/products/categories", tags=["Products"])
 async def api_list_product_categories(matcher: ProductMatcher = Depends(lambda: product_matcher)):
-    """List top-level categories, e.g. 'personal', 'business'."""
+    """List top-level product categories (e.g. personal, business)."""
     try:
         categories = sorted({p.get("category_name") for p in matcher.product_index.values() if p.get("category_name")})
         return {"categories": categories}
@@ -580,7 +580,7 @@ async def api_list_product_categories(matcher: ProductMatcher = Depends(lambda: 
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@api_router.get("/products/by-id/{product_id:path}")
+@api_router.get("/products/by-id/{product_id:path}", tags=["Products"])
 async def api_get_product_by_id(
     product_id: str,
     include_details: bool = False,
@@ -615,7 +615,7 @@ async def api_get_product_by_id(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@api_router.get("/products/by-id/{product_id:path}/details")
+@api_router.get("/products/by-id/{product_id:path}/details", tags=["Products"])
 async def api_get_product_details_by_id(
     product_id: str,
     matcher: ProductMatcher = Depends(lambda: product_matcher),
@@ -644,7 +644,7 @@ async def api_get_product_details_by_id(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@api_router.get("/products/{category}")
+@api_router.get("/products/{category}", tags=["Products"])
 async def api_list_product_subcategories_or_products(category: str, matcher: ProductMatcher = Depends(lambda: product_matcher)):
     """
     List subcategories under a business unit (category), or products if category has none.
@@ -676,7 +676,7 @@ async def api_list_product_subcategories_or_products(category: str, matcher: Pro
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@api_router.get("/products/{category}/{subcategory}")
+@api_router.get("/products/{category}/{subcategory}", tags=["Products"])
 async def api_list_products_in_subcategory(category: str, subcategory: str, matcher: ProductMatcher = Depends(lambda: product_matcher)):
     """List products in a category/subcategory. product_id in each item is the full doc_id for by-id endpoints."""
     try:
@@ -697,7 +697,7 @@ async def api_list_products_in_subcategory(category: str, subcategory: str, matc
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@api_router.get("/products/{category}/{subcategory}/{product_slug}")
+@api_router.get("/products/{category}/{subcategory}/{product_slug}", tags=["Products"])
 async def api_get_product_structured(
     category: str,
     subcategory: str,
@@ -724,7 +724,7 @@ async def api_get_product_structured(
     }
 
 
-@api_router.get("/products/card/{product_id:path}")
+@api_router.get("/products/card/{product_id:path}", tags=["Products"])
 async def api_get_product_card(product_id: str, include_details: bool = False):
     """Product card (RAG summary). Use by-id when product_id contains slashes."""
     try:
@@ -741,7 +741,7 @@ async def api_get_product_card(product_id: str, include_details: bool = False):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@api_router.get("/products/card/{product_id:path}/details")
+@api_router.get("/products/card/{product_id:path}/details", tags=["Products"])
 async def api_get_product_card_details(product_id: str):
     """Detailed product information (Learn More) via RAG/LLM."""
     try:
@@ -809,9 +809,9 @@ def _load_product_sections(product_id: str) -> Dict[str, List[Dict[str, str]]]:
     return sections
 
 
-@app.post("/quotes/generate", response_model=QuoteResponse)
+@app.post("/quotes/generate", response_model=QuoteResponse, tags=["Quotes"])
 async def generate_quote(request: QuoteRequest, db: PostgresDB = Depends(get_db)):
-    """Generate insurance quote"""
+    """Generate an insurance quote from underwriting data."""
     try:
         # This would use the quotation flow
         from src.chatbot.flows.quotation import QuotationFlow
@@ -842,9 +842,9 @@ async def generate_quote(request: QuoteRequest, db: PostgresDB = Depends(get_db)
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/quotes/{quote_id}")
+@app.get("/quotes/{quote_id}", tags=["Quotes"])
 async def get_quote(quote_id: str, db: PostgresDB = Depends(get_db)):
-    """Get quote by ID"""
+    """Get a quote by ID."""
     try:
         quote = db.get_quote(quote_id)
 
@@ -869,9 +869,9 @@ async def get_quote(quote_id: str, db: PostgresDB = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/sessions/{session_id}/history")
+@app.get("/sessions/{session_id}/history", tags=["Sessions"])
 async def get_conversation_history(session_id: str, limit: int = 50):
-    """Get conversation history"""
+    """Get conversation history for a session."""
     try:
         session = state_manager.get_session(session_id)
 
@@ -890,9 +890,9 @@ async def get_conversation_history(session_id: str, limit: int = 50):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/sessions/{session_id}")
+@app.delete("/sessions/{session_id}", tags=["Sessions"])
 async def end_session(session_id: str):
-    """End chatbot session"""
+    """End a chatbot session."""
     try:
         state_manager.end_session(session_id)
         return {"message": "Session ended successfully"}
