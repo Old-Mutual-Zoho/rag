@@ -100,6 +100,7 @@ SERENICARE_PLANS = [
     }
 ]
 
+
 class SerenicareFlow:
     """
     Guided flow for Serenicare: cover personalization, optional benefits,
@@ -223,7 +224,10 @@ class SerenicareFlow:
         return {
             "response": {
                 "type": "radio",
-                "message": "Do you or any of the family members you wish to include in this plan have any of the following: Sickle Cells, Cancer(s), Leukaemia, or liver-related conditions?",
+                "message": (
+                    "Do you or any family members you wish to include have any of the following: "
+                    "Sickle Cells, Cancer(s), Leukaemia, or liver-related conditions?"
+                ),
                 "question_id": "medical_conditions",
                 "options": [{"id": "yes", "label": "Yes"}, {"id": "no", "label": "No"}],
                 "required": True,

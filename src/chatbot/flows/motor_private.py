@@ -64,6 +64,7 @@ MOTOR_PRIVATE_BENEFITS = [
     {"label": "Hire of replacement vehicle", "value": "N/A"},
 ]
 
+
 class MotorPrivateFlow:
     """
     Guided flow for Motor Private: vehicle details, excess parameters, additional benefits,
@@ -151,10 +152,14 @@ class MotorPrivateFlow:
                     {"name": "rare_model", "label": "Is the car a rare model?", "type": "radio", "options": ["Yes", "No"], "required": True},
                     {"name": "valuation_done", "label": "Has the vehicle undergone valuation?", "type": "radio", "options": ["Yes", "No"], "required": True},
                     {"name": "vehicle_value", "label": "Value of Vehicle (UGX)", "type": "number", "required": True},
-                    {"name": "first_time_registration", "label": "Is this the first time this vehicle is being registered for this type of insurance?", "type": "radio", "options": ["Yes", "No"], "required": True},
-                    {"name": "car_alarm_installed", "label": "Do you have a car alarm installed?", "type": "radio", "options": ["Yes", "No"], "required": True},
-                    {"name": "tracking_system_installed", "label": "Do you have a tracking system installed?", "type": "radio", "options": ["Yes", "No"], "required": True},
-                    {"name": "car_usage_region", "label": "Do you use your car within Uganda or within/outside East Africa?", "type": "radio", "options": ["Within Uganda", "Within East Africa", "Outside East Africa"], "required": True},
+                    {"name": "first_time_registration", "label": "First time this vehicle is registered for this type of insurance?", "type": "radio",
+                     "options": ["Yes", "No"], "required": True},
+                    {"name": "car_alarm_installed", "label": "Do you have a car alarm installed?", "type": "radio",
+                     "options": ["Yes", "No"], "required": True},
+                    {"name": "tracking_system_installed", "label": "Do you have a tracking system installed?", "type": "radio",
+                     "options": ["Yes", "No"], "required": True},
+                    {"name": "car_usage_region", "label": "Car usage: within Uganda, East Africa, or outside East Africa?", "type": "radio",
+                     "options": ["Within Uganda", "Within East Africa", "Outside East Africa"], "required": True},
                 ],
             },
             "next_step": 1,
