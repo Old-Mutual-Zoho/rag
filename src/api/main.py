@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+from src.chatbot.dependencies import api_key_protection
 
 from src.chatbot.modes.conversational import ConversationalMode
 from src.chatbot.modes.guided import GuidedMode
@@ -32,7 +33,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
-app = FastAPI(title="Old Mutual Chatbot API", description="AI-powered insurance chatbot with conversational and guided modes", version="1.0.0")
+app = FastAPI(
+    title="Old Mutual Chatbot API",
+    description="AI-powered insurance chatbot with conversational and guided modes",
+    version="1.0.0",
+    dependencies=[Depends(api_key_protection)],  # protect everything by default
+)
 
 # CORS middleware
 app.add_middleware(
@@ -260,7 +266,7 @@ async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: Pos
 
 
 # ---------- API router (prefix /api) ----------
-api_router = APIRouter()
+api_router = APIRouter()  # app-level dependency covers these too now
 
 
 @api_router.post("/session", response_model=CreateSessionResponse, tags=["Sessions"])
@@ -809,7 +815,12 @@ def _load_product_sections(product_id: str) -> Dict[str, List[Dict[str, str]]]:
     return sections
 
 
-@app.post("/quotes/generate", response_model=QuoteResponse, tags=["Quotes"])
+@app.post(
+    "/quotes/generate",
+    response_model=QuoteResponse,
+    tags=["Quotes"],
+    dependencies=[Depends(api_key_protection)],
+)
 async def generate_quote(request: QuoteRequest, db: PostgresDB = Depends(get_db)):
     """Generate an insurance quote from underwriting data."""
     try:
@@ -842,7 +853,11 @@ async def generate_quote(request: QuoteRequest, db: PostgresDB = Depends(get_db)
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/quotes/{quote_id}", tags=["Quotes"])
+@app.get(
+    "/quotes/{quote_id}",
+    tags=["Quotes"],
+    dependencies=[Depends(api_key_protection)],
+)
 async def get_quote(quote_id: str, db: PostgresDB = Depends(get_db)):
     """Get a quote by ID."""
     try:
@@ -869,7 +884,11 @@ async def get_quote(quote_id: str, db: PostgresDB = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/sessions/{session_id}/history", tags=["Sessions"])
+@app.get(
+    "/sessions/{session_id}/history",
+    tags=["Sessions"],
+    dependencies=[Depends(api_key_protection)],
+)
 async def get_conversation_history(session_id: str, limit: int = 50):
     """Get conversation history for a session."""
     try:
@@ -890,7 +909,11 @@ async def get_conversation_history(session_id: str, limit: int = 50):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.delete("/sessions/{session_id}", tags=["Sessions"])
+@app.delete(
+    "/sessions/{session_id}",
+    tags=["Sessions"],
+    dependencies=[Depends(api_key_protection)],
+)
 async def end_session(session_id: str):
     """End a chatbot session."""
     try:
