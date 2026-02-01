@@ -43,13 +43,6 @@ Important note
 - A frontend-shipped API key is not a true secret (users can extract it).
 - For strong security, use proper user authentication (JWT/OAuth) or a backend-to-backend key.
 
-Git: create a feature branch (do NOT commit to main)
-- From repo root:
+CI / Lint note
+- tests/test_flows.py uses a small sys.path bootstrap for imports, so some imports are marked with "# noqa: E402" to satisfy flake8.
 
-  git status
-  git checkout -b feature/api-key-protection
-  git add -A
-  git commit -m "Add API key protection (X-API-KEY) + frontend integration notes"
-  git push -u origin feature/api-key-protection
-
-- Then open a PR from feature/api-key-protection -> main

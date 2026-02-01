@@ -1,38 +1,50 @@
 import sys
 import os
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-import pytest
-import asyncio
-from fastapi import HTTPException
-from src.chatbot.dependencies import api_key_protection
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from src.chatbot.flows.personal_accident import PersonalAccidentFlow
-from src.chatbot.flows.serenicare import SerenicareFlow
-from src.chatbot.flows.motor_private import MotorPrivateFlow
-from src.chatbot.flows.underwriting import UnderwritingFlow
-from src.chatbot.flows.quotation import QuotationFlow
+import pytest  # noqa: E402
+from fastapi import HTTPException  # noqa: E402
+
+from src.chatbot.dependencies import api_key_protection  # noqa: E402
+from src.chatbot.flows.personal_accident import PersonalAccidentFlow  # noqa: E402
+from src.chatbot.flows.serenicare import SerenicareFlow  # noqa: E402
+from src.chatbot.flows.motor_private import MotorPrivateFlow  # noqa: E402
+from src.chatbot.flows.quotation import QuotationFlow  # noqa: E402
+
 
 class DummyQuote:
     def __init__(self):
         self.id = "Q123"
         from datetime import datetime, timedelta
+
         self.valid_until = datetime.now() + timedelta(days=30)
+
 
 class DummyDB:
     def get_user_by_id(self, user_id):
         class User:
             kyc_completed = True
+
         return User()
+
     def create_quote(self, **kwargs):
         return DummyQuote()
+
 
 @pytest.mark.asyncio
 async def test_personal_accident_underwriting():
     db = DummyDB()
     flow = PersonalAccidentFlow(None, db)
     collected_data = {
-        "personal_details": {"first_name": "John", "surname": "Doe", "date_of_birth": "1980-01-01", "gender": "Male", "occupation": "Engineer", "email": "john@example.com"},
+        "personal_details": {
+            "first_name": "John",
+            "surname": "Doe",
+            "date_of_birth": "1980-01-01",
+            "gender": "Male",
+            "occupation": "Engineer",
+            "email": "john@example.com",
+        },
         "next_of_kin": {"first_name": "Jane"},
         "coverage_plan": {"sum_assured": 10000000},
     }

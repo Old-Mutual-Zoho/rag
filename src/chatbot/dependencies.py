@@ -9,10 +9,6 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-# NOTE:
-# - Attach `api_key_protection` at the FastAPI app level to protect ALL endpoints by default.
-# - Paths in _ALLOWLIST_PATHS bypass API key checks (useful for health/docs).
-# - Set API_KEY_DEBUG=1 to log whether a header was present (does not log the key value).
 _ALLOWLIST_PATHS = {
     "/",  # optional
     "/health",
