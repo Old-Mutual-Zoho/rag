@@ -8,6 +8,7 @@ from ..flows.underwriting import UnderwritingFlow
 from ..flows.quotation import QuotationFlow
 from ..flows.payment import PaymentFlow
 from ..flows.personal_accident import PersonalAccidentFlow
+from ..flows.travel_insurance import TravelInsuranceFlow
 
 
 class GuidedMode:
@@ -23,6 +24,7 @@ class GuidedMode:
             "quotation": QuotationFlow(product_catalog, db),
             "payment": PaymentFlow(db),
             "personal_accident": PersonalAccidentFlow(product_catalog, db),
+            "travel_insurance": TravelInsuranceFlow(product_catalog, db),
         }
 
     async def process(self, user_input, session_id: str, user_id: str) -> Dict:

@@ -66,6 +66,9 @@ class ChatRouter:
             "personal accident",
             "pa cover",
             "accident insurance",
+            "travel insurance",
+            "travel sure",
+            "travel cover",
         ]
         message_lower = message.lower()
         return any(trigger in message_lower for trigger in triggers)
@@ -77,6 +80,10 @@ class ChatRouter:
         # Personal Accident: apply, buy, get cover for personal accident
         if any(phrase in message_lower for phrase in ["personal accident", "pa insurance", "accident cover", "pa cover"]):
             return "personal_accident"
+
+        # Travel Insurance: travel insurance, travel sure, travel cover
+        if any(phrase in message_lower for phrase in ["travel insurance", "travel sure", "travel cover", "travel policy"]):
+            return "travel_insurance"
 
         # Quote/buy triggers
         if any(word in message_lower for word in ["quote", "how much", "price", "cost"]):

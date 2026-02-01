@@ -322,6 +322,12 @@ async def get_session_state(session_id: str):
             step_names = PersonalAccidentFlow.STEPS
             step_name = step_names[step] if step < len(step_names) else None
             steps_total = len(step_names)
+        elif session.get("current_flow") == "travel_insurance":
+            from src.chatbot.flows.travel_insurance import TravelInsuranceFlow
+
+            step_names = TravelInsuranceFlow.STEPS
+            step_name = step_names[step] if step < len(step_names) else None
+            steps_total = len(step_names)
         return {
             "session_id": session_id,
             "mode": session.get("mode", "conversational"),
@@ -436,6 +442,92 @@ async def get_personal_accident_schema():
             entry["form"] = {"type": "premium_summary", "actions": ["view_all_plans", "proceed_to_pay"]}
         steps.append(entry)
     return {"flow_id": "personal_accident", "steps": steps}
+
+
+@api_router.get("/flows/travel_insurance/schema")
+async def get_travel_insurance_schema():
+    """Return step and field schema for Travel Insurance so the frontend can build forms."""
+    from src.chatbot.flows.travel_insurance import (
+        TRAVEL_INSURANCE_PRODUCTS,
+        TravelInsuranceFlow,
+    )
+
+    steps = []
+    for i, name in enumerate(TravelInsuranceFlow.STEPS):
+        entry = {"index": i, "name": name}
+        if name == "product_selection":
+            entry["form"] = {
+                "type": "product_cards",
+                "products": [{"id": p["id"], "label": p["label"], "description": p["description"]} for p in TRAVEL_INSURANCE_PRODUCTS],
+            }
+        elif name == "about_you":
+            entry["form"] = {
+                "type": "form",
+                "fields": [
+                    {"name": "first_name", "label": "First Name", "type": "text", "required": True},
+                    {"name": "middle_name", "label": "Middle Name (Optional)", "type": "text", "required": False},
+                    {"name": "surname", "label": "Surname", "type": "text", "required": True},
+                    {"name": "phone_number", "label": "Phone Number", "type": "tel", "required": True},
+                    {"name": "email", "label": "Email", "type": "email", "required": True},
+                ],
+            }
+        elif name == "travel_party_and_trip":
+            entry["form"] = {
+                "type": "form",
+                "fields": [
+                    {"name": "travel_party", "label": "Travel party", "type": "radio", "options": ["myself_only", "myself_and_someone_else", "group"], "required": True},
+                    {"name": "num_travellers_18_69", "label": "Travellers (18-69)", "type": "number", "required": True},
+                    {"name": "num_travellers_0_17", "label": "Travellers (0-17)", "type": "number", "required": False},
+                    {"name": "departure_country", "label": "Departure Country", "type": "text", "required": True},
+                    {"name": "destination_country", "label": "Destination Country", "type": "text", "required": True},
+                    {"name": "departure_date", "label": "Departure Date", "type": "date", "required": True},
+                    {"name": "return_date", "label": "Return Date", "type": "date", "required": True},
+                ],
+            }
+        elif name == "data_consent":
+            entry["form"] = {
+                "type": "consent",
+                "consents": [
+                    {"id": "terms_and_conditions_agreed", "required": True},
+                    {"id": "consent_data_outside_uganda", "required": True},
+                    {"id": "consent_child_data", "required": False},
+                    {"id": "consent_marketing", "required": False},
+                ],
+            }
+        elif name == "traveller_details":
+            entry["form"] = {
+                "type": "form",
+                "fields": [
+                    {"name": "first_name", "label": "First Name", "type": "text", "required": True},
+                    {"name": "surname", "label": "Surname", "type": "text", "required": True},
+                    {"name": "nationality_type", "label": "Nationality", "type": "radio", "options": ["ugandan", "non_ugandan"], "required": True},
+                    {"name": "passport_number", "label": "Passport Number", "type": "text", "required": True},
+                    {"name": "date_of_birth", "label": "Date of Birth", "type": "date", "required": True},
+                    {"name": "occupation", "label": "Profession/Occupation", "type": "text", "required": True},
+                    {"name": "phone_number", "label": "Phone Number", "type": "tel", "required": True},
+                    {"name": "email", "label": "Email", "type": "email", "required": True},
+                    {"name": "postal_address", "label": "Postal/Home Address", "type": "text", "required": True},
+                    {"name": "town_city", "label": "Town/City", "type": "text", "required": True},
+                ],
+            }
+        elif name == "emergency_contact":
+            entry["form"] = {
+                "type": "form",
+                "fields": [
+                    {"name": "ec_surname", "label": "Surname", "type": "text", "required": True},
+                    {"name": "ec_relationship", "label": "Relationship", "type": "text", "required": True},
+                    {"name": "ec_phone_number", "label": "Phone Number", "type": "tel", "required": True},
+                    {"name": "ec_email", "label": "Email", "type": "email", "required": True},
+                ],
+            }
+        elif name == "bank_details_optional":
+            entry["form"] = {"type": "form", "optional": True, "fields": []}
+        elif name == "upload_passport":
+            entry["form"] = {"type": "file_upload", "field_name": "passport_file_ref", "accept": "application/pdf,image/jpeg,image/jpg"}
+        elif name in ("premium_summary", "choose_plan_and_pay"):
+            entry["form"] = {"type": "premium_summary", "actions": ["edit", "call_me_back", "proceed_to_pay"]}
+        steps.append(entry)
+    return {"flow_id": "travel_insurance", "steps": steps}
 
 
 @api_router.post("/chat/message", response_model=ChatResponse)
