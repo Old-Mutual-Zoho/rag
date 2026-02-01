@@ -55,6 +55,7 @@ async def test_personal_accident_underwriting():
         or (result.get("status") in ("ok", "review", "success", "declined", "incomplete"))
     )
 
+
 @pytest.mark.asyncio
 async def test_serenicare_underwriting():
     db = DummyDB()
@@ -71,6 +72,7 @@ async def test_serenicare_underwriting():
         or (result.get("status") in ("ok", "review", "success", "declined", "incomplete"))
     )
 
+
 @pytest.mark.asyncio
 async def test_motor_private_underwriting():
     db = DummyDB()
@@ -86,6 +88,7 @@ async def test_motor_private_underwriting():
         or (result.get("status") in ("ok", "review", "success", "declined", "incomplete"))
     )
 
+
 @pytest.mark.asyncio
 async def test_quotation_human_review():
     db = DummyDB()
@@ -94,6 +97,7 @@ async def test_quotation_human_review():
     result = await flow.start("user1", data)
     print("Quotation (human review required) result:", result)
     assert result["response"]["type"] == "underwriting_pending"
+
 
 @pytest.mark.asyncio
 async def test_quotation_quote_generated():
@@ -111,6 +115,7 @@ async def test_quotation_quote_generated():
     assert result["response"]["type"] == "quote_presentation"
     assert "quote" in result["response"]
 
+
 @pytest.mark.asyncio
 async def test_api_key_protection_allows_valid_key():
     prev = os.environ.get("API_KEYS")
@@ -123,6 +128,7 @@ async def test_api_key_protection_allows_valid_key():
             os.environ.pop("API_KEYS", None)
         else:
             os.environ["API_KEYS"] = prev
+
 
 @pytest.mark.asyncio
 async def test_api_key_protection_rejects_missing_or_invalid_key():
