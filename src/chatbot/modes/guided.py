@@ -7,8 +7,10 @@ from ..flows.product_discovery import ProductDiscoveryFlow
 from ..flows.underwriting import UnderwritingFlow
 from ..flows.quotation import QuotationFlow
 from ..flows.payment import PaymentFlow
+from ..flows.motor_private import MotorPrivateFlow
 from ..flows.personal_accident import PersonalAccidentFlow
 from ..flows.travel_insurance import TravelInsuranceFlow
+from ..flows.serenicare import SerenicareFlow
 
 
 class GuidedMode:
@@ -25,6 +27,8 @@ class GuidedMode:
             "payment": PaymentFlow(db),
             "personal_accident": PersonalAccidentFlow(product_catalog, db),
             "travel_insurance": TravelInsuranceFlow(product_catalog, db),
+            "motor_private": MotorPrivateFlow(product_catalog, db),
+            "serenicare": SerenicareFlow(product_catalog, db),
         }
 
     async def process(self, user_input, session_id: str, user_id: str) -> Dict:

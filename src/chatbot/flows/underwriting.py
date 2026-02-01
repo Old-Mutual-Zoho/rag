@@ -2,8 +2,11 @@
 Underwriting flow - Collect customer data and assess risk
 """
 
-from typing import Dict
+import logging
 from datetime import datetime
+from typing import Dict
+
+logger = logging.getLogger(__name__)
 
 
 class UnderwritingFlow:
@@ -24,8 +27,12 @@ class UnderwritingFlow:
 
     async def process_step(self, user_input: str, current_step: int, collected_data: Dict, user_id: str) -> Dict:
         """Process underwriting step"""
+        step_names = ["personal_info", "coverage_details", "health_questions", "lifestyle_questions", "review_and_submit"]
+        step_name = step_names[current_step] if current_step < len(step_names) else f"step_{current_step}"
+        logger.info("[Underwriting] step=%s (%s) user_id=%s", current_step, step_name, user_id)
 
         if current_step == 0:  # personal_info
+            logger.info("[Underwriting] Showing form: personal_info (full_name, date_of_birth, occupation, ...)")
             return {
                 "response": {
                     "type": "form",
@@ -49,7 +56,9 @@ class UnderwritingFlow:
 
                 personal_info = json.loads(user_input) if isinstance(user_input, str) else user_input
                 collected_data.update(personal_info)
+                logger.info("[Underwriting] Saved personal_info: %s", {k: v for k, v in personal_info.items() if k != "user_id"})
 
+            logger.info("[Underwriting] Showing form: coverage_details (sum_assured, policy_term, beneficiaries)")
             return {
                 "response": {
                     "type": "form",
@@ -79,11 +88,16 @@ class UnderwritingFlow:
 
                 coverage_info = json.loads(user_input) if isinstance(user_input, str) else user_input
                 collected_data.update(coverage_info)
+                logger.info(
+                    "[Underwriting] Saved coverage_details: sum_assured=%s, policy_term=%s",
+                    coverage_info.get("sum_assured"), coverage_info.get("policy_term"),
+                )
 
+            logger.info("[Underwriting] Showing health_questions (chronic_conditions, medications, ...)")
             return {
                 "response": {
                     "type": "health_questionnaire",
-                    "message": "🏥 A few health questions to assess your risk",
+                    "message": " A few health questions to assess your risk",
                     "questions": [
                         {
                             "id": "chronic_conditions",
@@ -117,7 +131,9 @@ class UnderwritingFlow:
 
                 health_info = json.loads(user_input) if isinstance(user_input, str) else user_input
                 collected_data["health_info"] = health_info
+                logger.info("[Underwriting] Saved health_info: %s", list(health_info.keys()) if isinstance(health_info, dict) else "raw")
 
+            logger.info("[Underwriting] Showing form: lifestyle_questions (smoker, alcohol, exercise, ...)")
             return {
                 "response": {
                     "type": "form",
@@ -162,9 +178,12 @@ class UnderwritingFlow:
 
                 lifestyle_info = json.loads(user_input) if isinstance(user_input, str) else user_input
                 collected_data["lifestyle_info"] = lifestyle_info
+                logger.info("[Underwriting] Saved lifestyle_info: smoker=%s, alcohol=%s", lifestyle_info.get("smoker"), lifestyle_info.get("alcohol"))
 
             # Assess if human review is needed
             requires_review = self._assess_risk(collected_data)
+            risk_score = self._calculate_risk_score(collected_data)
+            logger.info("[Underwriting] review_and_submit: requires_review=%s, risk_score=%s", requires_review, risk_score)
 
             return {
                 "response": {

@@ -69,6 +69,12 @@ class ChatRouter:
             "travel insurance",
             "travel sure",
             "travel cover",
+            "motor",
+            "car insurance",
+            "vehicle insurance",
+            "serenicare",
+            "health insurance",
+            "medical cover",
         ]
         message_lower = message.lower()
         return any(trigger in message_lower for trigger in triggers)
@@ -84,6 +90,34 @@ class ChatRouter:
         # Travel Insurance: travel insurance, travel sure, travel cover
         if any(phrase in message_lower for phrase in ["travel insurance", "travel sure", "travel cover", "travel policy"]):
             return "travel_insurance"
+
+        # Motor Private: car, vehicle, motor insurance
+        if any(
+            phrase in message_lower
+            for phrase in [
+                "motor private",
+                "motor insurance",
+                "car insurance",
+                "vehicle insurance",
+                "motor cover",
+                "car cover",
+            ]
+        ):
+            return "motor_private"
+
+        # Serenicare: health, medical, serenicare
+        if any(
+            phrase in message_lower
+            for phrase in [
+                "serenicare",
+                "health insurance",
+                "medical cover",
+                "medical insurance",
+                "health cover",
+                "family health",
+            ]
+        ):
+            return "serenicare"
 
         # Quote/buy triggers
         if any(word in message_lower for word in ["quote", "how much", "price", "cost"]):
