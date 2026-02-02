@@ -7,7 +7,6 @@ Or: python -m pytest tests/test_travel_insurance_flow.py -v
 
 from __future__ import annotations
 
-import asyncio
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -107,7 +106,7 @@ async def test_about_you_stores_data(flow):
         "phone_number": "0772123456",
     }
     data = {}
-    result = await flow._step_about_you(form_data, data, "user-1")
+    await flow._step_about_you(form_data, data, "user-1")
     assert "about_you" in data
     assert data["about_you"]["first_name"] == "Jane"
     assert data["about_you"]["surname"] == "Doe"
