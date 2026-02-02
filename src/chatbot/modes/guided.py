@@ -11,6 +11,7 @@ from ..flows.motor_private import MotorPrivateFlow
 from ..flows.personal_accident import PersonalAccidentFlow
 from ..flows.travel_insurance import TravelInsuranceFlow
 from ..flows.serenicare import SerenicareFlow
+from ..flows.dynamic_question_engine import DynamicQuestionEngineFlow
 
 
 class GuidedMode:
@@ -21,6 +22,7 @@ class GuidedMode:
 
         # Initialize flows
         self.flows = {
+            "journey": DynamicQuestionEngineFlow(product_catalog, db),
             "discovery": ProductDiscoveryFlow(product_catalog),
             "underwriting": UnderwritingFlow(db),
             "quotation": QuotationFlow(product_catalog, db),

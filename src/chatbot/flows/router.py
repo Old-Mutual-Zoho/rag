@@ -35,6 +35,23 @@ class ChatRouter:
             self.state_manager.switch_mode(session_id, "conversational")
             return {"message": "👋 Exited guided flow. How else can I help you?", "mode": "conversational"}
 
+        # Button actions from the frontend to start guided mode and immediately return the first form/cards.
+        # This is used for digital products where the user clicks "Get quotation".
+        if form_data and isinstance(form_data, dict):
+            action = str(form_data.get("action") or "").strip().lower()
+
+            if action in ("get_quotation", "get_quote"):
+                ctx = (session.get("context") or {}) if isinstance(session, dict) else {}
+                topic = (ctx.get("product_topic") or {}) if isinstance(ctx, dict) else {}
+                product_flow = topic.get("digital_flow")
+                initial_data = {"product_flow": product_flow} if product_flow else None
+                return await self.guided.start_flow("journey", session_id, user_id, initial_data=initial_data)
+
+            if action == "start_guided":
+                flow_name = form_data.get("flow") or form_data.get("flow_name") or "journey"
+                initial_data = form_data.get("initial_data") or {}
+                return await self.guided.start_flow(str(flow_name), session_id, user_id, initial_data=initial_data)
+
         # If in guided mode, stay in guided unless exiting
         if session.get("mode") == "guided" and session.get("current_flow"):
             user_input = form_data if form_data is not None else message
@@ -43,10 +60,15 @@ class ChatRouter:
         # Check for guided flow triggers (only when no form_data)
         if form_data is None and self._is_guided_trigger(message):
             flow_type = self._detect_flow_type(message)
-            return await self.guided.start_flow(flow_type, session_id, user_id)
+            initial_data = None
+            if flow_type in ("personal_accident", "travel_insurance", "motor_private", "serenicare"):
+                initial_data = {"product_flow": flow_type}
+
+            # Always start the journey engine for guided triggers.
+            return await self.guided.start_flow("journey", session_id, user_id, initial_data=initial_data)
 
         # Default to conversational mode
-        return await self.conversational.process(message, session_id, user_id)
+        return await self.conversational.process(message, session_id, user_id, form_data=form_data)
 
     def _is_guided_trigger(self, message: str) -> bool:
         """Check if message should trigger guided flow"""
@@ -55,26 +77,10 @@ class ChatRouter:
             "buy",
             "apply",
             "purchase",
-            "get insurance",
             "how much",
             "price",
             "cost",
             "premium",
-            "i want",
-            "i need",
-            "help me choose",
-            "personal accident",
-            "pa cover",
-            "accident insurance",
-            "travel insurance",
-            "travel sure",
-            "travel cover",
-            "motor",
-            "car insurance",
-            "vehicle insurance",
-            "serenicare",
-            "health insurance",
-            "medical cover",
         ]
         message_lower = message.lower()
         return any(trigger in message_lower for trigger in triggers)

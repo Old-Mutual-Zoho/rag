@@ -321,6 +321,10 @@ async def get_session_state(session_id: str):
             step_names = SerenicareFlow.STEPS
             step_name = step_names[step] if step < len(step_names) else None
             steps_total = len(step_names)
+        elif current_flow == "journey":
+            # Dynamic flow: steps are determined by engine state, not a static list.
+            step_name = "dynamic"
+            steps_total = None
 
         return {
             "session_id": session_id,
