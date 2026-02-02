@@ -18,9 +18,11 @@ _ALLOWLIST_PATHS = {
     "/redoc",
 }
 
+
 def get_api_keys():
     keys = os.getenv("API_KEYS", "")
     return [k.strip() for k in keys.split(",") if k.strip()]
+
 
 async def api_key_protection(
     request: Request = None,  # keep Request type so FastAPI injects it; default None for direct calls/tests
