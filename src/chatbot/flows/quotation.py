@@ -17,6 +17,18 @@ class QuotationFlow:
     async def start(self, user_id: str, initial_data: Dict) -> Dict:
         """Start quotation flow"""
         logger.info("[Quotation] start user_id=%s underwriting_keys=%s", user_id, list(initial_data.keys()))
+
+        if initial_data.get("requires_human_review"):
+            logger.info("[Quotation] requires_human_review=True; routing to underwriting_pending")
+            return {
+                "response": {
+                    "type": "underwriting_pending",
+                    "message": "Your request needs a quick human review. We'll get back to you shortly.",
+                },
+                "next_step": 0,
+                "collected_data": initial_data,
+            }
+
         # Calculate premium based on underwriting data
         quote_data = await self._calculate_premium(initial_data)
         logger.info(
