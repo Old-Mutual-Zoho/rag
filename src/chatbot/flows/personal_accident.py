@@ -53,6 +53,20 @@ class PersonalAccidentFlow:
         self.catalog = product_catalog
         self.db = db
 
+    async def complete_flow(self, collected_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+        """Finalize the flow from already-collected data.
+
+        This is primarily a convenience helper for tests and integrations that already
+        have all required data and simply need a quote/payment handoff.
+        """
+        data = dict(collected_data or {})
+        data.setdefault("user_id", user_id)
+        data.setdefault("product_id", "personal_accident")
+
+        result = await self._step_choose_plan_and_pay({"action": "proceed_to_pay"}, data, user_id)
+        result.setdefault("status", "success")
+        return result
+
     async def start(self, user_id: str, initial_data: Dict) -> Dict:
         """Start Personal Accident flow"""
         data = dict(initial_data or {})
