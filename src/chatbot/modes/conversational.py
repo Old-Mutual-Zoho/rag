@@ -8,6 +8,34 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def _is_greeting(message: str) -> bool:
+    m = (message or "").strip().lower()
+    if not m:
+        return False
+    # Keep it strict so we don't mis-classify real questions.
+    return m in {"hi", "hello", "hey", "hey!", "hello!", "hi!", "good morning", "good afternoon", "good evening"}
+
+
+def _detect_section_intent(message: str) -> str | None:
+    m = (message or "").lower()
+    # Benefits
+    if any(k in m for k in ["benefit", "benefits", "advantages", "what do i get", "what do you cover"]):
+        return "show_benefits"
+    # Coverage
+    if any(k in m for k in ["coverage", "covered", "what is covered", "what's covered", "what is included", "included"]):
+        return "show_coverage"
+    # Exclusions
+    if any(k in m for k in ["exclusion", "exclusions", "not covered", "what is not covered", "what isn't covered", "limitations"]):
+        return "show_exclusions"
+    # Eligibility
+    if any(k in m for k in ["eligibility", "eligible", "qualify", "requirements", "who can apply", "who is it for"]):
+        return "show_eligibility"
+    # Pricing
+    if any(k in m for k in ["premium", "price", "pricing", "cost", "how much"]):
+        return "show_pricing"
+    return None
+
+
 def _detect_digital_flow(message: str) -> str | None:
     m = (message or "").lower()
     if any(k in m for k in ["personal accident", "pa cover", "accident insurance", "accident cover", "pa insurance"]):
@@ -75,6 +103,19 @@ class ConversationalMode:
     async def process(self, message: str, session_id: str, user_id: str, form_data: Optional[Dict[str, Any]] = None) -> Dict:
         """Process message in conversational mode"""
 
+        # Friendly greeting (avoid sending "hi" into RAG/LLM).
+        if form_data is None and _is_greeting(message):
+            return {
+                "mode": "conversational",
+                "response": (
+                    "Hey! 👋 I’m MIA. How can I help today?\n"
+                    "✨ You can ask about benefits, coverage, exclusions, or eligibility for a product.\n"
+                    "For example: ‘benefits of Travel Sure Plus’ or ‘tell me about Serenicare’."
+                ),
+                "intent": "greeting",
+                "confidence": 1.0,
+            }
+
         # Backward-compatible: if the frontend still sends a product-guide action via form_data,
         # handle it, but we no longer *emit* buttons/actions as the primary UX.
         if form_data and isinstance(form_data, dict) and form_data.get("action"):
@@ -97,6 +138,42 @@ class ConversationalMode:
                 # User asked something else; clear the pending offer to avoid accidental triggers.
                 ctx.pop("pending_section_offer", None)
                 self.state_manager.update_session(session_id, {"context": ctx})
+
+        # If the user is explicitly asking for a product section (benefits/coverage/etc),
+        # resolve the product and answer via the product-guide path (filters by doc_id).
+        if form_data is None:
+            section_action = _detect_section_intent(message)
+            if section_action:
+                products = self.product_matcher.match_products(message, top_k=1)
+
+                # Prefer explicit mention in message, else fall back to last product topic.
+                session = self.state_manager.get_session(session_id) or {}
+                ctx = dict(session.get("context") or {})
+
+                picked = products[0][2] if products else None
+                if picked:
+                    ctx["product_topic"] = {
+                        "digital_flow": _detect_digital_flow(message),
+                        "name": picked.get("name"),
+                        "doc_id": picked.get("product_id"),
+                        "url": picked.get("url"),
+                    }
+                    self.state_manager.update_session(session_id, {"context": ctx})
+
+                # If we still don't know which product, ask a single clarifying question.
+                topic = (ctx.get("product_topic") or {}) if isinstance(ctx, dict) else {}
+                if not topic.get("doc_id"):
+                    return {
+                        "mode": "conversational",
+                        "response": (
+                            "Sure 🙂 Which product do you mean?\n"
+                            "Examples: ✈️ Travel Sure Plus, 🩹 Personal Accident, 🏥 Serenicare, 🚗 Motor Private."
+                        ),
+                        "intent": "clarify_product",
+                        "confidence": 0.9,
+                    }
+
+                return await self._process_product_guide_action({"action": section_action}, session_id)
 
         # Detect intent
         intent = self._detect_intent(message)

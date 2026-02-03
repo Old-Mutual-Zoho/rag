@@ -6,12 +6,117 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from typing import Any, Dict, List
 import google.generativeai as genai
 from google.api_core import exceptions
 
 logger = logging.getLogger(__name__)
+
+
+def _intent_from_question(question: str) -> str:
+    q = (question or "").strip().lower()
+    if not q:
+        return "general"
+    if q in {"hi", "hello", "hey", "hi!", "hello!", "hey!"}:
+        return "greeting"
+    if re.search(r"\b(benefit|benefits|advantages)\b", q):
+        return "benefits"
+    if re.search(r"\b(exclusion|exclusions|not covered|limitations)\b", q):
+        return "exclusions"
+    if re.search(r"\b(cover|coverage|covered|included|what does it cover)\b", q):
+        return "coverage"
+    if re.search(r"\b(eligible|eligibility|qualify|requirements|who is it for)\b", q):
+        return "eligibility"
+    if re.search(r"\b(premium|price|pricing|cost|how much)\b", q):
+        return "pricing"
+    if re.search(r"\b(quote|quotation)\b", q):
+        return "quote"
+    return "general"
+
+
+def _style_block(intent: str) -> str:
+    """Return intent-aware formatting rules and a small template.
+
+    We intentionally keep this as plain text (no markdown headings) to keep chat UX natural.
+    """
+    common = """
+Style rules (Meta-AI-like):
+- Keep it warm and conversational, like a helpful assistant in WhatsApp.
+- Use emojis naturally (not every line). Prefer 1–2 emojis per section.
+- Keep it short: aim for 3–10 lines.
+- If listing items, use emoji bullets like: ✅, ✨, 🧾, 🛡️, 🚫
+- Never say: "Based on the context provided".
+- Stay grounded in Available info. If unsure/missing, ask ONE short clarifying question.
+- Don’t invent prices, benefits, or exclusions that aren’t in Available info.
+""".strip()
+
+    templates: dict[str, str] = {
+        "greeting": """
+Output template:
+Hey! 👋 I’m MIA from Old Mutual Uganda.
+What can I help you with today — benefits, coverage, exclusions, eligibility, or getting a quote?
+""".strip(),
+        "benefits": """
+Output template:
+Sure! Here are the key benefits 👇
+✅ Benefit 1
+✅ Benefit 2
+✅ Benefit 3
+
+Want me to share coverage or exclusions next?
+""".strip(),
+        "coverage": """
+Output template:
+Here’s what’s typically covered 👇
+🛡️ Coverage item 1
+🛡️ Coverage item 2
+🛡️ Coverage item 3
+
+Want exclusions or eligibility next?
+""".strip(),
+        "exclusions": """
+Output template:
+Good question — common exclusions include 👇
+🚫 Exclusion 1
+🚫 Exclusion 2
+🚫 Exclusion 3
+
+Want me to also share what IS covered?
+""".strip(),
+        "eligibility": """
+Output template:
+Here’s who it’s usually for 👇
+🧾 Requirement / eligibility point 1
+🧾 Requirement / eligibility point 2
+🧾 Requirement / eligibility point 3
+
+Want benefits or exclusions next?
+""".strip(),
+        "pricing": """
+Output template:
+Pricing depends on a few things 👇
+💰 Factor 1
+💰 Factor 2
+💰 Factor 3
+
+If you tell me the product + a few details, I can guide you to a quote.
+""".strip(),
+        "quote": """
+Output template:
+Absolutely — I can help you get a quote ✅
+Which product are you quoting for (Travel Sure Plus, Personal Accident, Serenicare, Motor Private)?
+""".strip(),
+        "general": """
+Output template:
+Give a direct answer first (1–3 lines).
+Then add 3–5 emoji bullets if it helps clarity.
+End with ONE friendly follow-up question.
+""".strip(),
+    }
+
+    return f"{common}\n\n{templates.get(intent, templates['general'])}"
 
 
 def build_context(hits: List[Dict[str, Any]], *, max_chars: int = 10000) -> str:
@@ -59,33 +164,22 @@ def generate_with_gemini(
     genai.configure(api_key=key)
     context = build_context(hits)
 
-    # Ultra-natural prompt with examples
-    prompt = f"""You're chatting with a customer about Old Mutual Uganda. Answer naturally and helpfully.
+    intent = _intent_from_question(question)
+    style = _style_block(intent)
+
+    # Intent-aware conversational prompt (Meta-AI-like).
+    prompt = f"""You're MIA, a friendly Old Mutual Uganda assistant.
 
 Question: {question}
 
 Available info:
 {context}
 
-How to respond:
-❌ DON'T say: "That is a great question! Old Mutual Uganda offers..."
-❌ DON'T use: "Based on the context provided" or "Here is an overview"
-❌ DON'T create: Formal headers like "### Broad Service Categories" or
-   bullet lists with asterisks
-❌ DON'T add: Disclaimers like "*Please note: This summary is based only on...*"
+{style}
 
-✓ DO respond naturally like this example:
-"Old Mutual Uganda has several options for you. We offer savings plans like the Sure Deal,
-investment products including unit trusts, and various insurance solutions. We also provide
-loans - you can even use your Sure Deal policy as security if needed. What specifically
-are you interested in?"
-
-Or if you don't have enough info:
-"I can tell you about our Sure Deal savings plan and unit trusts, but I'd need to check on
-our full product range. Would you like details on any of these, or should I help you
-connect with someone who can give you the complete picture?"
-
-Keep it conversational, helpful, and human. Just answer the question naturally.
+Extra grounding rules:
+- Only use details that appear in Available info.
+- If Available info is empty/irrelevant, ask a single clarifying question.
 
 Your response:"""
 
