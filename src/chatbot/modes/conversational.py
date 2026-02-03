@@ -357,7 +357,8 @@ class ConversationalMode:
     def _generate_product_card(self, product: Dict) -> Dict:
         """Generate product card data"""
         return {
-            "product_id": product["product_id"],
+            "product_id": product.get("product_key") or product["product_id"],
+            "doc_id": product.get("doc_id") or product.get("product_id"),
             "name": product["name"],
             "category": product.get("category_name", ""),
             "description": product.get("description", ""),

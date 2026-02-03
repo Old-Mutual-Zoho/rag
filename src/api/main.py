@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from src.chatbot.dependencies import api_key_protection
@@ -567,15 +567,73 @@ async def api_send_message(
 
 
 # ---------- Product routes ----------
+def _public_product(matcher: ProductMatcher, item: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert internal product representation (doc_id-based) to a frontend-friendly shape.
+
+    - product_id: short stable key like "personal/insure/serenicare"
+    - doc_id: internal id like "website:product:personal/insure/serenicare" (kept for debugging/back-compat)
+    """
+    doc_id = item.get("doc_id") or item.get("product_id") or ""
+    public_id = (item.get("product_key") or matcher.get_public_id(doc_id) or doc_id) if doc_id else (item.get("product_key") or "")
+    return {
+        "product_id": public_id,
+        "doc_id": doc_id,
+        "slug": item.get("slug") or "",
+        "name": item.get("name") or "",
+        "category": item.get("category_name") or "",
+        "subcategory": item.get("sub_category_name") or "",
+        "url": item.get("url"),
+    }
+
+
+def _resolve_product_doc_id(matcher: ProductMatcher, product_id: str) -> str:
+    """
+    Accept either:
+    - full doc_id: "website:product:..."
+    - short product key: "category/subcategory/slug"
+    - unique slug: "serenicare" (only when globally unique)
+    """
+    doc_id = matcher.resolve_doc_id(product_id)
+    if not doc_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Product not found. Use full doc_id (website:product:...) or short key (category/subcategory/slug).",
+        )
+    return doc_id
+
+
 @api_router.get("/products/list", tags=["Products"])
-async def api_list_products(category: Optional[str] = None, matcher: ProductMatcher = Depends(lambda: product_matcher)):
-    """List all products. Optional ?category=personal."""
+async def api_list_products(
+    category: Optional[str] = Query(None, description="Filter by category (e.g. personal, business)."),
+    subcategory: Optional[str] = Query(None, description="Filter by subcategory (e.g. save-and-invest). Use with category."),
+    search: Optional[str] = Query(None, description="Search in product name and category; returns matching products."),
+    matcher: ProductMatcher = Depends(lambda: product_matcher),
+):
+    """
+    List products with optional filters.
+
+    - **category**: list products where category equals this (e.g. `?category=personal`).
+    - **subcategory**: narrow by subcategory (e.g. `?category=personal&subcategory=save-and-invest`).
+    - **search**: text search in name/category (e.g. `?search=savings`).
+    """
     try:
-        if category:
+        if search and search.strip():
+            # Text search: use match_products, return product dicts
+            scored = matcher.match_products(search.strip(), top_k=50)
+            products = [p[2] for p in scored]
+        elif category:
             products = matcher.get_products_by_category(category)
+            if subcategory and subcategory.strip():
+                sub_lower = subcategory.strip().lower()
+                products = [p for p in products if (p.get("sub_category_name") or "").lower() == sub_lower]
         else:
             products = list(matcher.product_index.values())
-        return {"products": products, "count": len(products)}
+            if subcategory and subcategory.strip():
+                sub_lower = subcategory.strip().lower()
+                products = [p for p in products if (p.get("sub_category_name") or "").lower() == sub_lower]
+        public = [_public_product(matcher, p) for p in products]
+        return {"products": public, "count": len(public)}
     except Exception as e:
         logger.error(f"Error listing products: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -600,15 +658,20 @@ async def api_get_product_by_id(
 ):
     """
     Get product info from chunks: overview, benefits, general. When include_details=true, also returns faq.
-    product_id is the full doc_id (e.g. website:product:personal/save-and-invest/sure-deal-savings-plan).
+    product_id can be either:
+    - full doc_id (e.g. website:product:personal/save-and-invest/sure-deal-savings-plan), or
+    - short key (e.g. personal/save-and-invest/sure-deal-savings-plan)
     """
     try:
-        product = matcher.get_product_by_id(product_id)
+        doc_id = _resolve_product_doc_id(matcher, product_id)
+        product = matcher.get_product_by_id(doc_id)
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
-        sections = _load_product_sections(product_id)
+        sections = _load_product_sections(doc_id)
+        public_id = product.get("product_key") or matcher.get_public_id(doc_id) or doc_id
         out = {
-            "product_id": product_id,
+            "product_id": public_id,
+            "doc_id": doc_id,
             "name": product.get("name"),
             "category": product.get("category_name"),
             "subcategory": product.get("sub_category_name"),
@@ -634,12 +697,15 @@ async def api_get_product_details_by_id(
 ):
     """Same as by-id with include_details=true: overview, benefits, general, and faq."""
     try:
-        product = matcher.get_product_by_id(product_id)
+        doc_id = _resolve_product_doc_id(matcher, product_id)
+        product = matcher.get_product_by_id(doc_id)
         if not product:
             raise HTTPException(status_code=404, detail="Product not found")
-        sections = _load_product_sections(product_id)
+        sections = _load_product_sections(doc_id)
+        public_id = product.get("product_key") or matcher.get_public_id(doc_id) or doc_id
         return {
-            "product_id": product_id,
+            "product_id": public_id,
+            "doc_id": doc_id,
             "name": product.get("name"),
             "category": product.get("category_name"),
             "subcategory": product.get("sub_category_name"),
@@ -674,7 +740,7 @@ async def api_list_product_subcategories_or_products(category: str, matcher: Pro
         products: List[Dict[str, Any]] = []
         if not subs:
             products = [
-                {"product_id": p["product_id"], "name": p["name"], "url": p.get("url")}
+                _public_product(matcher, p)
                 for p in matcher.product_index.values()
                 if p.get("category_name", "").lower() == cat_lower
             ]
@@ -690,12 +756,12 @@ async def api_list_product_subcategories_or_products(category: str, matcher: Pro
 
 @api_router.get("/products/{category}/{subcategory}", tags=["Products"])
 async def api_list_products_in_subcategory(category: str, subcategory: str, matcher: ProductMatcher = Depends(lambda: product_matcher)):
-    """List products in a category/subcategory. product_id in each item is the full doc_id for by-id endpoints."""
+    """List products in a category/subcategory. product_id is a short key (category/subcategory/slug)."""
     try:
         cat_lower = category.lower()
         sub_lower = subcategory.lower()
         items = [
-            {"product_id": p["product_id"], "name": p["name"], "url": p.get("url")}
+            _public_product(matcher, p)
             for p in matcher.product_index.values()
             if p.get("category_name", "").lower() == cat_lower and p.get("sub_category_name", "").lower() == sub_lower
         ]
@@ -722,8 +788,10 @@ async def api_get_product_structured(
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     sections = _load_product_sections(doc_id)
+    public_id = product.get("product_key") or f"{category}/{subcategory}/{product_slug}"
     return {
-        "product_id": doc_id,
+        "product_id": public_id,
+        "doc_id": doc_id,
         "name": product.get("name"),
         "category": product.get("category_name"),
         "subcategory": product.get("sub_category_name"),
@@ -737,14 +805,35 @@ async def api_get_product_structured(
 
 
 @api_router.get("/products/card/{product_id:path}", tags=["Products"])
-async def api_get_product_card(product_id: str, include_details: bool = False):
+async def api_get_product_card(
+    product_id: str,
+    include_details: bool = False,
+    matcher: ProductMatcher = Depends(lambda: product_matcher),
+):
     """Product card (RAG summary). Use by-id when product_id contains slashes."""
     try:
-        card = product_card_gen.generate_card(product_id, False)
+        doc_id = _resolve_product_doc_id(matcher, product_id)
+        card = product_card_gen.generate_card(doc_id, False)
         if not card:
             raise HTTPException(status_code=404, detail="Product not found")
         if include_details:
-            card["details"] = await product_card_gen.get_product_details(product_id)
+            card["details"] = await product_card_gen.get_product_details(doc_id)
+
+        # Present friendly ids outward
+        public_id = matcher.get_public_id(doc_id) or doc_id
+        card["product_id"] = public_id
+        card["doc_id"] = doc_id
+        if isinstance(card.get("details"), dict):
+            card["details"]["product_id"] = public_id
+            card["details"]["doc_id"] = doc_id
+            # Rewrite related_products ids if present
+            rel = card["details"].get("related_products")
+            if isinstance(rel, list):
+                for r in rel:
+                    if isinstance(r, dict) and r.get("product_id"):
+                        r_doc = r["product_id"]
+                        r["product_id"] = matcher.get_public_id(r_doc) or r_doc
+                        r["doc_id"] = r_doc
         return card
     except HTTPException:
         raise
@@ -754,16 +843,127 @@ async def api_get_product_card(product_id: str, include_details: bool = False):
 
 
 @api_router.get("/products/card/{product_id:path}/details", tags=["Products"])
-async def api_get_product_card_details(product_id: str):
+async def api_get_product_card_details(
+    product_id: str,
+    matcher: ProductMatcher = Depends(lambda: product_matcher),
+):
     """Detailed product information (Learn More) via RAG/LLM."""
     try:
-        return await product_card_gen.get_product_details(product_id)
+        doc_id = _resolve_product_doc_id(matcher, product_id)
+        details = await product_card_gen.get_product_details(doc_id)
+        public_id = matcher.get_public_id(doc_id) or doc_id
+        if isinstance(details, dict):
+            details["product_id"] = public_id
+            details["doc_id"] = doc_id
+            rel = details.get("related_products")
+            if isinstance(rel, list):
+                for r in rel:
+                    if isinstance(r, dict) and r.get("product_id"):
+                        r_doc = r["product_id"]
+                        r["product_id"] = matcher.get_public_id(r_doc) or r_doc
+                        r["doc_id"] = r_doc
+        return details
     except Exception as e:
         logger.error(f"Error getting product details: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
-app.include_router(api_router, prefix="/api")
+@api_router.post("/quotes/generate", response_model=QuoteResponse, tags=["Quotes"])
+async def generate_quote(request: QuoteRequest, db: PostgresDB = Depends(get_db)):
+    """Generate an insurance quote from underwriting data."""
+    try:
+        # This would use the quotation flow
+        from src.chatbot.flows.quotation import QuotationFlow
+
+        quotation_flow = QuotationFlow(product_matcher, db)
+        quote_data = await quotation_flow._calculate_premium(request.underwriting_data)
+
+        # Save quote to database
+        quote = db.create_quote(
+            user_id=request.user_id,
+            product_id=request.product_id,
+            premium_amount=quote_data["monthly_premium"],
+            sum_assured=quote_data["sum_assured"],
+            underwriting_data=request.underwriting_data,
+            pricing_breakdown=quote_data["breakdown"],
+        )
+
+        return QuoteResponse(
+            quote_id=str(quote.id),
+            product_name=quote_data["product_name"],
+            monthly_premium=quote_data["monthly_premium"],
+            sum_assured=quote_data["sum_assured"],
+            valid_until=quote.valid_until.isoformat(),
+        )
+
+    except Exception as e:
+        logger.error(f"Error generating quote: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/quotes/{quote_id}", tags=["Quotes"])
+async def get_quote(quote_id: str, db: PostgresDB = Depends(get_db)):
+    """Get a quote by ID."""
+    try:
+        quote = db.get_quote(quote_id)
+
+        if not quote:
+            raise HTTPException(status_code=404, detail="Quote not found")
+
+        return {
+            "quote_id": str(quote.id),
+            "product_id": quote.product_id,
+            "product_name": quote.product_name,
+            "premium_amount": float(quote.premium_amount),
+            "sum_assured": float(quote.sum_assured) if quote.sum_assured else None,
+            "status": quote.status,
+            "valid_until": quote.valid_until.isoformat() if quote.valid_until else None,
+            "generated_at": quote.generated_at.isoformat(),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting quote: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/sessions/{session_id}/history", tags=["Sessions"])
+async def get_conversation_history(session_id: str, limit: int = 50):
+    """Get conversation history for a session."""
+    try:
+        session = state_manager.get_session(session_id)
+
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        messages = postgres_db.get_conversation_history(session["conversation_id"], limit=limit)
+
+        msg_list = [{"role": msg.role, "content": msg.content, "timestamp": msg.timestamp.isoformat()} for msg in reversed(messages)]
+        return {"session_id": session_id, "messages": msg_list}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting history: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.delete("/sessions/{session_id}", tags=["Sessions"])
+async def end_session(session_id: str):
+    """End a chatbot session."""
+    try:
+        state_manager.end_session(session_id)
+        return {"message": "Session ended successfully"}
+
+    except Exception as e:
+        logger.error(f"Error ending session: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# API versioning: primary prefix is /api/v1; /api is kept for backward compatibility
+app.include_router(api_router, prefix="/api/v1")
+app.include_router(api_router, prefix="/api")  # backward compat: same routes under /api
 
 
 def _strip_heading_from_text(text: str, heading: str) -> str:
@@ -819,116 +1019,6 @@ def _load_product_sections(product_id: str) -> Dict[str, List[Dict[str, str]]]:
             entry = {"heading": heading, "text": text}
             sections.setdefault(ctype, []).append(entry)
     return sections
-
-
-@app.post(
-    "/quotes/generate",
-    response_model=QuoteResponse,
-    tags=["Quotes"],
-    dependencies=[Depends(api_key_protection)],
-)
-async def generate_quote(request: QuoteRequest, db: PostgresDB = Depends(get_db)):
-    """Generate an insurance quote from underwriting data."""
-    try:
-        # This would use the quotation flow
-        from src.chatbot.flows.quotation import QuotationFlow
-
-        quotation_flow = QuotationFlow(product_matcher, db)
-        quote_data = await quotation_flow._calculate_premium(request.underwriting_data)
-
-        # Save quote to database
-        quote = db.create_quote(
-            user_id=request.user_id,
-            product_id=request.product_id,
-            premium_amount=quote_data["monthly_premium"],
-            sum_assured=quote_data["sum_assured"],
-            underwriting_data=request.underwriting_data,
-            pricing_breakdown=quote_data["breakdown"],
-        )
-
-        return QuoteResponse(
-            quote_id=str(quote.id),
-            product_name=quote_data["product_name"],
-            monthly_premium=quote_data["monthly_premium"],
-            sum_assured=quote_data["sum_assured"],
-            valid_until=quote.valid_until.isoformat(),
-        )
-
-    except Exception as e:
-        logger.error(f"Error generating quote: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get(
-    "/quotes/{quote_id}",
-    tags=["Quotes"],
-    dependencies=[Depends(api_key_protection)],
-)
-async def get_quote(quote_id: str, db: PostgresDB = Depends(get_db)):
-    """Get a quote by ID."""
-    try:
-        quote = db.get_quote(quote_id)
-
-        if not quote:
-            raise HTTPException(status_code=404, detail="Quote not found")
-
-        return {
-            "quote_id": str(quote.id),
-            "product_id": quote.product_id,
-            "product_name": quote.product_name,
-            "premium_amount": float(quote.premium_amount),
-            "sum_assured": float(quote.sum_assured) if quote.sum_assured else None,
-            "status": quote.status,
-            "valid_until": quote.valid_until.isoformat() if quote.valid_until else None,
-            "generated_at": quote.generated_at.isoformat(),
-        }
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting quote: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get(
-    "/sessions/{session_id}/history",
-    tags=["Sessions"],
-    dependencies=[Depends(api_key_protection)],
-)
-async def get_conversation_history(session_id: str, limit: int = 50):
-    """Get conversation history for a session."""
-    try:
-        session = state_manager.get_session(session_id)
-
-        if not session:
-            raise HTTPException(status_code=404, detail="Session not found")
-
-        messages = postgres_db.get_conversation_history(session["conversation_id"], limit=limit)
-
-        msg_list = [{"role": msg.role, "content": msg.content, "timestamp": msg.timestamp.isoformat()} for msg in reversed(messages)]
-        return {"session_id": session_id, "messages": msg_list}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting history: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.delete(
-    "/sessions/{session_id}",
-    tags=["Sessions"],
-    dependencies=[Depends(api_key_protection)],
-)
-async def end_session(session_id: str):
-    """End a chatbot session."""
-    try:
-        state_manager.end_session(session_id)
-        return {"message": "Session ended successfully"}
-
-    except Exception as e:
-        logger.error(f"Error ending session: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ============================================================================
