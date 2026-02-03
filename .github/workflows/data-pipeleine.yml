@@ -22,8 +22,8 @@ jobs:
     
     - name: Run pipeline
       env:
-        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-        PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+        OPENAI_API_KEY: ${{secrets.OPENAI_API_KEY}}
+        PINECONE_API_KEY: ${{secrets.PINECONE_API_KEY}}
       run: |
         python scripts/run_scraping.py --scrapers website
         python scripts/process_data.py

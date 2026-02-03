@@ -13,7 +13,7 @@ Frontend (Axios + Vite) setup
 1) Add a frontend env var (Vite exposes VITE_* at build time)
    In your frontend .env (or .env.production):
      VITE_API_KEY=your_api_key_here
-     VITE_API_BASE_URL=https://your-domain/api
+     VITE_API_BASE_URL=https://your-domain/api/v1
 
 2) Configure Axios to include the header on every request
    Example:

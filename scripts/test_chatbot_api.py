@@ -48,9 +48,9 @@ def main() -> int:
     print(f"User ID:  {user_id}\n")
 
     # 1) Create session
-    print("1) POST /api/session")
+    print("1) POST /api/v1/session")
     try:
-        out = post_json(f"{base}/api/session", {"user_id": user_id})
+        out = post_json(f"{base}/api/v1/session", {"user_id": user_id})
         session_id = out["session_id"]
         print(f"   session_id: {session_id}\n")
     except requests.RequestException as e:
@@ -65,19 +65,19 @@ def main() -> int:
         return 1
 
     # 2) Get session state (optional)
-    print("2) GET /api/session/{session_id}")
+    print("2) GET /api/v1/session/{session_id}")
     try:
-        state = get_json(f"{base}/api/session/{session_id}")
+        state = get_json(f"{base}/api/v1/session/{session_id}")
         print(f"   mode={state.get('mode')} flow={state.get('current_flow')} step={state.get('current_step')}\n")
     except requests.RequestException as e:
         print(f"   FAIL: {e}\n")
         return 1
 
     # 3) Start Personal Accident flow
-    print("3) POST /api/chat/start-guided (personal_accident)")
+    print("3) POST /api/v1/chat/start-guided (personal_accident)")
     try:
         out = post_json(
-            f"{base}/api/chat/start-guided",
+            f"{base}/api/v1/chat/start-guided",
             {"flow_name": "personal_accident", "user_id": user_id, "session_id": session_id},
         )
         resp = out.get("response", {})
@@ -93,7 +93,7 @@ def main() -> int:
         return 1
 
     # 4) Submit personal details (step 0 -> 1)
-    print("4) POST /api/chat/message (form_data: personal_details)")
+    print("4) POST /api/v1/chat/message (form_data: personal_details)")
     personal = {
         "surname": "Test",
         "first_name": "Jane",
@@ -111,7 +111,7 @@ def main() -> int:
     }
     try:
         out = post_json(
-            f"{base}/api/chat/message",
+            f"{base}/api/v1/chat/message",
             {"user_id": user_id, "session_id": session_id, "message": "", "form_data": personal},
         )
         payload = out.get("response", {})
@@ -129,7 +129,7 @@ def main() -> int:
         return 1
 
     # 5) Submit next of kin (step 1 -> 2)
-    print("5) POST /api/chat/message (form_data: next_of_kin)")
+    print("5) POST /api/v1/chat/message (form_data: next_of_kin)")
     nok = {
         "nok_first_name": "John",
         "nok_last_name": "Test",
@@ -141,7 +141,7 @@ def main() -> int:
     }
     try:
         out = post_json(
-            f"{base}/api/chat/message",
+            f"{base}/api/v1/chat/message",
             {"user_id": user_id, "session_id": session_id, "message": "", "form_data": nok},
         )
         payload = out.get("response", {})
@@ -159,9 +159,9 @@ def main() -> int:
         return 1
 
     # 6) Get session state again
-    print("6) GET /api/session/{session_id} (after 2 steps)")
+    print("6) GET /api/v1/session/{session_id} (after 2 steps)")
     try:
-        state = get_json(f"{base}/api/session/{session_id}")
+        state = get_json(f"{base}/api/v1/session/{session_id}")
         print(f"   mode={state.get('mode')} flow={state.get('current_flow')} step={state.get('current_step')} step_name={state.get('step_name')}")
         print(f"   collected_keys={state.get('collected_keys')}\n")
     except requests.RequestException as e:

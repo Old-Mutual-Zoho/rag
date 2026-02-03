@@ -91,6 +91,15 @@ class ConversationalMode:
         self.product_matcher = product_matcher
         self.state_manager = state_manager
 
+        # Lazily import response processor to avoid circular imports at module load time
+        try:
+            from src.response_processor import ResponseProcessor
+
+            self.response_processor = ResponseProcessor(state_manager=self.state_manager)
+        except Exception:
+            # Fallback: no response processor available
+            self.response_processor = None
+
     async def process(self, message: str, session_id: str, user_id: str, form_data: Optional[Dict[str, Any]] = None) -> Dict:
         """Process message in conversational mode"""
 
@@ -183,6 +192,22 @@ class ConversationalMode:
         # Generate response
         response = await self.rag.generate(query=message, context_docs=retrieval_results, conversation_history=self._get_recent_history(session_id))
 
+        # Use ResponseProcessor if available to normalize and handle follow-ups/fallbacks
+        session = self.state_manager.get_session(session_id) or {}
+        if self.response_processor:
+            processed = self.response_processor.process_response(
+                raw_response=response.get("answer"),
+                user_input=message,
+                confidence=response.get("confidence", 0.0),
+                conversation_state=session,
+                session_id=session_id,
+            )
+            answer_text = processed.get("message")
+            follow_up_flag = processed.get("follow_up", False)
+        else:
+            answer_text = response["answer"]
+            follow_up_flag = False
+
         # Determine product topic for follow-up guidance.
         digital_flow = _detect_digital_flow(message)
         top_product = products[0][2] if products else None
@@ -222,6 +247,14 @@ class ConversationalMode:
             ctx = dict(session.get("context") or {})
             ctx["pending_section_offer"] = "show_benefits"
             self.state_manager.update_session(session_id, {"context": ctx})
+
+        # If response processor already queued a follow-up, prefer that text over our generic follow_up_prompt
+        if follow_up_flag:
+            # If the processor flagged a follow-up, we assume it already queued it.
+            # Keep the model-provided message as-is.
+            pass
+        elif follow_up_prompt:
+            answer_text = f"{answer_text}\n\n{follow_up_prompt}" if answer_text else follow_up_prompt
 
         # Determine if we should suggest guided mode
         suggested_action = None
@@ -267,10 +300,6 @@ class ConversationalMode:
             }
 
         # No product-guide buttons by default; users can reply in free text.
-
-        answer_text = response["answer"]
-        if follow_up_prompt:
-            answer_text = f"{answer_text}\n\n{follow_up_prompt}"
 
         return {
             "mode": "conversational",
@@ -323,6 +352,22 @@ class ConversationalMode:
         hits = await self.rag.retrieve(query=query, filters=filters)
         gen = await self.rag.generate(query=query, context_docs=hits, conversation_history=self._get_recent_history(session_id))
 
+        # Process generation through ResponseProcessor if available so follow-ups/fallbacks are handled consistently
+        session = self.state_manager.get_session(session_id) or {}
+        if self.response_processor:
+            processed = self.response_processor.process_response(
+                raw_response=gen.get("answer"),
+                user_input=query,
+                confidence=gen.get("confidence", 0.0),
+                conversation_state=session,
+                session_id=session_id,
+            )
+            gen_text = processed.get("message")
+            follow_up_flag = processed.get("follow_up", False)
+        else:
+            gen_text = gen.get("answer")
+            follow_up_flag = False
+
         next_action, next_label = _next_section_offer(action, is_digital=bool(digital_flow))
 
         follow_up = "Do you have any more questions?"
@@ -338,9 +383,13 @@ class ConversationalMode:
             ctx["pending_section_offer"] = next_action
             self.state_manager.update_session(session_id, {"context": ctx})
 
+        response_text = gen_text
+        if not follow_up_flag and follow_up:
+            response_text = f"{gen_text}\n\n{follow_up}" if gen_text else follow_up
+
         return {
             "mode": "conversational",
-            "response": f"{gen['answer']}\n\n{follow_up}",
+            "response": response_text,
         }
 
     def _detect_intent(self, message: str) -> str:
@@ -385,7 +434,8 @@ class ConversationalMode:
     def _generate_product_card(self, product: Dict) -> Dict:
         """Generate product card data"""
         return {
-            "product_id": product["product_id"],
+            "product_id": product.get("product_key") or product["product_id"],
+            "doc_id": product.get("doc_id") or product.get("product_id"),
             "name": product["name"],
             "category": product.get("category_name", ""),
             "description": product.get("description", ""),

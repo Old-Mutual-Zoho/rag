@@ -45,9 +45,9 @@ def main() -> int:
     print(f"User ID:  {user_id}\n")
 
     # 1) Create session
-    print("1) POST /api/session")
+    print("1) POST /api/v1/session")
     try:
-        out = post_json(f"{base}/api/session", {"user_id": user_id})
+        out = post_json(f"{base}/api/v1/session", {"user_id": user_id})
         session_id = out["session_id"]
         print(f"   session_id: {session_id}\n")
     except requests.RequestException as e:
@@ -57,10 +57,10 @@ def main() -> int:
         return 1
 
     # 2) Start Travel Insurance flow via message trigger
-    print("2) POST /api/chat/message (trigger: 'I want travel insurance')")
+    print("2) POST /api/v1/chat/message (trigger: 'I want travel insurance')")
     try:
         out = post_json(
-            f"{base}/api/chat/message",
+            f"{base}/api/v1/chat/message",
             {"user_id": user_id, "session_id": session_id, "message": "I want travel insurance"},
         )
         resp = out.get("response", {})
@@ -77,10 +77,10 @@ def main() -> int:
         return 1
 
     # 3) Submit product selection
-    print("3) POST /api/chat/message (form_data: product_selection)")
+    print("3) POST /api/v1/chat/message (form_data: product_selection)")
     try:
         out = post_json(
-            f"{base}/api/chat/message",
+            f"{base}/api/v1/chat/message",
             {"user_id": user_id, "session_id": session_id, "message": "", "form_data": {"product_id": "worldwide_essential"}},
         )
         payload = out.get("response", {})
@@ -92,10 +92,10 @@ def main() -> int:
         return 1
 
     # 4) Submit about you
-    print("4) POST /api/chat/message (form_data: about_you)")
+    print("4) POST /api/v1/chat/message (form_data: about_you)")
     try:
         out = post_json(
-            f"{base}/api/chat/message",
+            f"{base}/api/v1/chat/message",
             {
                 "user_id": user_id,
                 "session_id": session_id,
@@ -117,18 +117,18 @@ def main() -> int:
         return 1
 
     # 5) Get session state
-    print("5) GET /api/session/{session_id}")
+    print("5) GET /api/v1/session/{session_id}")
     try:
-        state = get_json(f"{base}/api/session/{session_id}")
+        state = get_json(f"{base}/api/v1/session/{session_id}")
         print(f"   flow={state.get('current_flow')} step={state.get('current_step')} step_name={state.get('step_name')}\n")
     except requests.RequestException as e:
         print(f"   FAIL: {e}\n")
         return 1
 
     # 6) Get travel insurance schema
-    print("6) GET /api/flows/travel_insurance/schema")
+    print("6) GET /api/v1/flows/travel_insurance/schema")
     try:
-        schema = get_json(f"{base}/api/flows/travel_insurance/schema")
+        schema = get_json(f"{base}/api/v1/flows/travel_insurance/schema")
         steps = schema.get("steps", [])
         print(f"   flow_id={schema.get('flow_id')} steps={len(steps)}\n")
     except requests.RequestException as e:

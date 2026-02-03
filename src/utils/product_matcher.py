@@ -28,6 +28,8 @@ class ProductMatcher:
 
         self.index_path = index_path
         self.product_index: Dict[str, Dict[str, Any]] = {}
+        # Aliases that the API can accept (slug, category/subcategory/slug, etc.) → doc_id
+        self._alias_to_doc_id: Dict[str, str] = {}
 
         if self.index_path.exists():
             with open(self.index_path, "r", encoding="utf-8") as f:
@@ -35,21 +37,75 @@ class ProductMatcher:
         else:
             raw = {}
 
+        def _product_key_from_doc_id(doc_id: str) -> str:
+            """
+            Extract "category/subcategory/slug" from:
+              website:product:category/subcategory/slug
+            """
+            prefix = "website:product:"
+            if not doc_id or not doc_id.startswith(prefix):
+                return ""
+            return doc_id[len(prefix) :].strip("/")
+
+        def _slug_from_product_key(product_key: str) -> str:
+            if not product_key:
+                return ""
+            return product_key.strip("/").split("/")[-1]
+
+        # Pre-count slugs so we only alias unique slugs globally.
+        slug_counts: Dict[str, int] = {}
+        for _doc_id, _doc in raw.items():
+            if _doc.get("type") != "product":
+                continue
+            product_key = (
+                (_doc.get("product_key") or "").strip()
+                or (_doc.get("product_id") or "").strip()  # not present in website_index.json, but may exist in other indexes
+                or _product_key_from_doc_id(_doc_id)
+            )
+            slug = _slug_from_product_key(product_key)
+            if slug:
+                slug_counts[slug] = slug_counts.get(slug, 0) + 1
+
         # Normalise into a friendlier structure
         for doc_id, doc in raw.items():
             if doc.get("type") != "product":
                 continue
 
-            product_id = doc_id  # use full doc_id as stable ID
+            # Use full doc_id as stable internal ID for RAG filtering and lookups
+            product_id = doc_id
+            category = (doc.get("category") or "").strip()
+            subcategory = (doc.get("subcategory") or "").strip()
+            # website_index.json does not include a slug field; derive from doc_id when missing.
+            product_key = _product_key_from_doc_id(doc_id)
+            slug = _slug_from_product_key(product_key)
+
+            # If the doc_id wasn't in the expected format, fall back to category/subcategory + any available slug.
+            if not product_key:
+                slug_fallback = (doc.get("product_id") or "").strip()
+                if category and subcategory and slug_fallback:
+                    product_key = f"{category}/{subcategory}/{slug_fallback}"
+                    slug = slug_fallback
             item = {
                 "product_id": product_id,
                 "doc_id": doc_id,
+                # Friendly identifiers for frontend usage
+                "slug": slug,
+                "product_key": product_key,  # e.g. "personal/insure/serenicare"
                 "name": doc.get("title") or "",
                 "category_name": doc.get("category") or "",
                 "sub_category_name": doc.get("subcategory") or "",
                 "url": doc.get("url"),
             }
             self.product_index[product_id] = item
+
+            # Register aliases for resolving friendly IDs to doc_id
+            self._alias_to_doc_id[doc_id] = doc_id
+            if product_key:
+                self._alias_to_doc_id[product_key] = doc_id
+                self._alias_to_doc_id[f"website:product:{product_key}"] = doc_id
+            if slug and slug_counts.get(slug, 0) == 1:
+                # Only alias a bare slug when it's globally unique to avoid collisions.
+                self._alias_to_doc_id[slug] = doc_id
 
     # ------------------------------------------------------------------ #
     # Public API used by chatbot / FastAPI
@@ -92,6 +148,27 @@ class ProductMatcher:
 
     def get_product_by_id(self, product_id: str) -> Optional[Dict[str, Any]]:
         return self.product_index.get(product_id)
+
+    def resolve_doc_id(self, product_id_or_key: str) -> Optional[str]:
+        """
+        Resolve a frontend-friendly product identifier to the internal doc_id.
+
+        Accepted inputs:
+        - Full doc_id: "website:product:personal/insure/serenicare"
+        - Product key: "personal/insure/serenicare"
+        - Bare slug (only if unique): "serenicare"
+        """
+        key = (product_id_or_key or "").strip()
+        if not key:
+            return None
+        return self._alias_to_doc_id.get(key)
+
+    def get_public_id(self, doc_id: str) -> Optional[str]:
+        """Return the short product_key for a given internal doc_id."""
+        item = self.product_index.get(doc_id)
+        if not item:
+            return None
+        return item.get("product_key") or None
 
     def get_products_by_category(self, category: str) -> List[Dict[str, Any]]:
         cat = (category or "").lower()
