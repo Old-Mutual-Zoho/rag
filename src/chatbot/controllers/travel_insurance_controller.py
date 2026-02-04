@@ -1,6 +1,19 @@
 """Controller for Travel Insurance flow persistence."""
 from typing import Any, Dict, Optional
 import logging
+import re
+
+from src.chatbot.validation import (
+    raise_if_errors,
+    require_str,
+    optional_str,
+    parse_int,
+    validate_date_iso,
+    validate_email,
+    validate_in,
+    validate_phone_ug,
+    parse_iso_date,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +44,11 @@ class TravelInsuranceController:
 
     # Step helpers
     def update_product_selection(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        product_id = payload.get("product_id") or payload.get("coverage_product") or payload.get("selected_product")
+        errors: Dict[str, str] = {}
+        product_id = _safe_str(payload.get("product_id") or payload.get("coverage_product") or payload.get("selected_product"))
+        if not product_id:
+            errors["product_id"] = "Product selection is required"
+        raise_if_errors(errors)
         selected = None
         if product_id:
             # Lookup from available products is up to caller; store minimal
@@ -41,33 +58,64 @@ class TravelInsuranceController:
         return self._to_dict(app) if app else None
 
     def update_about_you(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        errors: Dict[str, str] = {}
+        first_name = require_str(payload, "first_name", errors, label="First Name")
+        middle_name = optional_str(payload, "middle_name")
+        surname = require_str(payload, "surname", errors, label="Surname")
+        phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
+        email = validate_email(payload.get("email", ""), errors, field="email")
+        raise_if_errors(errors)
         updates = {"about_you": {
-            "first_name": payload.get("first_name", ""),
-            "middle_name": payload.get("middle_name", ""),
-            "surname": payload.get("surname", ""),
-            "phone_number": payload.get("phone_number", ""),
-            "email": payload.get("email", ""),
+            "first_name": first_name,
+            "middle_name": middle_name,
+            "surname": surname,
+            "phone_number": phone_number,
+            "email": email,
         }}
         app = self.db.update_travel_application(app_id, updates)
         return self._to_dict(app) if app else None
 
     def update_travel_party_and_trip(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        errors: Dict[str, str] = {}
+        travel_party = validate_in(payload.get("travel_party", ""), {"myself_only", "myself_and_someone_else", "group"}, errors, "travel_party", required=True)
+        num_18_69 = parse_int(payload, "num_travellers_18_69", errors, min_value=0, required=True)
+        num_0_17 = parse_int(payload, "num_travellers_0_17", errors, min_value=0)
+        num_70_75 = parse_int(payload, "num_travellers_70_75", errors, min_value=0)
+        num_76_80 = parse_int(payload, "num_travellers_76_80", errors, min_value=0)
+        num_81_85 = parse_int(payload, "num_travellers_81_85", errors, min_value=0)
+        departure_country = require_str(payload, "departure_country", errors, label="Departure Country")
+        destination_country = require_str(payload, "destination_country", errors, label="Destination Country")
+        departure_date = validate_date_iso(payload.get("departure_date", ""), errors, "departure_date", required=True)
+        return_date = validate_date_iso(payload.get("return_date", ""), errors, "return_date", required=True)
+        # Date ordering check (only if both parsed)
+        d1 = parse_iso_date(departure_date)
+        d2 = parse_iso_date(return_date)
+        if d1 and d2 and d2 < d1:
+            errors["return_date"] = "Return date cannot be before departure date"
+        raise_if_errors(errors)
         updates = {"travel_party_and_trip": {
-            "travel_party": payload.get("travel_party", ""),
-            "num_travellers_18_69": int(payload.get("num_travellers_18_69") or 0),
-            "num_travellers_0_17": int(payload.get("num_travellers_0_17") or 0),
-            "num_travellers_70_75": int(payload.get("num_travellers_70_75") or 0),
-            "num_travellers_76_80": int(payload.get("num_travellers_76_80") or 0),
-            "num_travellers_81_85": int(payload.get("num_travellers_81_85") or 0),
-            "departure_country": payload.get("departure_country", ""),
-            "destination_country": payload.get("destination_country", ""),
-            "departure_date": payload.get("departure_date", ""),
-            "return_date": payload.get("return_date", ""),
+            "travel_party": travel_party,
+            "num_travellers_18_69": num_18_69,
+            "num_travellers_0_17": num_0_17,
+            "num_travellers_70_75": num_70_75,
+            "num_travellers_76_80": num_76_80,
+            "num_travellers_81_85": num_81_85,
+            "departure_country": departure_country,
+            "destination_country": destination_country,
+            "departure_date": departure_date,
+            "return_date": return_date,
         }}
         app = self.db.update_travel_application(app_id, updates)
         return self._to_dict(app) if app else None
 
     def update_data_consent(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        errors: Dict[str, str] = {}
+        terms = payload.get("terms_and_conditions_agreed")
+        agreed = terms in (True, "yes", "true", "1")
+        if not agreed:
+            errors["terms_and_conditions_agreed"] = "You must agree to the Terms and Conditions"
+        # Other consents are captured as booleans, but not enforced as strictly required here.
+        raise_if_errors(errors)
         updates = {"data_consent": {
             "terms_and_conditions_agreed": payload.get("terms_and_conditions_agreed") in (True, "yes", "true", "1"),
             "consent_data_outside_uganda": payload.get("consent_data_outside_uganda") in (True, "yes", "true", "1"),
@@ -78,21 +126,35 @@ class TravelInsuranceController:
         return self._to_dict(app) if app else None
 
     def update_traveller_details(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        errors: Dict[str, str] = {}
+        first_name = require_str(payload, "first_name", errors, label="First Name")
+        middle_name = optional_str(payload, "middle_name")
+        surname = require_str(payload, "surname", errors, label="Surname")
+        nationality_type = require_str(payload, "nationality_type", errors, label="Nationality")
+        passport_number = require_str(payload, "passport_number", errors, label="Passport Number")
+        dob = validate_date_iso(payload.get("date_of_birth", ""), errors, "date_of_birth", required=True, not_future=True)
+        occupation = optional_str(payload, "occupation")
+        phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
+        email = validate_email(payload.get("email", ""), errors, field="email")
+        postal_address = optional_str(payload, "postal_address")
+        town_city = optional_str(payload, "town_city")
+        office_number = optional_str(payload, "office_number")
+        raise_if_errors(errors)
         app = self.db.get_travel_application(app_id)
         travellers = app.travellers if app and app.travellers else []
         primary = {
-            "first_name": payload.get("first_name", ""),
-            "middle_name": payload.get("middle_name", ""),
-            "surname": payload.get("surname", ""),
-            "nationality_type": payload.get("nationality_type", ""),
-            "passport_number": payload.get("passport_number", ""),
-            "date_of_birth": payload.get("date_of_birth", ""),
-            "occupation": payload.get("occupation", ""),
-            "phone_number": payload.get("phone_number", ""),
-            "office_number": payload.get("office_number", ""),
-            "email": payload.get("email", ""),
-            "postal_address": payload.get("postal_address", ""),
-            "town_city": payload.get("town_city", ""),
+            "first_name": first_name,
+            "middle_name": middle_name,
+            "surname": surname,
+            "nationality_type": nationality_type,
+            "passport_number": passport_number,
+            "date_of_birth": dob,
+            "occupation": occupation,
+            "phone_number": phone_number,
+            "office_number": office_number,
+            "email": email,
+            "postal_address": postal_address,
+            "town_city": town_city,
         }
         if not travellers:
             travellers.append(primary)
@@ -103,31 +165,71 @@ class TravelInsuranceController:
         return self._to_dict(app) if app else None
 
     def update_emergency_contact(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        errors: Dict[str, str] = {}
+        surname = require_str(payload, "ec_surname", errors, label="Surname")
+        relationship = require_str(payload, "ec_relationship", errors, label="Relationship")
+        phone_number = validate_phone_ug(payload.get("ec_phone_number", ""), errors, field="ec_phone_number")
+        email_raw = require_str(payload, "ec_email", errors, label="Email")
+        validate_email(email_raw, errors, field="ec_email")
+        home_address = optional_str(payload, "ec_home_address")
+        raise_if_errors(errors)
         updates = {"emergency_contact": {
-            "surname": payload.get("ec_surname", ""),
-            "relationship": payload.get("ec_relationship", ""),
-            "phone_number": payload.get("ec_phone_number", ""),
-            "email": payload.get("ec_email", ""),
-            "home_address": payload.get("ec_home_address", ""),
+            "surname": surname,
+            "relationship": relationship,
+            "phone_number": phone_number,
+            "email": email_raw,
+            "home_address": home_address,
         }}
         app = self.db.update_travel_application(app_id, updates)
         return self._to_dict(app) if app else None
 
     def update_bank_details(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        errors: Dict[str, str] = {}
+        bank_name_raw = optional_str(payload, "bank_name")
+        account_holder_name_raw = optional_str(payload, "account_holder_name")
+        account_number_raw = optional_str(payload, "account_number")
+        bank_branch_raw = optional_str(payload, "bank_branch")
+        account_currency_raw = optional_str(payload, "account_currency")
+
+        any_provided = any([bank_name_raw, account_holder_name_raw, account_number_raw, bank_branch_raw, account_currency_raw])
+        if any_provided:
+            bank_name = require_str(payload, "bank_name", errors, label="Bank Name")
+            account_holder_name = require_str(payload, "account_holder_name", errors, label="Account Holder Name")
+            account_number = require_str(payload, "account_number", errors, label="Account Number")
+            bank_branch = require_str(payload, "bank_branch", errors, label="Bank Branch")
+            account_currency = require_str(payload, "account_currency", errors, label="Account Currency")
+            if account_number and not re.sub(r"\s", "", account_number).isdigit():
+                errors["account_number"] = "Account number must be numeric"
+            raise_if_errors(errors)
+        else:
+            bank_name = bank_name_raw
+            account_holder_name = account_holder_name_raw
+            account_number = account_number_raw
+            bank_branch = bank_branch_raw
+            account_currency = account_currency_raw
         updates = {"bank_details": {
-            "bank_name": payload.get("bank_name", ""),
-            "account_holder_name": payload.get("account_holder_name", ""),
-            "account_number": payload.get("account_number", ""),
-            "bank_branch": payload.get("bank_branch", ""),
-            "account_currency": payload.get("account_currency", ""),
+            "bank_name": bank_name,
+            "account_holder_name": account_holder_name,
+            "account_number": account_number,
+            "bank_branch": bank_branch,
+            "account_currency": account_currency,
         }}
         app = self.db.update_travel_application(app_id, updates)
         return self._to_dict(app) if app else None
 
     def update_passport_upload(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        errors: Dict[str, str] = {}
+        file_ref = _safe_str(payload.get("passport_file_ref"))
+        if not file_ref:
+            errors["passport_file_ref"] = "Passport file is required"
+        raise_if_errors(errors)
         updates = {"passport_upload": {"file_ref": payload.get("passport_file_ref", "")}}
         app = self.db.update_travel_application(app_id, updates)
         return self._to_dict(app) if app else None
+
+
+def _safe_str(v: Any) -> str:
+    return ("" if v is None else str(v)).strip()
 
     def finalize_and_create_quote(self, app_id: str, user_id: str, pricing: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         app = self.db.get_travel_application(app_id)

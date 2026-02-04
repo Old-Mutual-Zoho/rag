@@ -9,6 +9,20 @@ import json
 from decimal import Decimal
 from typing import Any, Dict
 
+from datetime import date
+
+from src.chatbot.validation import (
+    raise_if_errors,
+    require_str,
+    optional_str,
+    parse_int,
+    parse_decimal_str,
+    validate_date_iso,
+    validate_email,
+    validate_in,
+    validate_phone_ug,
+)
+
 MOTOR_PRIVATE_EXCESS_PARAMETERS = [
     {
         "id": "excess_1",
@@ -142,17 +156,30 @@ class MotorPrivateFlow:
 
     async def _step_vehicle_details(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            errors: Dict[str, str] = {}
+            vehicle_make = require_str(payload, "vehicle_make", errors, label="Vehicle make")
+            year = parse_int(payload, "year_of_manufacture", errors, min_value=1900, max_value=date.today().year, required=True)
+            cover_start_date = validate_date_iso(payload.get("cover_start_date", ""), errors, "cover_start_date", required=True)
+            rare_model = validate_in(payload.get("rare_model", ""), {"Yes", "No"}, errors, "rare_model", required=True)
+            valuation_done = validate_in(payload.get("valuation_done", ""), {"Yes", "No"}, errors, "valuation_done", required=True)
+            vehicle_value = parse_decimal_str(payload, "vehicle_value", errors, min_value=1, required=True)
+            first_time_registration = validate_in(payload.get("first_time_registration", ""), {"Yes", "No"}, errors, "first_time_registration", required=True)
+            car_alarm_installed = validate_in(payload.get("car_alarm_installed", ""), {"Yes", "No"}, errors, "car_alarm_installed", required=True)
+            tracking_system_installed = validate_in(payload.get("tracking_system_installed", ""), {"Yes", "No"}, errors, "tracking_system_installed", required=True)
+            car_usage_region = validate_in(payload.get("car_usage_region", ""), {"Within Uganda", "Within East Africa", "Outside East Africa"}, errors, "car_usage_region", required=True)
+            raise_if_errors(errors)
+
             data["vehicle_details"] = {
-                "vehicle_make": payload.get("vehicle_make", ""),
-                "year_of_manufacture": payload.get("year_of_manufacture", ""),
-                "cover_start_date": payload.get("cover_start_date", ""),
-                "rare_model": payload.get("rare_model", ""),
-                "valuation_done": payload.get("valuation_done", ""),
-                "vehicle_value": payload.get("vehicle_value", ""),
-                "first_time_registration": payload.get("first_time_registration", ""),
-                "car_alarm_installed": payload.get("car_alarm_installed", ""),
-                "tracking_system_installed": payload.get("tracking_system_installed", ""),
-                "car_usage_region": payload.get("car_usage_region", ""),
+                "vehicle_make": vehicle_make,
+                "year_of_manufacture": str(year),
+                "cover_start_date": cover_start_date,
+                "rare_model": rare_model,
+                "valuation_done": valuation_done,
+                "vehicle_value": vehicle_value,
+                "first_time_registration": first_time_registration,
+                "car_alarm_installed": car_alarm_installed,
+                "tracking_system_installed": tracking_system_installed,
+                "car_usage_region": car_usage_region,
             }
         return {
             "response": {
@@ -250,12 +277,19 @@ class MotorPrivateFlow:
 
     async def _step_about_you(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            errors: Dict[str, str] = {}
+            first_name = require_str(payload, "first_name", errors, label="First Name")
+            middle_name = optional_str(payload, "middle_name")
+            surname = require_str(payload, "surname", errors, label="Surname")
+            phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
+            email = validate_email(payload.get("email", ""), errors, field="email")
+            raise_if_errors(errors)
             data["about_you"] = {
-                "first_name": payload.get("first_name", ""),
-                "middle_name": payload.get("middle_name", ""),
-                "surname": payload.get("surname", ""),
-                "phone_number": payload.get("phone_number", ""),
-                "email": payload.get("email", ""),
+                "first_name": first_name,
+                "middle_name": middle_name,
+                "surname": surname,
+                "phone_number": phone_number,
+                "email": email,
             }
         return {
             "response": {

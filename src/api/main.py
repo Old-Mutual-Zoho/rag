@@ -23,6 +23,7 @@ from src.chatbot.modes.guided import GuidedMode
 from src.chatbot.product_cards import ProductCardGenerator
 from src.chatbot.router import ChatRouter
 from src.chatbot.state_manager import StateManager
+from src.chatbot.validation import FormValidationError
 from src.rag.generate import generate_with_gemini
 from src.rag.query import retrieve_context
 from src.utils.product_matcher import ProductMatcher
@@ -576,6 +577,15 @@ async def api_send_message(
     """
     try:
         return await _handle_chat_message(request, router, db)
+    except FormValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "validation_error",
+                "message": e.message,
+                "field_errors": e.field_errors,
+            },
+        )
     except Exception as e:
         logger.error(f"Error processing message: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -631,6 +641,15 @@ async def websocket_chat(
 
         try:
             resp = await _handle_chat_message(msg, chat_router, postgres_db)
+        except FormValidationError as e:
+            await websocket.send_json(
+                {
+                    "error": "validation_error",
+                    "message": e.message,
+                    "field_errors": e.field_errors,
+                }
+            )
+            continue
         except Exception as e:
             logger.error("Error processing websocket message: %s", e, exc_info=True)
             await websocket.send_json(

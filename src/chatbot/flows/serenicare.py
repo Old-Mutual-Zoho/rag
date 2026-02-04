@@ -9,6 +9,15 @@ import json
 from decimal import Decimal
 from typing import Any, Dict
 
+from src.chatbot.validation import (
+    raise_if_errors,
+    require_str,
+    optional_str,
+    validate_date_iso,
+    validate_email,
+    validate_phone_ug,
+)
+
 SERENICARE_OPTIONAL_BENEFITS = [
     {
         "id": "outpatient",
@@ -242,6 +251,10 @@ class SerenicareFlow:
 
     async def _step_cover_personalization(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            if not self.controller:
+                errors: Dict[str, str] = {}
+                validate_date_iso(payload.get("date_of_birth", ""), errors, "date_of_birth", required=True, not_future=True)
+                raise_if_errors(errors)
             data["cover_personalization"] = {
                 "date_of_birth": payload.get("date_of_birth", ""),
                 "include_spouse": payload.get("include_spouse", False),
@@ -328,10 +341,14 @@ class SerenicareFlow:
     async def _step_plan_selection(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
             plan_id = payload.get("plan_option") or payload.get("_raw", "").strip()
+            if not plan_id:
+                raise_if_errors({"plan_option": "Plan selection is required"})
             if plan_id:
                 plan = next((p for p in SERENICARE_PLANS if p["id"] == plan_id), None)
                 if plan:
                     data["plan_option"] = plan
+                else:
+                    raise_if_errors({"plan_option": "Please select a valid plan"})
                     app_id = data.get("application_id")
                     if self.controller and app_id:
                         self.controller.update_plan_selection(app_id, payload)
@@ -355,6 +372,13 @@ class SerenicareFlow:
 
     async def _step_about_you(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            if not self.controller:
+                errors: Dict[str, str] = {}
+                require_str(payload, "first_name", errors, label="First Name")
+                require_str(payload, "surname", errors, label="Surname")
+                validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
+                validate_email(payload.get("email", ""), errors, field="email")
+                raise_if_errors(errors)
             data["about_you"] = {
                 "first_name": payload.get("first_name", ""),
                 "middle_name": payload.get("middle_name", ""),

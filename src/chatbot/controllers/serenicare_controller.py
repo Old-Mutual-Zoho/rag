@@ -2,6 +2,15 @@
 from typing import Any, Dict, Optional
 import logging
 
+from src.chatbot.validation import (
+    raise_if_errors,
+    require_str,
+    optional_str,
+    validate_date_iso,
+    validate_email,
+    validate_phone_ug,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -31,8 +40,11 @@ class SerenicareController:
 
     # Step helpers
     def update_cover_personalization(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        errors: Dict[str, str] = {}
+        dob = validate_date_iso(payload.get("date_of_birth", ""), errors, "date_of_birth", required=True, not_future=True)
+        raise_if_errors(errors)
         updates = {"cover_personalization": {
-            "date_of_birth": payload.get("date_of_birth", ""),
+            "date_of_birth": dob,
             "include_spouse": payload.get("include_spouse", False),
             "include_children": payload.get("include_children", False),
             "add_another_main_member": payload.get("add_another_main_member", False),
@@ -54,18 +66,29 @@ class SerenicareController:
         return self._to_dict(app) if app else None
 
     def update_plan_selection(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        plan_id = payload.get("plan_option") or payload.get("_raw", "").strip()
+        errors: Dict[str, str] = {}
+        plan_id = (payload.get("plan_option") or payload.get("_raw") or "").strip()
+        if not plan_id:
+            errors["plan_option"] = "Plan selection is required"
+        raise_if_errors(errors)
         updates = {"plan_option": {"id": plan_id}}
         app = self.db.update_serenicare_application(app_id, updates)
         return self._to_dict(app) if app else None
 
     def update_about_you(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        errors: Dict[str, str] = {}
+        first_name = require_str(payload, "first_name", errors, label="First Name")
+        middle_name = optional_str(payload, "middle_name")
+        surname = require_str(payload, "surname", errors, label="Surname")
+        phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
+        email = validate_email(payload.get("email", ""), errors, field="email")
+        raise_if_errors(errors)
         updates = {"about_you": {
-            "first_name": payload.get("first_name", ""),
-            "middle_name": payload.get("middle_name", ""),
-            "surname": payload.get("surname", ""),
-            "phone_number": payload.get("phone_number", ""),
-            "email": payload.get("email", ""),
+            "first_name": first_name,
+            "middle_name": middle_name,
+            "surname": surname,
+            "phone_number": phone_number,
+            "email": email,
         }}
         app = self.db.update_serenicare_application(app_id, updates)
         return self._to_dict(app) if app else None

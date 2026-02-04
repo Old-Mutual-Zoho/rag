@@ -15,6 +15,19 @@ from decimal import Decimal
 from typing import Any, Dict
 from datetime import datetime
 
+from src.chatbot.validation import (
+    FormValidationError,
+    add_error,
+    parse_int,
+    parse_iso_date,
+    raise_if_errors,
+    require_str,
+    validate_date_iso,
+    validate_email,
+    validate_in,
+    validate_phone_ug,
+)
+
 
 # Travel insurance product cards (from product selection screen)
 TRAVEL_INSURANCE_PRODUCTS = [
@@ -124,15 +137,20 @@ class TravelInsuranceFlow:
 
     async def _step_product_selection(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            errors: Dict[str, str] = {}
             product_id = payload.get("product_id") or payload.get("coverage_product", "").strip()
             if product_id:
                 product = next((p for p in TRAVEL_INSURANCE_PRODUCTS if p["id"] == product_id), None)
-                if product:
+                if not product:
+                    add_error(errors, "product_id", "Invalid product selection")
+                else:
                     data["selected_product"] = product
                     # Persist
                     app_id = data.get("application_id")
                     if self.controller and app_id:
                         self.controller.update_product_selection(app_id, {"product_id": product_id})
+
+            raise_if_errors(errors)
 
         return {
             "response": {
@@ -154,6 +172,13 @@ class TravelInsuranceFlow:
 
     async def _step_about_you(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            errors: Dict[str, str] = {}
+            require_str(payload, "first_name", errors, label="First Name")
+            require_str(payload, "surname", errors, label="Surname")
+            validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
+            validate_email(payload.get("email", ""), errors, field="email")
+            raise_if_errors(errors)
+
             data["about_you"] = {
                 "first_name": payload.get("first_name", ""),
                 "middle_name": payload.get("middle_name", ""),
@@ -183,17 +208,45 @@ class TravelInsuranceFlow:
 
     async def _step_travel_party_and_trip(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            errors: Dict[str, str] = {}
+
+            travel_party = validate_in(
+                payload.get("travel_party", ""),
+                ("myself_only", "myself_and_someone_else", "group"),
+                errors,
+                "travel_party",
+                required=True,
+            )
+
+            n18_69 = parse_int(payload, "num_travellers_18_69", errors, min_value=0, required=True)
+            n0_17 = parse_int(payload, "num_travellers_0_17", errors, min_value=0, required=False)
+            n70_75 = parse_int(payload, "num_travellers_70_75", errors, min_value=0, required=False)
+            n76_80 = parse_int(payload, "num_travellers_76_80", errors, min_value=0, required=False)
+            n81_85 = parse_int(payload, "num_travellers_81_85", errors, min_value=0, required=False)
+
+            departure_country = require_str(payload, "departure_country", errors, label="Departure Country")
+            destination_country = require_str(payload, "destination_country", errors, label="Destination Country")
+            departure_date = validate_date_iso(payload.get("departure_date", ""), errors, "departure_date", required=True)
+            return_date = validate_date_iso(payload.get("return_date", ""), errors, "return_date", required=True)
+
+            dd = parse_iso_date(departure_date)
+            rd = parse_iso_date(return_date)
+            if dd and rd and rd < dd:
+                add_error(errors, "return_date", "Return date cannot be before departure date")
+
+            raise_if_errors(errors)
+
             data["travel_party_and_trip"] = {
-                "travel_party": payload.get("travel_party", ""),
-                "num_travellers_18_69": int(payload.get("num_travellers_18_69") or 0),
-                "num_travellers_0_17": int(payload.get("num_travellers_0_17") or 0),
-                "num_travellers_70_75": int(payload.get("num_travellers_70_75") or 0),
-                "num_travellers_76_80": int(payload.get("num_travellers_76_80") or 0),
-                "num_travellers_81_85": int(payload.get("num_travellers_81_85") or 0),
-                "departure_country": payload.get("departure_country", ""),
-                "destination_country": payload.get("destination_country", ""),
-                "departure_date": payload.get("departure_date", ""),
-                "return_date": payload.get("return_date", ""),
+                "travel_party": travel_party,
+                "num_travellers_18_69": n18_69,
+                "num_travellers_0_17": n0_17,
+                "num_travellers_70_75": n70_75,
+                "num_travellers_76_80": n76_80,
+                "num_travellers_81_85": n81_85,
+                "departure_country": departure_country,
+                "destination_country": destination_country,
+                "departure_date": departure_date,
+                "return_date": return_date,
             }
             app_id = data.get("application_id")
             if self.controller and app_id:
@@ -233,12 +286,19 @@ class TravelInsuranceFlow:
 
     async def _step_data_consent(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            errors: Dict[str, str] = {}
             data["data_consent"] = {
                 "terms_and_conditions_agreed": payload.get("terms_and_conditions_agreed") in (True, "yes", "true", "1"),
                 "consent_data_outside_uganda": payload.get("consent_data_outside_uganda") in (True, "yes", "true", "1"),
                 "consent_child_data": payload.get("consent_child_data") in (True, "yes", "true", "1"),
                 "consent_marketing": payload.get("consent_marketing") in (True, "yes", "true", "1"),
             }
+
+            if not data["data_consent"].get("terms_and_conditions_agreed"):
+                add_error(errors, "terms_and_conditions_agreed", "You must accept the Terms and Conditions")
+
+            raise_if_errors(errors)
+
             app_id = data.get("application_id")
             if self.controller and app_id:
                 self.controller.update_data_consent(app_id, payload)
@@ -277,6 +337,21 @@ class TravelInsuranceFlow:
 
     async def _step_traveller_details(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            errors: Dict[str, str] = {}
+
+            require_str(payload, "first_name", errors, label="First Name")
+            require_str(payload, "surname", errors, label="Surname")
+            validate_in(payload.get("nationality_type", ""), ("ugandan", "non_ugandan"), errors, "nationality_type", required=True)
+            require_str(payload, "passport_number", errors, label="Passport Number")
+            validate_date_iso(payload.get("date_of_birth", ""), errors, "date_of_birth", required=True, not_future=True)
+            require_str(payload, "occupation", errors, label="Profession/Occupation")
+            validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
+            validate_email(payload.get("email", ""), errors, field="email")
+            require_str(payload, "postal_address", errors, label="Postal/Home Address")
+            require_str(payload, "town_city", errors, label="Town/City")
+
+            raise_if_errors(errors)
+
             travellers = data.get("travellers") or []
             primary = {
                 "first_name": payload.get("first_name", ""),
@@ -333,6 +408,13 @@ class TravelInsuranceFlow:
 
     async def _step_emergency_contact(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            errors: Dict[str, str] = {}
+            require_str(payload, "ec_surname", errors, label="Surname")
+            validate_in(payload.get("ec_relationship", ""), EMERGENCY_CONTACT_RELATIONSHIPS, errors, "ec_relationship", required=True)
+            validate_phone_ug(payload.get("ec_phone_number", ""), errors, field="ec_phone_number")
+            validate_email(payload.get("ec_email", ""), errors, field="ec_email")
+            raise_if_errors(errors)
+
             data["emergency_contact"] = {
                 "surname": payload.get("ec_surname", ""),
                 "relationship": payload.get("ec_relationship", ""),
@@ -368,6 +450,30 @@ class TravelInsuranceFlow:
 
     async def _step_bank_details_optional(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            errors: Dict[str, str] = {}
+
+            bank_name = str(payload.get("bank_name") or "").strip()
+            account_holder_name = str(payload.get("account_holder_name") or "").strip()
+            account_number = str(payload.get("account_number") or "").strip()
+            bank_branch = str(payload.get("bank_branch") or "").strip()
+            account_currency = str(payload.get("account_currency") or "").strip()
+
+            any_bank_field = any([bank_name, account_holder_name, account_number, bank_branch, account_currency])
+            if any_bank_field:
+                if not bank_name:
+                    add_error(errors, "bank_name", "Bank Name is required")
+                if not account_holder_name:
+                    add_error(errors, "account_holder_name", "Bank Account Holder Name is required")
+                if not account_number:
+                    add_error(errors, "account_number", "Bank Account Number is required")
+                elif not account_number.isdigit():
+                    add_error(errors, "account_number", "Bank Account Number must be numeric")
+                if not bank_branch:
+                    add_error(errors, "bank_branch", "Bank Branch is required")
+                validate_in(account_currency, ("UGX", "USD", "EUR"), errors, "account_currency", required=True)
+
+            raise_if_errors(errors)
+
             data["bank_details"] = {
                 "bank_name": payload.get("bank_name", ""),
                 "account_holder_name": payload.get("account_holder_name", ""),
@@ -398,8 +504,11 @@ class TravelInsuranceFlow:
 
     async def _step_upload_passport(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            errors: Dict[str, str] = {}
+            file_ref = require_str(payload, "passport_file_ref", errors, label="Passport file")
+            raise_if_errors(errors)
             data["passport_upload"] = {
-                "file_ref": payload.get("passport_file_ref", ""),
+                "file_ref": file_ref,
                 "uploaded_at": datetime.utcnow().isoformat(),
             }
             app_id = data.get("application_id")

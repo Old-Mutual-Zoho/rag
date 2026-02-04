@@ -11,6 +11,17 @@ from typing import Any, Dict
 
 from datetime import datetime
 
+from src.chatbot.validation import (
+    raise_if_errors,
+    require_str,
+    optional_str,
+    validate_date_iso,
+    validate_email,
+    validate_in,
+    validate_nin_ug,
+    validate_phone_ug,
+)
+
 
 # Risky activities for the checkbox step (per product requirements)
 PERSONAL_ACCIDENT_RISKY_ACTIVITIES = [
@@ -115,20 +126,36 @@ class PersonalAccidentFlow:
 
     async def _step_personal_details(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            errors: Dict[str, str] = {}
+            surname = require_str(payload, "surname", errors, label="Surname")
+            first_name = require_str(payload, "first_name", errors, label="First Name")
+            middle_name = optional_str(payload, "middle_name")
+            date_of_birth = validate_date_iso(payload.get("date_of_birth", ""), errors, "date_of_birth", required=True, not_future=True)
+            email = validate_email(payload.get("email", ""), errors, field="email")
+            mobile_number = validate_phone_ug(payload.get("mobile_number", ""), errors, field="mobile_number")
+            national_id_number = validate_nin_ug(payload.get("national_id_number", ""), errors, field="national_id_number")
+            nationality = require_str(payload, "nationality", errors, label="Nationality")
+            tax_identification_number = optional_str(payload, "tax_identification_number")
+            occupation = require_str(payload, "occupation", errors, label="Occupation")
+            gender = validate_in(payload.get("gender", ""), {"Male", "Female", "Other"}, errors, "gender", required=True)
+            country_of_residence = require_str(payload, "country_of_residence", errors, label="Country of Residence")
+            physical_address = require_str(payload, "physical_address", errors, label="Physical Address")
+            raise_if_errors(errors)
+
             data["personal_details"] = {
-                "surname": payload.get("surname", ""),
-                "first_name": payload.get("first_name", ""),
-                "middle_name": payload.get("middle_name", ""),
-                "date_of_birth": payload.get("date_of_birth", ""),
-                "email": payload.get("email", ""),
-                "mobile_number": payload.get("mobile_number", ""),
-                "national_id_number": payload.get("national_id_number", ""),
-                "nationality": payload.get("nationality", ""),
-                "tax_identification_number": payload.get("tax_identification_number", ""),
-                "occupation": payload.get("occupation", ""),
-                "gender": payload.get("gender", ""),
-                "country_of_residence": payload.get("country_of_residence", ""),
-                "physical_address": payload.get("physical_address", ""),
+                "surname": surname,
+                "first_name": first_name,
+                "middle_name": middle_name,
+                "date_of_birth": date_of_birth,
+                "email": email,
+                "mobile_number": mobile_number,
+                "national_id_number": national_id_number,
+                "nationality": nationality,
+                "tax_identification_number": tax_identification_number,
+                "occupation": occupation,
+                "gender": gender,
+                "country_of_residence": country_of_residence,
+                "physical_address": physical_address,
             }
 
         return {
@@ -157,14 +184,26 @@ class PersonalAccidentFlow:
 
     async def _step_next_of_kin(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            errors: Dict[str, str] = {}
+            first_name = require_str(payload, "nok_first_name", errors, label="First Name")
+            last_name = require_str(payload, "nok_last_name", errors, label="Last Name")
+            middle_name = optional_str(payload, "nok_middle_name")
+            phone_number = validate_phone_ug(payload.get("nok_phone_number", ""), errors, field="nok_phone_number")
+            relationship = require_str(payload, "nok_relationship", errors, label="Relationship")
+            address = require_str(payload, "nok_address", errors, label="Address")
+            id_number = optional_str(payload, "nok_id_number")
+            if id_number:
+                validate_nin_ug(id_number, errors, field="nok_id_number")
+            raise_if_errors(errors)
+
             data["next_of_kin"] = {
-                "first_name": payload.get("nok_first_name", ""),
-                "last_name": payload.get("nok_last_name", ""),
-                "middle_name": payload.get("nok_middle_name", ""),
-                "phone_number": payload.get("nok_phone_number", ""),
-                "relationship": payload.get("nok_relationship", ""),
-                "address": payload.get("nok_address", ""),
-                "id_number": payload.get("nok_id_number", ""),
+                "first_name": first_name,
+                "last_name": last_name,
+                "middle_name": middle_name,
+                "phone_number": phone_number,
+                "relationship": relationship,
+                "address": address,
+                "id_number": id_number,
             }
 
         return {
@@ -264,6 +303,8 @@ class PersonalAccidentFlow:
                 plan = next((p for p in PERSONAL_ACCIDENT_COVERAGE_PLANS if p["id"] == plan_id), None)
                 if plan:
                     data["coverage_plan"] = plan
+                else:
+                    raise_if_errors({"coverage_plan": "Please select a valid coverage plan"})
 
         return {
             "response": {
@@ -284,8 +325,11 @@ class PersonalAccidentFlow:
 
     async def _step_upload_national_id(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
+            file_ref = payload.get("file_ref") or payload.get("national_id_file_ref", "")
+            if not str(file_ref or "").strip():
+                raise_if_errors({"national_id_file_ref": "National ID file is required"})
             data["national_id_upload"] = {
-                "file_ref": payload.get("file_ref") or payload.get("national_id_file_ref", ""),
+                "file_ref": file_ref,
                 "uploaded_at": datetime.utcnow().isoformat(),
             }
 
