@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 from decimal import Decimal
 from typing import Any, Dict
-
 from datetime import datetime
 
 
@@ -518,6 +517,7 @@ class TravelInsuranceFlow:
             "collected_data": data,
             "data": {"quote_id": str(data["quote_id"])},
         }
+
     def _calculate_travel_premium(self, data: Dict) -> Dict:
         """
         Calculate travel insurance premium.
