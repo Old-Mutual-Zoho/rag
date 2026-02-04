@@ -68,3 +68,72 @@ class Quote(Base):
     status: Mapped[str] = mapped_column(String(32), default="pending")
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.utcnow() + timedelta(days=30))
+
+
+# ======================================================================
+# NEW: Application persistence tables (PA, Travel, Serenicare)
+# ======================================================================
+
+class PersonalAccidentApplication(Base):
+    __tablename__ = "personal_accident_applications"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+
+    status: Mapped[str] = mapped_column(String(32), default="in_progress", nullable=False)
+
+    personal_details: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    next_of_kin: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    previous_pa_policy: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    physical_disability: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    risky_activities: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    coverage_plan: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    national_id_upload: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    quote_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class TravelInsuranceApplication(Base):
+    __tablename__ = "travel_insurance_applications"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+
+    status: Mapped[str] = mapped_column(String(32), default="in_progress", nullable=False)
+
+    selected_product: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    about_you: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    travel_party_and_trip: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    data_consent: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    travellers: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # list[dict]
+    emergency_contact: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    bank_details: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    passport_upload: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    quote_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class SerenicareApplication(Base):
+    __tablename__ = "serenicare_applications"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+
+    status: Mapped[str] = mapped_column(String(32), default="in_progress", nullable=False)
+
+    cover_personalization: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    optional_benefits: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # list[str]
+    medical_conditions: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    plan_option: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    about_you: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    quote_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)

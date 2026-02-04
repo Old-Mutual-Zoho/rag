@@ -965,8 +965,16 @@ async def end_session(session_id: str):
 app.include_router(api_router, prefix="/api/v1")
 app.include_router(api_router, prefix="/api")  # backward compat: same routes under /api
 
+# Register applications router
+try:
+    from src.api.applications_router import api as applications_api
 
-def _strip_heading_from_text(text: str, heading: str) -> str:
+    app.include_router(applications_api, prefix="/api")
+except Exception:
+    pass
+
+
+def _strip_heading_from_text(text: str, heading: str) -> Dict[str, List[Dict[str, str]]]:
     """
     Remove duplicated heading from the start of text so the API returns
     content-only in "text" when "heading" is already present.

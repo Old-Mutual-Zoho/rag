@@ -7,13 +7,23 @@ from __future__ import annotations
 
 import re
 from contextlib import contextmanager
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.database.models import Base, Conversation, Message, Quote, User
+from src.database.models import (
+    Base,
+    Conversation,
+    Message,
+    Quote,
+    User,
+    PersonalAccidentApplication,
+    TravelInsuranceApplication,
+    SerenicareApplication,
+)
 
 
 def _normalize_connection_string(s: str) -> str:
@@ -52,6 +62,9 @@ class PostgresDB:
         finally:
             s.close()
 
+    # ------------------------------------------------------------------ #
+    # Users
+    # ------------------------------------------------------------------ #
     def get_or_create_user(self, phone_number: str) -> User:
         with self._session() as s:
             stmt = select(User).where(User.phone_number == phone_number)
@@ -74,6 +87,9 @@ class PostgresDB:
             stmt = select(User).where(User.id == user_id)
             return s.execute(stmt).scalar_one_or_none()
 
+    # ------------------------------------------------------------------ #
+    # Conversations & messages
+    # ------------------------------------------------------------------ #
     def create_conversation(self, user_id: str, mode: str) -> Conversation:
         with self._session() as s:
             c = Conversation(id=str(uuid4()), user_id=user_id, mode=mode)
@@ -104,9 +120,17 @@ class PostgresDB:
 
     def get_conversation_history(self, conversation_id: str, limit: int = 50) -> List[Message]:
         with self._session() as s:
-            stmt = select(Message).where(Message.conversation_id == conversation_id).order_by(Message.timestamp.desc()).limit(limit)
+            stmt = (
+                select(Message)
+                .where(Message.conversation_id == conversation_id)
+                .order_by(Message.timestamp.desc())
+                .limit(limit)
+            )
             return list(s.execute(stmt).scalars().all())
 
+    # ------------------------------------------------------------------ #
+    # Quotes
+    # ------------------------------------------------------------------ #
     def create_quote(
         self,
         *,
@@ -138,3 +162,188 @@ class PostgresDB:
         with self._session() as s:
             stmt = select(Quote).where(Quote.id == str(quote_id))
             return s.execute(stmt).scalar_one_or_none()
+
+    # ------------------------------------------------------------------ #
+    # Personal Accident applications
+    # ------------------------------------------------------------------ #
+    def create_pa_application(self, user_id: str, initial_data: Optional[Dict[str, Any]] = None) -> PersonalAccidentApplication:
+        data = initial_data or {}
+        with self._session() as s:
+            app = PersonalAccidentApplication(
+                id=str(uuid4()),
+                user_id=user_id,
+                status=data.get("status", "in_progress"),
+                personal_details=data.get("personal_details", {}),
+                next_of_kin=data.get("next_of_kin", {}),
+                previous_pa_policy=data.get("previous_pa_policy", {}),
+                physical_disability=data.get("physical_disability", {}),
+                risky_activities=data.get("risky_activities", {}),
+                coverage_plan=data.get("coverage_plan", {}),
+                national_id_upload=data.get("national_id_upload", {}),
+                quote_id=data.get("quote_id"),
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            s.add(app)
+            s.flush()
+            s.refresh(app)
+            return app
+
+    def get_pa_application(self, app_id: str) -> Optional[PersonalAccidentApplication]:
+        with self._session() as s:
+            stmt = select(PersonalAccidentApplication).where(PersonalAccidentApplication.id == str(app_id))
+            return s.execute(stmt).scalar_one_or_none()
+
+    def update_pa_application(self, app_id: str, updates: Dict[str, Any]) -> Optional[PersonalAccidentApplication]:
+        with self._session() as s:
+            stmt = select(PersonalAccidentApplication).where(PersonalAccidentApplication.id == str(app_id))
+            app = s.execute(stmt).scalar_one_or_none()
+            if not app:
+                return None
+            for k, v in (updates or {}).items():
+                if hasattr(app, k):
+                    setattr(app, k, v)
+            app.updated_at = datetime.utcnow()
+            s.add(app)
+            s.flush()
+            s.refresh(app)
+            return app
+
+    def delete_pa_application(self, app_id: str) -> bool:
+        with self._session() as s:
+            stmt = select(PersonalAccidentApplication).where(PersonalAccidentApplication.id == str(app_id))
+            app = s.execute(stmt).scalar_one_or_none()
+            if not app:
+                return False
+            s.delete(app)
+            return True
+
+    def list_pa_applications(self, user_id: Optional[str] = None) -> List[PersonalAccidentApplication]:
+        with self._session() as s:
+            stmt = select(PersonalAccidentApplication)
+            if user_id:
+                stmt = stmt.where(PersonalAccidentApplication.user_id == str(user_id))
+            return list(s.execute(stmt).scalars().all())
+
+    # ------------------------------------------------------------------ #
+    # Travel Insurance applications
+    # ------------------------------------------------------------------ #
+    def create_travel_application(self, user_id: str, initial_data: Optional[Dict[str, Any]] = None) -> TravelInsuranceApplication:
+        data = initial_data or {}
+        with self._session() as s:
+            app = TravelInsuranceApplication(
+                id=str(uuid4()),
+                user_id=user_id,
+                status=data.get("status", "in_progress"),
+                selected_product=data.get("selected_product", {}),
+                about_you=data.get("about_you", {}),
+                travel_party_and_trip=data.get("travel_party_and_trip", {}),
+                data_consent=data.get("data_consent", {}),
+                travellers=data.get("travellers", []),
+                emergency_contact=data.get("emergency_contact", {}),
+                bank_details=data.get("bank_details", {}),
+                passport_upload=data.get("passport_upload", {}),
+                quote_id=data.get("quote_id"),
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            s.add(app)
+            s.flush()
+            s.refresh(app)
+            return app
+
+    def get_travel_application(self, app_id: str) -> Optional[TravelInsuranceApplication]:
+        with self._session() as s:
+            stmt = select(TravelInsuranceApplication).where(TravelInsuranceApplication.id == str(app_id))
+            return s.execute(stmt).scalar_one_or_none()
+
+    def update_travel_application(self, app_id: str, updates: Dict[str, Any]) -> Optional[TravelInsuranceApplication]:
+        with self._session() as s:
+            stmt = select(TravelInsuranceApplication).where(TravelInsuranceApplication.id == str(app_id))
+            app = s.execute(stmt).scalar_one_or_none()
+            if not app:
+                return None
+            for k, v in (updates or {}).items():
+                if hasattr(app, k):
+                    setattr(app, k, v)
+            app.updated_at = datetime.utcnow()
+            s.add(app)
+            s.flush()
+            s.refresh(app)
+            return app
+
+    def delete_travel_application(self, app_id: str) -> bool:
+        with self._session() as s:
+            stmt = select(TravelInsuranceApplication).where(TravelInsuranceApplication.id == str(app_id))
+            app = s.execute(stmt).scalar_one_or_none()
+            if not app:
+                return False
+            s.delete(app)
+            return True
+
+    def list_travel_applications(self, user_id: Optional[str] = None) -> List[TravelInsuranceApplication]:
+        with self._session() as s:
+            stmt = select(TravelInsuranceApplication)
+            if user_id:
+                stmt = stmt.where(TravelInsuranceApplication.user_id == str(user_id))
+            return list(s.execute(stmt).scalars().all())
+
+    # ------------------------------------------------------------------ #
+    # Serenicare applications
+    # ------------------------------------------------------------------ #
+    def create_serenicare_application(self, user_id: str, initial_data: Optional[Dict[str, Any]] = None) -> SerenicareApplication:
+        data = initial_data or {}
+        with self._session() as s:
+            app = SerenicareApplication(
+                id=str(uuid4()),
+                user_id=user_id,
+                status=data.get("status", "in_progress"),
+                cover_personalization=data.get("cover_personalization", {}),
+                optional_benefits=data.get("optional_benefits", []),
+                medical_conditions=data.get("medical_conditions", {}),
+                plan_option=data.get("plan_option", {}),
+                about_you=data.get("about_you", {}),
+                quote_id=data.get("quote_id"),
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            s.add(app)
+            s.flush()
+            s.refresh(app)
+            return app
+
+    def get_serenicare_application(self, app_id: str) -> Optional[SerenicareApplication]:
+        with self._session() as s:
+            stmt = select(SerenicareApplication).where(SerenicareApplication.id == str(app_id))
+            return s.execute(stmt).scalar_one_or_none()
+
+    def update_serenicare_application(self, app_id: str, updates: Dict[str, Any]) -> Optional[SerenicareApplication]:
+        with self._session() as s:
+            stmt = select(SerenicareApplication).where(SerenicareApplication.id == str(app_id))
+            app = s.execute(stmt).scalar_one_or_none()
+            if not app:
+                return None
+            for k, v in (updates or {}).items():
+                if hasattr(app, k):
+                    setattr(app, k, v)
+            app.updated_at = datetime.utcnow()
+            s.add(app)
+            s.flush()
+            s.refresh(app)
+            return app
+
+    def delete_serenicare_application(self, app_id: str) -> bool:
+        with self._session() as s:
+            stmt = select(SerenicareApplication).where(SerenicareApplication.id == str(app_id))
+            app = s.execute(stmt).scalar_one_or_none()
+            if not app:
+                return False
+            s.delete(app)
+            return True
+
+    def list_serenicare_applications(self, user_id: Optional[str] = None) -> List[SerenicareApplication]:
+        with self._session() as s:
+            stmt = select(SerenicareApplication)
+            if user_id:
+                stmt = stmt.where(SerenicareApplication.user_id == str(user_id))
+            return list(s.execute(stmt).scalars().all())
