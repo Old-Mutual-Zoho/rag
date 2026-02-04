@@ -218,9 +218,14 @@ class GeminiEmbedder:
                 return v
             except Exception as e:
                 last_err = e
-                is_rate_limit = "429" in str(e) or "quota" in str(e).lower() or "ResourceExhausted" in type(e).__name__
-                if is_rate_limit and attempt < 3:
-                    wait = 50  # seconds; API often suggests ~45s
+                msg = str(e)
+                is_rate_limit = "429" in msg or "quota" in msg.lower() or "ResourceExhausted" in type(e).__name__
+                hard_quota = "You exceeded your current quota" in msg or "limit: 0" in msg
+                # For hard quota errors (plan/billing), don't keep the user waiting with long sleeps;
+                # surface the failure quickly so the API can return a clear error.
+                if is_rate_limit and not hard_quota and attempt < 3:
+                    # Short exponential backoff (max ~7 seconds total) instead of 50s-per-attempt.
+                    wait = 1 * (2**attempt)
                     time.sleep(wait)
                     continue
                 raise

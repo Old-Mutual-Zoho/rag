@@ -107,9 +107,9 @@ def retrieve_context(
     qvec = embedder.embed_query(search_query)
 
     store_class = type(store).__name__
-    if store_class == "PgVectorStore" and hasattr(store, "ensure_table"):
-        store.ensure_table(len(qvec))
     if store_class == "PgVectorStore":
+        # Table/collection creation is handled during ingest/startup; avoid
+        # running DDL on every query to keep latency low.
         hits = store.search(query_vector=qvec, limit=fetch_k, filters=filters)
     elif store_class == "QdrantVectorStore":
         kw: Dict[str, Any] = {"query_vector": qvec, "limit": fetch_k}

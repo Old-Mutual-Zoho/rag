@@ -45,20 +45,29 @@ class PgVectorStore:
     ) -> None:
         self.table_name = table_name
         self.connection_string = _normalize_connection_string(connection_string)
-        self._pool: List[Any] = []
+        # Single long-lived connection per process for RAG queries. This avoids the
+        # overhead of establishing a new TCP/TLS connection to Postgres for every
+        # search, while keeping the public API unchanged. If the connection is
+        # closed or broken, it will be lazily re-created on next use.
+        self._conn_obj: Optional[Any] = None
+        self._pool: List[Any] = []  # kept for backward-compatibility; not used
         self._pool_size = pool_size
 
     @contextmanager
     def _conn(self):
-        conn = psycopg2.connect(self.connection_string, cursor_factory=RealDictCursor)
+        # Lazily create (or re-create) a single connection and reuse it across
+        # calls. psycopg2 connections are not safe for concurrent use from
+        # multiple threads, but in the typical FastAPI + uvicorn async setup
+        # queries are executed sequentially in the same thread per process.
+        if self._conn_obj is None or getattr(self._conn_obj, "closed", 0):
+            self._conn_obj = psycopg2.connect(self.connection_string, cursor_factory=RealDictCursor)
+        conn = self._conn_obj
         try:
             yield conn
             conn.commit()
         except Exception:
             conn.rollback()
             raise
-        finally:
-            conn.close()
 
     def ensure_table(self, vector_size: int) -> None:
         """Create table and enable pgvector extension if missing."""

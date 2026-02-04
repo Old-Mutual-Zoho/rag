@@ -13,9 +13,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query
+from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from src.chatbot.dependencies import api_key_protection
 
 from src.chatbot.modes.conversational import ConversationalMode
@@ -87,6 +87,21 @@ class APIRAGAdapter:
 
     def __init__(self):
         self.cfg = rag_cfg
+        # For pgvector, ensure the vector table exists once at startup using the
+        # configured embedding dimensionality, instead of running DDL on every
+        # request inside the hot retrieval path.
+        try:
+            from src.rag.query import _vector_store_from_config as _vs_from_cfg  # type: ignore
+
+            store = _vs_from_cfg(self.cfg)
+            store_class = type(store).__name__
+            if store_class == "PgVectorStore" and hasattr(store, "ensure_table"):
+                # Use the configured output dimensionality when available; fall
+                # back to a sane default if not set.
+                dim = getattr(self.cfg.embeddings, "output_dimensionality", None) or 1536
+                store.ensure_table(int(dim))
+        except Exception as e:  # pragma: no cover - best effort safeguard
+            logger.warning("Failed to pre-initialize vector table: %s", e)
 
     async def retrieve(self, query: str, filters: Optional[Dict] = None, top_k: Optional[int] = None):
         k = self.cfg.retrieval.top_k if top_k is None else top_k
@@ -564,6 +579,69 @@ async def api_send_message(
     except Exception as e:
         logger.error(f"Error processing message: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.websocket("/ws/chat")
+async def websocket_chat(
+    websocket: WebSocket,
+):
+    """
+    WebSocket endpoint for chat conversations.
+
+    - Expects JSON payloads shaped like ChatMessage:
+      { "message": "...", "session_id": "...", "user_id": "...", "metadata": {...}, "form_data": {...} }
+    - Returns ChatResponse-shaped JSON for each incoming message.
+    - Uses the same ChatRouter/RAG pipeline as the HTTP /api/chat/message endpoint.
+    - Protected by the same API key mechanism using the X-API-KEY header.
+    """
+    from src.chatbot.dependencies import get_api_keys
+    import hmac
+
+    # Authenticate using the same API key as HTTP routes.
+    api_key = websocket.headers.get("x-api-key") or websocket.query_params.get("api_key")
+    valid_keys = get_api_keys()
+    candidate = (api_key or "").strip()
+    ok = bool(candidate) and any(hmac.compare_digest(candidate, k) for k in valid_keys)
+    if not ok:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    await websocket.accept()
+
+    while True:
+        try:
+            data = await websocket.receive_json()
+        except WebSocketDisconnect:
+            break
+        except Exception:
+            # Malformed frame; close with a generic error.
+            await websocket.close(code=status.WS_1003_UNSUPPORTED_DATA)
+            break
+
+        try:
+            msg = ChatMessage(**data)
+        except ValidationError as e:
+            await websocket.send_json(
+                {
+                    "error": "invalid_payload",
+                    "details": e.errors(),
+                }
+            )
+            continue
+
+        try:
+            resp = await _handle_chat_message(msg, chat_router, postgres_db)
+        except Exception as e:
+            logger.error("Error processing websocket message: %s", e, exc_info=True)
+            await websocket.send_json(
+                {
+                    "error": "server_error",
+                    "detail": "An error occurred while processing your message.",
+                }
+            )
+            continue
+
+        await websocket.send_json(resp.dict())
 
 
 # ---------- Product routes ----------

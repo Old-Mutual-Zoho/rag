@@ -195,7 +195,15 @@ Your response:"""
         first_err = str(e).strip()
         logger.warning("Gemini ResourceExhausted: %s", first_err)
 
-        time.sleep(5)
+        # If this is a hard quota / free-tier disabled error, don't keep the
+        # user waiting with retries; return a clear, fast failure message.
+        if "You exceeded your current quota" in first_err or ("limit: 0" in first_err and "free_tier" in first_err.lower()):
+            return (
+                "I'm currently over my usage limit and can't generate a response. "
+                "Please try again later while we increase capacity."
+            )
+
+        time.sleep(2)
         try:
             resp = m.generate_content(prompt)
             return (getattr(resp, "text", None) or "").strip()
