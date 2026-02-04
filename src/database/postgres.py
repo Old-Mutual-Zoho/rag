@@ -267,10 +267,24 @@ class PostgresDB:
             return True
         return False
 
-    def list_pa_applications(self, user_id: Optional[str] = None) -> List[PersonalAccidentApplication]:
+    def list_pa_applications(
+        self,
+        user_id: Optional[str] = None,
+        order_by: str = "created_at",
+        descending: bool = True,
+    ) -> List[PersonalAccidentApplication]:
         apps = list(self._pa_applications.values())
         if user_id:
             apps = [a for a in apps if a.user_id == user_id]
+        orderable = {
+            "id": lambda a: a.id,
+            "user_id": lambda a: a.user_id,
+            "status": lambda a: a.status,
+            "created_at": lambda a: a.created_at,
+            "updated_at": lambda a: a.updated_at,
+        }
+        key_fn = orderable.get(order_by) or orderable["created_at"]
+        apps.sort(key=key_fn, reverse=descending)
         return apps
 
     # ------------------------------------------------------------------ #
@@ -315,10 +329,24 @@ class PostgresDB:
             return True
         return False
 
-    def list_travel_applications(self, user_id: Optional[str] = None) -> List[TravelInsuranceApplication]:
+    def list_travel_applications(
+        self,
+        user_id: Optional[str] = None,
+        order_by: str = "created_at",
+        descending: bool = True,
+    ) -> List[TravelInsuranceApplication]:
         apps = list(self._travel_applications.values())
         if user_id:
             apps = [a for a in apps if a.user_id == user_id]
+        orderable = {
+            "id": lambda a: a.id,
+            "user_id": lambda a: a.user_id,
+            "status": lambda a: a.status,
+            "created_at": lambda a: a.created_at,
+            "updated_at": lambda a: a.updated_at,
+        }
+        key_fn = orderable.get(order_by) or orderable["created_at"]
+        apps.sort(key=key_fn, reverse=descending)
         return apps
 
     # ------------------------------------------------------------------ #
@@ -360,8 +388,22 @@ class PostgresDB:
             return True
         return False
 
-    def list_serenicare_applications(self, user_id: Optional[str] = None) -> List[SerenicareApplication]:
+    def list_serenicare_applications(
+        self,
+        user_id: Optional[str] = None,
+        order_by: str = "created_at",
+        descending: bool = True,
+    ) -> List[SerenicareApplication]:
         apps = list(self._serenicare_applications.values())
         if user_id:
             apps = [a for a in apps if a.user_id == user_id]
+        orderable = {
+            "id": lambda a: a.id,
+            "user_id": lambda a: a.user_id,
+            "status": lambda a: a.status,
+            "created_at": lambda a: a.created_at,
+            "updated_at": lambda a: a.updated_at,
+        }
+        key_fn = orderable.get(order_by) or orderable["created_at"]
+        apps.sort(key=key_fn, reverse=descending)
         return apps

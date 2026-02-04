@@ -17,8 +17,13 @@ class SerenicareController:
         app = self.db.get_serenicare_application(app_id)
         return self._to_dict(app) if app else None
 
-    def list_applications(self, user_id: Optional[str] = None):
-        apps = self.db.list_serenicare_applications(user_id=user_id)
+    def list_applications(
+        self,
+        user_id: Optional[str] = None,
+        order_by: str = "created_at",
+        descending: bool = True,
+    ):
+        apps = self.db.list_serenicare_applications(user_id=user_id, order_by=order_by, descending=descending)
         return [self._to_dict(a) for a in apps]
 
     def delete_application(self, app_id: str) -> bool:

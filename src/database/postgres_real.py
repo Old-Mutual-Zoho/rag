@@ -218,11 +218,25 @@ class PostgresDB:
             s.delete(app)
             return True
 
-    def list_pa_applications(self, user_id: Optional[str] = None) -> List[PersonalAccidentApplication]:
+    def list_pa_applications(
+        self,
+        user_id: Optional[str] = None,
+        order_by: str = "created_at",
+        descending: bool = True,
+    ) -> List[PersonalAccidentApplication]:
         with self._session() as s:
             stmt = select(PersonalAccidentApplication)
             if user_id:
                 stmt = stmt.where(PersonalAccidentApplication.user_id == str(user_id))
+            orderable = {
+                "id": PersonalAccidentApplication.id,
+                "user_id": PersonalAccidentApplication.user_id,
+                "status": PersonalAccidentApplication.status,
+                "created_at": PersonalAccidentApplication.created_at,
+                "updated_at": PersonalAccidentApplication.updated_at,
+            }
+            col = orderable.get(order_by) or PersonalAccidentApplication.created_at
+            stmt = stmt.order_by(col.desc() if descending else col.asc())
             return list(s.execute(stmt).scalars().all())
 
     # ------------------------------------------------------------------ #
@@ -281,11 +295,25 @@ class PostgresDB:
             s.delete(app)
             return True
 
-    def list_travel_applications(self, user_id: Optional[str] = None) -> List[TravelInsuranceApplication]:
+    def list_travel_applications(
+        self,
+        user_id: Optional[str] = None,
+        order_by: str = "created_at",
+        descending: bool = True,
+    ) -> List[TravelInsuranceApplication]:
         with self._session() as s:
             stmt = select(TravelInsuranceApplication)
             if user_id:
                 stmt = stmt.where(TravelInsuranceApplication.user_id == str(user_id))
+            orderable = {
+                "id": TravelInsuranceApplication.id,
+                "user_id": TravelInsuranceApplication.user_id,
+                "status": TravelInsuranceApplication.status,
+                "created_at": TravelInsuranceApplication.created_at,
+                "updated_at": TravelInsuranceApplication.updated_at,
+            }
+            col = orderable.get(order_by) or TravelInsuranceApplication.created_at
+            stmt = stmt.order_by(col.desc() if descending else col.asc())
             return list(s.execute(stmt).scalars().all())
 
     # ------------------------------------------------------------------ #
@@ -341,9 +369,23 @@ class PostgresDB:
             s.delete(app)
             return True
 
-    def list_serenicare_applications(self, user_id: Optional[str] = None) -> List[SerenicareApplication]:
+    def list_serenicare_applications(
+        self,
+        user_id: Optional[str] = None,
+        order_by: str = "created_at",
+        descending: bool = True,
+    ) -> List[SerenicareApplication]:
         with self._session() as s:
             stmt = select(SerenicareApplication)
             if user_id:
                 stmt = stmt.where(SerenicareApplication.user_id == str(user_id))
+            orderable = {
+                "id": SerenicareApplication.id,
+                "user_id": SerenicareApplication.user_id,
+                "status": SerenicareApplication.status,
+                "created_at": SerenicareApplication.created_at,
+                "updated_at": SerenicareApplication.updated_at,
+            }
+            col = orderable.get(order_by) or SerenicareApplication.created_at
+            stmt = stmt.order_by(col.desc() if descending else col.asc())
             return list(s.execute(stmt).scalars().all())
