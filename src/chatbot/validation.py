@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
-from typing import Any, Callable, Dict, Iterable, Optional, Tuple
+from datetime import date
+from typing import Any, Dict, Iterable, Optional
 
 
 @dataclass
@@ -71,7 +71,15 @@ def require_bool(payload: Dict[str, Any], field: str, errors: Dict[str, str], *,
     return False
 
 
-def parse_int(payload: Dict[str, Any], field: str, errors: Dict[str, str], *, min_value: Optional[int] = None, max_value: Optional[int] = None, required: bool = False) -> int:
+def parse_int(
+    payload: Dict[str, Any],
+    field: str,
+    errors: Dict[str, str],
+    *,
+    min_value: Optional[int] = None,
+    max_value: Optional[int] = None,
+    required: bool = False,
+) -> int:
     raw = payload.get(field)
     if raw is None or _strip(raw) == "":
         if required:

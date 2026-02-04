@@ -16,7 +16,6 @@ from typing import Any, Dict
 from datetime import datetime
 
 from src.chatbot.validation import (
-    FormValidationError,
     add_error,
     parse_int,
     parse_iso_date,

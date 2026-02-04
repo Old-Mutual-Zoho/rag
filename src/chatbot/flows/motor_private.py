@@ -158,15 +158,63 @@ class MotorPrivateFlow:
         if payload and "_raw" not in payload:
             errors: Dict[str, str] = {}
             vehicle_make = require_str(payload, "vehicle_make", errors, label="Vehicle make")
-            year = parse_int(payload, "year_of_manufacture", errors, min_value=1900, max_value=date.today().year, required=True)
-            cover_start_date = validate_date_iso(payload.get("cover_start_date", ""), errors, "cover_start_date", required=True)
-            rare_model = validate_in(payload.get("rare_model", ""), {"Yes", "No"}, errors, "rare_model", required=True)
-            valuation_done = validate_in(payload.get("valuation_done", ""), {"Yes", "No"}, errors, "valuation_done", required=True)
+            year = parse_int(
+                payload,
+                "year_of_manufacture",
+                errors,
+                min_value=1900,
+                max_value=date.today().year,
+                required=True,
+            )
+            cover_start_date = validate_date_iso(
+                payload.get("cover_start_date", ""),
+                errors,
+                "cover_start_date",
+                required=True,
+            )
+            rare_model = validate_in(
+                payload.get("rare_model", ""),
+                {"Yes", "No"},
+                errors,
+                "rare_model",
+                required=True,
+            )
+            valuation_done = validate_in(
+                payload.get("valuation_done", ""),
+                {"Yes", "No"},
+                errors,
+                "valuation_done",
+                required=True,
+            )
             vehicle_value = parse_decimal_str(payload, "vehicle_value", errors, min_value=1, required=True)
-            first_time_registration = validate_in(payload.get("first_time_registration", ""), {"Yes", "No"}, errors, "first_time_registration", required=True)
-            car_alarm_installed = validate_in(payload.get("car_alarm_installed", ""), {"Yes", "No"}, errors, "car_alarm_installed", required=True)
-            tracking_system_installed = validate_in(payload.get("tracking_system_installed", ""), {"Yes", "No"}, errors, "tracking_system_installed", required=True)
-            car_usage_region = validate_in(payload.get("car_usage_region", ""), {"Within Uganda", "Within East Africa", "Outside East Africa"}, errors, "car_usage_region", required=True)
+            first_time_registration = validate_in(
+                payload.get("first_time_registration", ""),
+                {"Yes", "No"},
+                errors,
+                "first_time_registration",
+                required=True,
+            )
+            car_alarm_installed = validate_in(
+                payload.get("car_alarm_installed", ""),
+                {"Yes", "No"},
+                errors,
+                "car_alarm_installed",
+                required=True,
+            )
+            tracking_system_installed = validate_in(
+                payload.get("tracking_system_installed", ""),
+                {"Yes", "No"},
+                errors,
+                "tracking_system_installed",
+                required=True,
+            )
+            car_usage_region = validate_in(
+                payload.get("car_usage_region", ""),
+                {"Within Uganda", "Within East Africa", "Outside East Africa"},
+                errors,
+                "car_usage_region",
+                required=True,
+            )
             raise_if_errors(errors)
 
             data["vehicle_details"] = {

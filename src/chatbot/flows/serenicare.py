@@ -12,7 +12,6 @@ from typing import Any, Dict
 from src.chatbot.validation import (
     raise_if_errors,
     require_str,
-    optional_str,
     validate_date_iso,
     validate_email,
     validate_phone_ug,
