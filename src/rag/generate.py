@@ -1,6 +1,5 @@
 import os
 import logging
-import asyncio
 from typing import Any, Dict, List
 from google import genai
 from google.genai import types
@@ -12,13 +11,34 @@ logger = logging.getLogger(__name__)
 # --- SYSTEM SETTINGS ---
 MODEL_NAME = "gemini-1.5-flash"  # Flash is the king of speed
 SYSTEM_INSTRUCTION = """
-You are MIA, a friendly Old Mutual Uganda assistant.
-Tone: Warm, conversational, WhatsApp-style.
-Style: Short (3-10 lines), use 1-2 emojis (✅, 🛡️, 🚫, 💰).
-Rules:
-- Ground your answer ONLY in the 'Available Info'.
-- If the info is missing or irrelevant, say you don't have that specific detail and ask a short clarifying question.
-- Never say "Based on the info provided."
+You are MIA, the Senior Virtual Assistant for Old Mutual Uganda. You are an expert across all business lines:
+General Insurance, Life Assurance, and Asset Management.
+
+CORE PRODUCT CATALOG (Knowledge Base):
+1. PERSONAL INSURANCE (PROTECTION):
+   - Serenicare: Comprehensive medical (Inpatient, Outpatient, Dental, Optical, Maternity). Covers East Africa.
+   - Motor: Motor Private, Motor Commercial, and Motor COMESA (Yellow Card for regional travel).
+   - Travel Sure Plus: For international travel emergencies.
+   - Domestic Package: Covers your home, contents, and domestic workers.
+   - Personal Accident: Compensation for accidental death or disability.
+
+2. SAVINGS & INVESTMENTS (WEALTH):
+   - Unit Trusts: Money Market Fund (High liquidity), Balanced Fund, Umbrella Fund.
+   - Dollar Unit Trust: Invest in USD (Min $1,000).
+   - Sure Deal: 5-10 year savings plan with a guaranteed tax-free lump sum.
+   - SOMESA Plus: Education plan for children 0-18 yrs. 5-10yr accumulation phase.
+   - Private Wealth: Bespoke portfolios for High-Net-Worth individuals.
+
+3. BUSINESS SOLUTIONS:
+   - Office Compact: One-stop SME policy (Fire, Burglary, Liability).
+   - Group Schemes: Group Life, Group Medical (Standard/Enhanced), and SME Life Pack.
+   - Special Risks: Marine Cargo, Livestock, and Crop Insurance.
+
+RESPONSE RULES:
+- If asked "What do you offer?", provide a structured summary using the categories above.
+- If asked about a specific product, use the 'Retrieved Data' for fine details (like USSD codes or specific waiting periods).
+- TONE: Professional, sales-oriented, and helpful.
+- FORMAT: Use bullet points and bold headers. Keep it under 10 lines.
 """.strip()
 
 
@@ -31,63 +51,35 @@ class MiaGenerator:
         self.client = genai.Client(api_key=api_key)
 
     def _build_context(self, hits: List[Dict[str, Any]]) -> str:
-        """
-        Extracts raw text and filters out metadata noise to save tokens/speed.
-        """
-        parts = []
-        for i, h in enumerate(hits, start=1):
-            p = h.get("payload") or {}
-            text = (p.get("text") or "").strip()
-            if text:
-                # Format: [Source ID] Title/Heading: Body
-                heading = p.get("section_heading") or p.get("title") or "Info"
-                parts.append(f"[{i}] {heading}: {text}")
-
-        return "\n".join(parts)
+        context_parts = []
+        for h in hits:
+            p = h.get("payload") or h
+            title = p.get("title", "Product")
+            heading = p.get("section_heading", "")
+            text = p.get("text", "")
+            chunk = f"[{title} | {heading}]: {text}"
+            context_parts.append(chunk)
+        return "\n\n".join(context_parts)
 
     async def generate(self, question: str, hits: List[Dict[str, Any]]) -> str:
-        """
-        The core engine: Safeguards -> Context Building -> Async Generation.
-        """
-        # 1. EMPTY CONTEXT SAFEGUARD
-        # If your retriever (Qdrant) returns nothing, don't even call the LLM.
-        if not hits:
-            logger.info("Safeguard triggered: Zero hits from retriever.")
-            return "I couldn't find specific details on that in our records. Could you tell me more about what you're looking for? ✨"
-
-        context = self._build_context(hits)
-
-        # 2. IRRELEVANT DATA SAFEGUARD
-        # If the combined text is too short to be useful (e.g., just noise)
-        if len(context) < 20:
-            return "I'm having trouble finding the right information for that. Which product are you interested in? 🛡️"
+        # BUILD CONTEXT: If no hits, we just send an empty string.
+        # Gemini will then rely on its System Instructions (The Master Catalog).
+        context = self._build_context(hits) if hits else "No specific documents found for this query."
 
         try:
-            # 3. ASYNC GENERATION WITH TIMEOUT
-            # If Gemini hangs, we kill the request at 8 seconds to preserve UX.
-            response = await asyncio.wait_for(
-                self.client.models.generate_content_async(
-                    model=MODEL_NAME,
-                    contents=f"Available Info:\n{context}\n\nUser Question: {question}",
-                    config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM_INSTRUCTION,
-                        temperature=0.2,  # Stays factual and fast
-                        max_output_tokens=300,  # Keeps it concise
-                    )
-                ),
-                timeout=8.0
+            response = await self.client.models.generate_content_async(
+                model="gemini-1.5-flash",
+                #  We always call the model. The model decides if it knows enough to answer.
+                contents=f"Question: {question}\n\nRetrieved Data:\n{context}",
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    temperature=0.2,
+                    max_output_tokens=500  # Slightly more tokens for full catalog lists
+                )
             )
-
             answer = response.text.strip()
-            return answer if answer else "I'm here to help, but I need a bit more detail on that question! 👋"
-
-        except asyncio.TimeoutError:
-            logger.error("Latency Alert: Gemini took > 8 seconds.")
-            return "I'm experiencing a slight delay. Please try again in a moment! ⏳"
+            return answer
 
         except Exception as e:
-            logger.error(f"Execution Error: {str(e)}")
-            # Handle the specific 'ResourceExhausted' (Quota) error
-            if "429" in str(e) or "quota" in str(e).lower():
-                return "I'm a bit busy at the moment! Could you ask that again in 30 seconds? 🚀"
-            return "I hit a technical snag. Give me a moment and try again? 🛠️"
+            logger.error(f"GenAI Error: {e}")
+            return "I'm here to help! Could you please rephrase that so I can get you the right details?"
