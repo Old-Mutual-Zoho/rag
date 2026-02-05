@@ -213,6 +213,7 @@ class PersonalAccidentFullFormResponse(BaseModel):
     sum_assured: float
     breakdown: Dict[str, Any]
 
+
 class CreateSessionRequest(BaseModel):
     """Create a new chatbot session (e.g. when user opens the app)."""
 
