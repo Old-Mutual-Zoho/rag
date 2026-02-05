@@ -24,7 +24,7 @@ from src.chatbot.product_cards import ProductCardGenerator
 from src.chatbot.router import ChatRouter
 from src.chatbot.state_manager import StateManager
 from src.chatbot.validation import FormValidationError
-from src.rag.generate import generate_with_gemini
+from src.rag.generate import MiaGenerator
 from src.rag.query import retrieve_context
 from src.utils.product_matcher import ProductMatcher
 from src.utils.rag_config_loader import load_rag_config
@@ -125,12 +125,10 @@ class APIRAGAdapter:
             return {"answer": answer, "confidence": 0.5, "sources": context_docs}
 
         if self.cfg.generation.backend == "gemini":
-            answer = generate_with_gemini(
-                question=query,
-                hits=context_docs,
-                model=self.cfg.generation.model,
-                api_key_env=self.cfg.generation.api_key_env,
-            )
+            # Use the new async Gemini generator (MiaGenerator) instead of the old
+            # synchronous helper, to keep latency bounded via asyncio timeouts.
+            mia = MiaGenerator()
+            answer = await mia.generate(query, context_docs)
             return {"answer": answer, "confidence": 0.7, "sources": context_docs}
 
         # Unsupported backend
@@ -199,6 +197,21 @@ class QuoteResponse(BaseModel):
     sum_assured: float
     valid_until: str
 
+
+class PersonalAccidentFullFormRequest(BaseModel):
+    """Submit the full Personal Accident form in a single payload (no guided steps)."""
+
+    user_id: str = Field(..., description="External user identifier (e.g. phone number)")
+    data: Dict[str, Any] = Field(..., description="Flattened form fields for Personal Accident application")
+
+
+class PersonalAccidentFullFormResponse(BaseModel):
+    quote_id: str
+    product_name: str
+    monthly_premium: float
+    annual_premium: float
+    sum_assured: float
+    breakdown: Dict[str, Any]
 
 class CreateSessionRequest(BaseModel):
     """Create a new chatbot session (e.g. when user opens the app)."""
@@ -962,6 +975,83 @@ async def api_get_product_card_details(
         return details
     except Exception as e:
         logger.error(f"Error getting product details: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/forms/personal-accident/full", response_model=PersonalAccidentFullFormResponse, tags=["Forms"])
+async def submit_personal_accident_full_form(
+    body: PersonalAccidentFullFormRequest,
+    db: PostgresDB = Depends(get_db),
+):
+    """
+    Accept the entire Personal Accident application in one payload and create a quote.
+
+    This bypasses the guided chat step-by-step flow, so the frontend can collect all
+    details in a single (possibly multi-section) form and submit once.
+    """
+    from src.chatbot.flows.personal_accident import PersonalAccidentFlow
+
+    try:
+        # Resolve external identifier (e.g. phone) to internal user UUID
+        user = db.get_or_create_user(phone_number=body.user_id)
+        internal_user_id = str(user.id)
+
+        # Reuse the existing PersonalAccidentFlow validations by running the
+        # step handlers sequentially against a shared data dict, but without
+        # touching the guided session state machine.
+        flow = PersonalAccidentFlow(product_matcher, db)
+
+        payload: Dict[str, Any] = dict(body.data or {})
+        data: Dict[str, Any] = {
+            "user_id": internal_user_id,
+            "product_id": "personal_accident",
+        }
+
+        # Run each logical step's validation + data shaping.
+        await flow._step_personal_details(payload, data, internal_user_id)
+        await flow._step_next_of_kin(payload, data, internal_user_id)
+        await flow._step_previous_pa_policy(payload, data, internal_user_id)
+        await flow._step_physical_disability(payload, data, internal_user_id)
+        await flow._step_risky_activities(payload, data, internal_user_id)
+        await flow._step_coverage_selection(payload, data, internal_user_id)
+        await flow._step_upload_national_id(payload, data, internal_user_id)
+
+        # Calculate premium using the same helper as the guided flow.
+        plan = data.get("coverage_plan") or {}
+        sum_assured = plan.get("sum_assured", 10_000_000)
+        premium = flow._calculate_pa_premium(data, sum_assured)
+
+        # Persist a quote once, with all underwriting data collected at once.
+        quote = db.create_quote(
+            user_id=internal_user_id,
+            product_id=data.get("product_id", "personal_accident"),
+            premium_amount=premium["monthly"],
+            sum_assured=sum_assured,
+            underwriting_data=data,
+            pricing_breakdown=premium.get("breakdown"),
+            product_name="Personal Accident",
+        )
+
+        return PersonalAccidentFullFormResponse(
+            quote_id=str(quote.id),
+            product_name="Personal Accident",
+            monthly_premium=premium["monthly"],
+            annual_premium=premium["annual"],
+            sum_assured=sum_assured,
+            breakdown=premium.get("breakdown", {}),
+        )
+    except FormValidationError as e:
+        # Mirror the chat/message validation error shape
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "validation_error",
+                "message": e.message,
+                "field_errors": e.field_errors,
+            },
+        )
+    except Exception as e:
+        logger.error(f"Error submitting Personal Accident full form: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
