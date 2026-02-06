@@ -45,11 +45,14 @@ class ResponseProcessor:
         confidence: float,
         conversation_state: Dict[str, Any],
         *,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
+        products_matched: Optional[list] = None,
     ) -> Dict[str, Any]:
         """Return a normalized dict with keys: message, follow_up (optional), fallback (optional), metadata.
 
         If state_manager and session_id are provided follow-ups will be queued into the persistent session store.
+        When products_matched is provided (e.g. ["Serenicare"]), short queries that match a product name
+        are not treated as incomplete, so the RAG answer is returned instead of a clarifying question.
         """
         try:
             logger.debug("Processing response: confidence=%s, user_input=%s", confidence, user_input)
@@ -66,8 +69,9 @@ class ResponseProcessor:
                     self.state_manager.update_session(session_id, {"fallbacks": conversation_state.get("fallbacks", [])})
                 return payload
 
-            # If user input looks incomplete, ask a clarifying question
-            if self._is_incomplete_input(user_input):
+            # If user input looks incomplete, ask a clarifying question — unless the query
+            # matches a product we already resolved (e.g. user typed "serenicare" and we have Serenicare).
+            if self._is_incomplete_input(user_input) and not self._query_matches_product(user_input, products_matched):
                 question = self.followup_manager.create_clarifying_question(user_input)
                 # Persist followup in session if possible
                 if self.state_manager and session_id:
@@ -137,4 +141,20 @@ class ResponseProcessor:
         tokens = user_input.strip().split()
         if len(tokens) <= 2:
             return True
+        return False
+
+    @staticmethod
+    def _query_matches_product(user_input: str, products_matched: Optional[list]) -> bool:
+        """True if we have matched products and the user query is that product name (e.g. 'serenicare' -> Serenicare)."""
+        if not user_input or not products_matched:
+            return False
+        q = user_input.strip().lower()
+        if not q:
+            return False
+        for name in products_matched:
+            if not name:
+                continue
+            n = (name or "").strip().lower()
+            if q == n or q in n or n in q:
+                return True
         return False

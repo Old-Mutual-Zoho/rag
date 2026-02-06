@@ -1,85 +1,99 @@
 import os
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 from google import genai
 from google.genai import types
 
-# Setup logging - essential for debugging RAG failures
+# Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- SYSTEM SETTINGS ---
-MODEL_NAME = "gemini-1.5-flash"  # Flash is the king of speed
+MODEL_NAME = "gemini-1.5-flash"
+
 SYSTEM_INSTRUCTION = """
-You are MIA, the Senior Virtual Assistant for Old Mutual Uganda. You are an expert across all business lines:
-General Insurance, Life Assurance, and Asset Management.
-
-CORE PRODUCT CATALOG (Knowledge Base):
-1. PERSONAL INSURANCE (PROTECTION):
-   - Serenicare: Comprehensive medical (Inpatient, Outpatient, Dental, Optical, Maternity). Covers East Africa.
-   - Motor: Motor Private, Motor Commercial, and Motor COMESA (Yellow Card for regional travel).
-   - Travel Sure Plus: For international travel emergencies.
-   - Domestic Package: Covers your home, contents, and domestic workers.
-   - Personal Accident: Compensation for accidental death or disability.
-
-2. SAVINGS & INVESTMENTS (WEALTH):
-   - Unit Trusts: Money Market Fund (High liquidity), Balanced Fund, Umbrella Fund.
-   - Dollar Unit Trust: Invest in USD (Min $1,000).
-   - Sure Deal: 5-10 year savings plan with a guaranteed tax-free lump sum.
-   - SOMESA Plus: Education plan for children 0-18 yrs. 5-10yr accumulation phase.
-   - Private Wealth: Bespoke portfolios for High-Net-Worth individuals.
-
-3. BUSINESS SOLUTIONS:
-   - Office Compact: One-stop SME policy (Fire, Burglary, Liability).
-   - Group Schemes: Group Life, Group Medical (Standard/Enhanced), and SME Life Pack.
-   - Special Risks: Marine Cargo, Livestock, and Crop Insurance.
-
-RESPONSE RULES:
-- If asked "What do you offer?", provide a structured summary using the categories above.
-- If asked about a specific product, use the 'Retrieved Data' for fine details (like USSD codes or specific waiting periods).
-- TONE: Professional, sales-oriented, and helpful.
-- FORMAT: Use bullet points and bold headers. Keep it under 10 lines.
+You are MIA, the Senior Virtual Assistant for Old Mutual Uganda.
+PROTOCOL:
+1. ALWAYS prioritize 'Retrieved Data'. Cite: "According to our documentation..."
+2. If context is empty, give a general overview and provide contact: 0800-100-900.
+3. FORMAT: Bullet points, **bold** terms, under 12 lines.
+4. TONE: Professional, friendly, sales-oriented.
 """.strip()
 
 
 class MiaGenerator:
-    def __init__(self):
+    def __init__(
+        self,
+        max_context_chars: int = 8000,
+        min_score: float = 0.65,
+        max_sources: int = 5,
+        temperature: float = 0.2  # Lowered for financial accuracy
+    ):
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
-            raise RuntimeError("CRITICAL: GEMINI_API_KEY is missing from environment variables.")
+            raise RuntimeError("CRITICAL: GEMINI_API_KEY is missing.")
 
         self.client = genai.Client(api_key=api_key)
+        self.max_context_chars = max_context_chars
+        self.min_score = min_score
+        self.max_sources = max_sources
+        self.temperature = temperature
 
-    def _build_context(self, hits: List[Dict[str, Any]]) -> str:
+    def _build_context(self, hits: List[Dict[str, Any]]) -> Tuple[str, int, float]:
+        if not hits:
+            return "", 0, 0.0
+
+        filtered_hits = [h for h in hits if h.get("score", 0) >= self.min_score]
+        if not filtered_hits:
+            return "", 0, 0.0
+
+        filtered_hits.sort(key=lambda x: x.get("score", 0), reverse=True)
+        avg_score = sum(h.get("score", 0) for h in filtered_hits) / len(filtered_hits)
+
         context_parts = []
-        for h in hits:
+        current_length = 0
+        sources_used = 0
+
+        for idx, h in enumerate(filtered_hits[:self.max_sources], 1):
             p = h.get("payload") or h
-            title = p.get("title", "Product")
-            heading = p.get("section_heading", "")
-            text = p.get("text", "")
-            chunk = f"[{title} | {heading}]: {text}"
+            chunk = f"[Source {idx}] **{p.get('title', 'Unknown')}**: {p.get('text', '')}\n"
+            if current_length + len(chunk) > self.max_context_chars:
+                break
             context_parts.append(chunk)
-        return "\n\n".join(context_parts)
+            current_length += len(chunk)
+            sources_used += 1
+
+        return "\n".join(context_parts), sources_used, avg_score
 
     async def generate(self, question: str, hits: List[Dict[str, Any]]) -> str:
-        # BUILD CONTEXT: If no hits, we just send an empty string.
-        # Gemini will then rely on its System Instructions (The Master Catalog).
-        context = self._build_context(hits) if hits else "No specific documents found for this query."
+        context, num_sources, avg_score = self._build_context(hits)
+
+        context_note = (
+            f"Use the {num_sources} sources below." if num_sources > 0
+            else "No specific documents found. Provide a general response."
+        )
+
+        full_prompt = f"{context_note}\n\n**User Question:** {question}\n\n**Retrieved Data:**\n{context or 'None'}"
 
         try:
-            response = await self.client.models.generate_content_async(
-                model="gemini-1.5-flash",
-                #  We always call the model. The model decides if it knows enough to answer.
-                contents=f"Question: {question}\n\nRetrieved Data:\n{context}",
+            # Use the async client wrapper provided by google-genai.
+            # Docs: https://googleapis.github.io/python-genai/
+            response = await self.client.aio.models.generate_content(
+                model=MODEL_NAME,
+                contents=full_prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_INSTRUCTION,
-                    temperature=0.2,
-                    max_output_tokens=500  # Slightly more tokens for full catalog lists
-                )
+                    temperature=self.temperature,
+                    max_output_tokens=600,
+                ),
             )
-            answer = response.text.strip()
-            return answer
+
+            text = (getattr(response, "text", "") or "").strip()
+            if not text:
+                logger.warning("GenAI returned empty text response.")
+                return "I'm having trouble retrieving those details. Please call 0800-100-900 for immediate help."
+
+            return text
 
         except Exception as e:
-            logger.error(f"GenAI Error: {e}")
-            return "I'm here to help! Could you please rephrase that so I can get you the right details?"
+            logger.error(f"GenAI error: {e}", exc_info=True)
+            return "I'm having trouble retrieving those details. Please call 0800-100-900 for immediate help."

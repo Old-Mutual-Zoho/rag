@@ -194,6 +194,7 @@ class ConversationalMode:
 
         # Use ResponseProcessor if available to normalize and handle follow-ups/fallbacks
         session = self.state_manager.get_session(session_id) or {}
+        products_matched_names = [p[2]["name"] for p in products] if products else []
         if self.response_processor:
             processed = self.response_processor.process_response(
                 raw_response=response.get("answer"),
@@ -201,6 +202,7 @@ class ConversationalMode:
                 confidence=response.get("confidence", 0.0),
                 conversation_state=session,
                 session_id=session_id,
+                products_matched=products_matched_names,
             )
             answer_text = processed.get("message")
             follow_up_flag = processed.get("follow_up", False)

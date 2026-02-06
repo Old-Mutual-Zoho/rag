@@ -90,7 +90,11 @@ def ingest_chunks_to_qdrant(
             if not text:
                 continue
             chunk_id = obj.get("id") or f"{obj.get('doc_id', 'doc')}_{i}"
-            rows.append({"id": chunk_id, "text": text, "payload": {k: v for k, v in obj.items() if k != "text" and v is not None}})
+            # Include text in payload so it can be retrieved during search
+            payload = {k: v for k, v in obj.items() if v is not None}
+            if "text" not in payload:
+                payload["text"] = text
+            rows.append({"id": chunk_id, "text": text, "payload": payload})
 
     if not rows:
         logger.warning("No chunks to ingest from %s", chunks_file)

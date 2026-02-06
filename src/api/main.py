@@ -113,30 +113,118 @@ class APIRAGAdapter:
         Use the configured generation backend (Gemini by default) to
         produce an answer grounded in the retrieved context.
         """
-        if not self.cfg.generation.enabled:
-            # Fallback: simple extractive answer from context only.
-            snippets = []
+        def _extractive_answer() -> Dict[str, Any]:
+            """
+            Fallback: build an answer directly from known product chunks when
+            the generator is unavailable or fails.
+
+            Priority:
+            - Use payload["text"] from retrieved hits when present.
+            - If missing, but doc_id is known, load sections from website_chunks.jsonl
+              and stitch together overview + benefits for that product.
+            - As a last resort, resolve individual chunk IDs from website_chunks.jsonl.
+            """
+            snippets: List[str] = []
+
+            # 1) Use any text already present on the hits.
             for h in context_docs:
                 payload = h.get("payload") or {}
                 text = (payload.get("text") or "").strip()
                 if text:
                     snippets.append(text)
-            answer = "\n\n".join(snippets) or "I'm not sure based on the available information."
-            return {"answer": answer, "confidence": 0.5, "sources": context_docs}
+
+            # 2) If still empty, try structured product sections file by doc_id.
+            if len(snippets) < 1:
+                from typing import Set
+
+                doc_ids: Set[str] = set()
+                for h in context_docs:
+                    p = h.get("payload") or {}
+                    doc_id = p.get("doc_id")
+                    if not doc_id or doc_id in doc_ids:
+                        continue
+                    doc_ids.add(doc_id)
+                    try:
+                        sections = _load_product_sections(doc_id)
+                    except Exception as e:  # pragma: no cover - best-effort only
+                        logger.warning("Failed to load sections for %s: %s", doc_id, e)
+                        continue
+
+                    overview = sections.get("overview") or []
+                    benefits = sections.get("benefits") or []
+
+                    if overview:
+                        # Take the first overview chunk as the core "what is X" answer.
+                        ov_text = (overview[0].get("text") or "").strip()
+                        if ov_text:
+                            snippets.append(ov_text)
+
+                    if benefits:
+                        # Add a concise benefits line if available.
+                        b0 = (benefits[0].get("text") or "").strip()
+                        if b0:
+                            snippets.append(b0)
+
+            # 3) As a last resort, try to resolve individual chunk IDs directly
+            #    from website_chunks.jsonl when doc_id-based lookup fails or when
+            #    the stored vector payloads are missing "text".
+            if len(snippets) < 1:
+                try:
+                    chunks_path = Path(__file__).parent.parent.parent / "data" / "processed" / "website_chunks.jsonl"
+                    if chunks_path.exists():
+                        wanted_ids = set()
+                        for h in context_docs:
+                            cid = h.get("id") or (h.get("payload") or {}).get("id")
+                            if cid:
+                                wanted_ids.add(cid)
+
+                        if wanted_ids:
+                            with open(chunks_path, "r", encoding="utf-8") as f:
+                                for line in f:
+                                    if not line.strip():
+                                        continue
+                                    try:
+                                        data = json.loads(line)
+                                    except Exception:
+                                        continue
+                                    if data.get("id") not in wanted_ids:
+                                        continue
+                                    heading = data.get("section_heading") or ""
+                                    raw_text = data.get("text") or ""
+                                    text = _strip_heading_from_text(raw_text, heading)
+                                    text = (text or "").strip()
+                                    if text:
+                                        snippets.append(text)
+                except Exception as e:  # pragma: no cover - defensive
+                    logger.warning("Chunk-id extractive fallback failed: %s", e)
+
+            answer_text = "\n\n".join(snippets).strip() or "I'm not sure based on the available information."
+            return {"answer": answer_text, "confidence": 0.5, "sources": context_docs}
+
+        # If generation is globally disabled, always fall back to extractive mode.
+        if not self.cfg.generation.enabled:
+            return _extractive_answer()
 
         if self.cfg.generation.backend == "gemini":
-            # Use the new async Gemini generator (MiaGenerator) instead of the old
-            # synchronous helper, to keep latency bounded via asyncio timeouts.
+            # Use the new async Gemini generator (MiaGenerator). If the model call
+            # fails or returns our generic phone number fallback, degrade to a
+            # context-only extractive answer instead of surfacing the error text.
             mia = MiaGenerator()
-            answer = await mia.generate(query, context_docs)
+            try:
+                answer = await mia.generate(query, context_docs)
+            except Exception as e:  # pragma: no cover - defensive; MiaGenerator already logs
+                logger.error("MiaGenerator.generate raised unexpectedly: %s", e, exc_info=True)
+                return _extractive_answer()
+
+            fallback_phrase = "I'm having trouble retrieving those details. Please call 0800-100-900 for immediate help."
+            if not answer or fallback_phrase in answer:
+                # LLM unavailable / failed -> use extractive context instead.
+                return _extractive_answer()
+
             return {"answer": answer, "confidence": 0.7, "sources": context_docs}
 
-        # Unsupported backend
-        return {
-            "answer": "Generation backend not supported in API adapter.",
-            "confidence": 0.0,
-            "sources": context_docs,
-        }
+        # Unsupported backend -> degrade gracefully to extractive answer.
+        return _extractive_answer()
 
 
 rag_adapter = APIRAGAdapter()
@@ -1162,7 +1250,7 @@ except Exception:
     pass
 
 
-def _strip_heading_from_text(text: str, heading: str) -> Dict[str, List[Dict[str, str]]]:
+def _strip_heading_from_text(text: str, heading: str) -> str:
     """
     Remove duplicated heading from the start of text so the API returns
     content-only in "text" when "heading" is already present.
