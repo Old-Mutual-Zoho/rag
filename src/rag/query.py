@@ -116,7 +116,30 @@ def retrieve_context(
         if filters:
             from qdrant_client.http import models as qm
 
-            conditions = [qm.FieldCondition(key=k, match=qm.MatchValue(value=v)) for k, v in filters.items() if v is not None]
+            conditions: List[qm.FieldCondition] = []
+            for k, v in filters.items():
+                if v is None:
+                    continue
+                # Our public filter API uses filters["products"] = [doc_id, ...]
+                # to restrict results by payload.doc_id.
+                if k == "products" and isinstance(v, (list, tuple)):
+                    vals = [x for x in v if x]
+                    if not vals:
+                        continue
+                    # Qdrant payload is flat (doc_id stored at top level in payload).
+                    # Use MatchAny for lists.
+                    if hasattr(qm, "MatchAny"):
+                        conditions.append(qm.FieldCondition(key="doc_id", match=qm.MatchAny(any=vals)))
+                    else:  # pragma: no cover - very old qdrant-client
+                        # Fallback: OR as should-clause
+                        any_conditions = [qm.FieldCondition(key="doc_id", match=qm.MatchValue(value=x)) for x in vals]
+                        kw["filter"] = qm.Filter(should=any_conditions)
+                        conditions = []
+                        break
+                    continue
+
+                # Scalar filters (category, type, chunk_type, etc.)
+                conditions.append(qm.FieldCondition(key=k, match=qm.MatchValue(value=v)))
             if conditions:
                 kw["filter"] = qm.Filter(must=conditions)
         hits = store.search(**kw)

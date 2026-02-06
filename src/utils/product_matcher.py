@@ -9,6 +9,7 @@ the scraping/processing pipeline.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Dict, List, Tuple, Any, Optional
 
@@ -120,25 +121,91 @@ class ProductMatcher:
         if not query:
             return []
 
-        q = query.lower()
+        # Tokenize and drop generic words so we don't match everything on
+        # "insurance", "cover", etc.
+        def _tokens(s: str) -> List[str]:
+            return re.findall(r"\b[\w']+\b", (s or "").lower())
+
+        stop = {
+            "insurance",
+            "insurances",
+            "cover",
+            "coverage",
+            "policy",
+            "plan",
+            "product",
+            "quote",
+            "premium",
+            "buy",
+            "apply",
+            "get",
+            "need",
+            "want",
+            "looking",
+            "for",
+            "an",
+            "a",
+            "the",
+            "to",
+            "of",
+            "and",
+            "in",
+            "on",
+            "with",
+            "about",
+            "tell",
+            "me",
+            "explain",
+            "what",
+            "is",
+            "are",
+        }
+
+        q_tokens_all = _tokens(query)
+        q_text = " ".join(q_tokens_all)
+
+        # Optional: expand query with synonym mappings (helps map "accident cover" -> "personal accident").
+        try:
+            from src.utils.synonym_expander import SynonymExpander
+
+            q_text = SynonymExpander().expand_query(q_text)
+        except Exception:
+            pass
+
+        q_set = set([t for t in _tokens(q_text) if t not in stop])
+        if not q_set:
+            # If query is entirely generic (e.g. "insurance"), don't force matches.
+            return []
+
         scored: List[Tuple[float, int, Dict[str, Any]]] = []
 
         for product in self.product_index.values():
-            name = product.get("name", "").lower()
-            cat = product.get("category_name", "").lower()
-            sub = product.get("sub_category_name", "").lower()
+            name = (product.get("name") or "").lower()
+            slug = (product.get("slug") or "").lower()
+            cat = (product.get("category_name") or "").lower()
+            sub = (product.get("sub_category_name") or "").lower()
+
+            name_tokens = set(_tokens(name))
+            meta_tokens = set(_tokens(" ".join([slug, cat, sub])))
+
+            overlap_name = len(q_set & name_tokens)
+            overlap_meta = len(q_set & meta_tokens)
 
             score = 0.0
-            if q in name:
-                score += 2.0
-            if q in cat or q in sub:
-                score += 1.0
 
-            # Fallback: token overlap
-            if score == 0.0:
-                tokens = set(q.split())
-                if tokens & set(name.split()):
-                    score += 1.0
+            # Strong signals
+            if slug and slug in q_text.lower():
+                score += 3.0
+            if name and name in q_text.lower():
+                score += 3.0
+
+            # Token overlap signals
+            score += overlap_name * 1.0
+            score += overlap_meta * 0.4
+
+            # Soft phrase match (handles e.g. "personal accident" appearing in longer query)
+            if overlap_name >= 2:
+                score += 0.5
 
             if score > 0.0:
                 scored.append((score, 0, product))

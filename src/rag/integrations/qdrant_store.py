@@ -82,11 +82,17 @@ class QdrantVectorStore:
         )
         out: list[dict[str, Any]] = []
         for p in res:
+            payload = p.payload or {}
+            stable_id = None
+            if isinstance(payload, dict):
+                stable_id = payload.get("id") or payload.get("chunk_id")
             out.append(
                 {
-                    "id": str(p.id),
+                    # Prefer the original chunk id (stored in payload during ingest)
+                    # over the Qdrant point id (UUID).
+                    "id": str(stable_id or p.id),
                     "score": float(p.score),
-                    "payload": p.payload or {},
+                    "payload": payload,
                 }
             )
         return out

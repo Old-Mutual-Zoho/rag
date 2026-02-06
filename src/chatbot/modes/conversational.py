@@ -181,13 +181,27 @@ class ConversationalMode:
         # Match relevant products
         products = self.product_matcher.match_products(message, top_k=3)
 
-        # Build filters for RAG retrieval
-        filters = {}
+        # Build filters for RAG retrieval.
+        # Key principle: default to ONE product when we're confident; otherwise
+        # leave retrieval unfiltered so the model can ask a clarifying question.
+        filters: Dict[str, Any] = {}
         if products:
-            filters["products"] = [p[2]["product_id"] for p in products]
+            top_score = float(products[0][0] or 0.0)
+            second_score = float(products[1][0] or 0.0) if len(products) > 1 else 0.0
+            is_confident = (top_score >= 1.2) and (top_score >= second_score + 0.5)
+
+            if intent == "compare":
+                # Comparing products: allow multiple doc_ids.
+                filters["products"] = [p[2]["product_id"] for p in products[:3]]
+            elif is_confident:
+                # Single-product intent: restrict to the best match.
+                filters["products"] = [products[0][2]["product_id"]]
+            else:
+                # Not confident: avoid accidental wrong-product filtering.
+                filters = {}
 
         # Retrieve relevant documents (top_k from RAG config when not specified)
-        retrieval_results = await self.rag.retrieve(query=message, filters=filters)
+        retrieval_results = await self.rag.retrieve(query=message, filters=filters or None)
 
         # Generate response
         response = await self.rag.generate(query=message, context_docs=retrieval_results, conversation_history=self._get_recent_history(session_id))
