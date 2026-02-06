@@ -3,9 +3,6 @@ Conversational mode - RAG-powered free-form chat
 """
 
 from typing import Any, Dict, List, Optional
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 def _is_greeting(message: str) -> bool:
@@ -883,6 +880,9 @@ class ConversationalMode:
         if m in small_talk_phrases:
             return "SMALL_TALK"
 
+        # UI/command help (e.g., "keep and undo command")
+        if "keep" in m and "undo" in m and "command" in m:
+            return "HELP"
 
         # Off-topic personal/identity questions (avoid retrieval)
         if any(
@@ -928,7 +928,8 @@ class ConversationalMode:
             return "I’m doing well, thank you for asking. How can I help you with Old Mutual products or services today?"
         if kind == "HELP":
             return (
-                "Sure — what do you need help with? You can ask about a product, coverage, claims, or getting a quote."
+                "I don’t have a 'keep' or 'undo' command here. "
+                "You can just type your next question, or tell me the product or topic you want help with."
             )
         if kind == "OFF_TOPIC":
             return (
@@ -1112,7 +1113,8 @@ class ConversationalMode:
             )
 
         lines.append(
-            "If you tell me what you're most interested in (for example life insurance, health, motor, or savings & investments), I can explain those in more detail."
+            "If you tell me what you're most interested in (for example life insurance, health, motor, or savings & "
+            "investments), I can explain those in more detail."
         )
 
         # Second return value kept for backward-compatibility but is unused

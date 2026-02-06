@@ -1,8 +1,8 @@
 import json
-import logging
 import os
+import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from google import genai
 from google.genai import types
@@ -190,4 +190,3 @@ Rules:
         except Exception as e:
             logger.warning("SmallTalkResponder error: %s", e, exc_info=True)
             return "Hi, I’m MIA. How can I help you with Old Mutual products or services today?"
-
