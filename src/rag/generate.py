@@ -8,7 +8,9 @@ from google.genai import types
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "gemini-1.5-flash"
+# Default text generation model for Google Gemini via google-genai.
+# As of the current SDK, gemini-2.5-flash is a fast, general-purpose model.
+MODEL_NAME = "gemini-2.5-flash"
 
 SYSTEM_INSTRUCTION = """
 You are MIA, the Senior Virtual Assistant for Old Mutual Uganda.

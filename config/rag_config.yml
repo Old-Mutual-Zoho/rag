@@ -19,9 +19,9 @@ vector_store:
   # qdrant_http: host: localhost, port: 6333
 
 retrieval:
-  top_k: 3   # fetch more chunks so product-specific queries (e.g. Somesa Plan) get relevant context
+  top_k: 5   # fetch more chunks so product-specific queries (e.g. Somesa Plan) get relevant context
   hybrid:
-    enabled: false
+    enabled: true
     dense_weight: 0.7
     sparse_weight: 0.3
 
@@ -29,5 +29,5 @@ generation:
   enabled: true
   backend: gemini
   # If you see "free_tier ... limit: 0", enable billing in Google AI Studio for this project
-  model: "models/gemini-flash-latest"
+  model: "gemini-2.5-flash"
   api_key_env: GEMINI_API_KEY
