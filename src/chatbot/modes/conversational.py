@@ -13,25 +13,154 @@ def _is_greeting(message: str) -> bool:
     if not m:
         return False
     # Keep it strict so we don't mis-classify real questions.
-    return m in {"hi", "hello", "hey", "hey!", "hello!", "hi!", "good morning", "good afternoon", "good evening"}
+    # Handle common missing-space variants like "goodmorning".
+    m = (
+        m.replace("goodmorning", "good morning")
+        .replace("goodafternoon", "good afternoon")
+        .replace("goodevening", "good evening")
+    )
+    if m in {
+        "hi",
+        "hello",
+        "hey",
+        "hey!",
+        "hello!",
+        "hi!",
+        "good morning",
+        "good afternoon",
+        "good evening",
+        "gm",
+        "gdm",
+        "gud morning",
+        "gud evening",
+        "morning",
+        "evening",
+        "hiya",
+        "yo",
+        "sup",
+        "heyyo",
+        "whatsapp",
+    }:
+        return True
+    # Allow simple greetings inside a longer sentence.
+    return any(
+        g in m
+        for g in [
+            "hi ",
+            "hello ",
+            "hey ",
+            "hi there",
+            "hello there",
+            "hey there",
+            "good morning",
+            "good afternoon",
+            "good evening",
+            "gm ",
+            "gud morning",
+            "gud evening",
+            "morning ",
+            "evening ",
+            "yo ",
+            "sup ",
+            "whatsapp",
+        ]
+    )
 
 
 def _detect_section_intent(message: str) -> str | None:
     m = (message or "").lower()
     # Benefits
-    if any(k in m for k in ["benefit", "benefits", "advantages", "what do i get", "what do you cover"]):
+    if any(
+        k in m
+        for k in [
+            "benefit",
+            "benefits",
+            "advantages",
+            "value",
+            "perks",
+            "what do i get",
+            "what do you cover",
+            "why should i",
+            "convince me",
+            "what's in it for me",
+            "what do i gain",
+        ]
+    ):
         return "show_benefits"
     # Coverage
-    if any(k in m for k in ["coverage", "covered", "what is covered", "what's covered", "what is included", "included"]):
+    if any(
+        k in m
+        for k in [
+            "coverage",
+            "covered",
+            "what is covered",
+            "what's covered",
+            "what is included",
+            "included",
+            "does it cover",
+            "am i covered",
+            "if i",
+            "in case of",
+            "when it happens",
+        ]
+    ):
         return "show_coverage"
     # Exclusions
-    if any(k in m for k in ["exclusion", "exclusions", "not covered", "what is not covered", "what isn't covered", "limitations"]):
+    if any(
+        k in m
+        for k in [
+            "exclusion",
+            "exclusions",
+            "not covered",
+            "what is not covered",
+            "what isn't covered",
+            "limitations",
+            "fine print",
+            "what you don't cover",
+            "what you wont cover",
+            "won't cover",
+            "doesn't cover",
+        ]
+    ):
         return "show_exclusions"
     # Eligibility
-    if any(k in m for k in ["eligibility", "eligible", "qualify", "requirements", "who can apply", "who is it for"]):
+    if any(
+        k in m
+        for k in [
+            "eligibility",
+            "eligible",
+            "qualify",
+            "requirements",
+            "who can apply",
+            "who is it for",
+            "is it for me",
+            "can i apply",
+            "age limit",
+            "age requirement",
+            "employment status",
+            "health status",
+        ]
+    ):
         return "show_eligibility"
     # Pricing
-    if any(k in m for k in ["premium", "price", "pricing", "cost", "how much"]):
+    if any(
+        k in m
+        for k in [
+            "premium",
+            "price",
+            "pricing",
+            "cost",
+            "how much",
+            "afford",
+            "budget",
+            "payment",
+            "installment",
+            "monthly",
+            "per month",
+            "per year",
+            "annually",
+        ]
+    ):
         return "show_pricing"
     return None
 
@@ -42,21 +171,107 @@ def _detect_digital_flow(message: str) -> str | None:
         return "personal_accident"
     if any(k in m for k in ["serenicare"]):
         return "serenicare"
-    if any(k in m for k in ["motor private", "car insurance", "vehicle insurance", "motor insurance"]):
+    if any(
+        k in m
+        for k in [
+            "motor private",
+            "car insurance",
+            "vehicle insurance",
+            "motor insurance",
+            "car cover",
+            "vehicle cover",
+            "auto insurance",
+        ]
+    ):
         return "motor_private"
-    if any(k in m for k in ["travel insurance", "travel sure", "travel cover", "travel policy"]):
+    if any(
+        k in m
+        for k in [
+            "travel insurance",
+            "travel sure",
+            "travel cover",
+            "travel policy",
+            "trip cover",
+            "trip insurance",
+            "flight insurance",
+            "going abroad",
+        ]
+    ):
         return "travel_insurance"
     return None
 
 
+def _is_domain_related(message: str) -> bool:
+    m = (message or "").lower()
+    if not m:
+        return False
+    domain_keywords = [
+        "old mutual",
+        "insurance",
+        "policy",
+        "cover",
+        "coverage",
+        "claim",
+        "premium",
+        "quote",
+        "buy",
+        "apply",
+        "benefit",
+        "exclusion",
+        "eligibility",
+        "motor",
+        "travel",
+        "life",
+        "health",
+        "medical",
+        "investment",
+        "investments",
+        "unit trust",
+        "savings",
+        "serenicare",
+        "personal accident",
+        "pa cover",
+        "insured",
+        "policyholder",
+        "sum assured",
+        "deductible",
+        "copay",
+        "claim form",
+        "accident",
+        "hospital",
+        "medical bill",
+        "treatment",
+        "risk",
+        "protection",
+        "coverage limit",
+    ]
+    return any(k in m for k in domain_keywords)
+
+
 def _is_affirmative(message: str) -> bool:
     m = (message or "").strip().lower()
-    return m in {"yes", "y", "yeah", "yep", "sure", "ok", "okay", "please", "go ahead", "go on"}
+    return m in {
+        "yes",
+        "y",
+        "yeah",
+        "yep",
+        "sure",
+        "ok",
+        "okay",
+        "please",
+        "go ahead",
+        "go on",
+        "alright",
+        "sounds good",
+        "do it",
+        "👍",
+        "✅",
+    }
 
 
 def _is_negative(message: str) -> bool:
     m = (message or "").strip().lower()
-    return m in {"no", "n", "nope", "not now", "later", "maybe later"}
+    return m in {"no", "n", "nope", "not now", "later", "maybe later", "not today", "no thanks", "nah", "pass"}
 
 
 def _build_section_query(product_name: str, section: str) -> str:
@@ -112,6 +327,10 @@ class ConversationalMode:
 
     async def process(self, message: str, session_id: str, user_id: str, form_data: Optional[Dict[str, Any]] = None) -> Dict:
         """Process message in conversational mode"""
+
+        # Normalize empty form_data to None so gating logic works as intended.
+        if not form_data:
+            form_data = None
 
         # Backward-compatible: if the frontend still sends a product-guide action via form_data,
         # handle it, but we no longer *emit* buttons/actions as the primary UX.
@@ -199,16 +418,24 @@ class ConversationalMode:
                     llm_intent = None
 
                 if llm_intent and llm_intent.intent_type == "NO_RETRIEVAL":
-                    if self.small_talk_responder is not None:
-                        answer_text = await self.small_talk_responder.respond(message, llm_intent.label)
+                    # Treat generic OTHER as off-topic to avoid a misleading overview.
+                    label = llm_intent.label
+                    if label == "OTHER":
+                        label = "OFF_TOPIC"
+                    # Use deterministic replies for GREETING to avoid partial outputs.
+                    if label == "GREETING":
+                        answer_text = self._build_no_retrieval_reply(label)
+                    # Use LLM responder only for safe small-talk intents.
+                    elif label in {"SMALL_TALK", "THANKS", "GOODBYE"} and self.small_talk_responder is not None:
+                        answer_text = await self.small_talk_responder.respond(message, label)
                     else:
-                        answer_text = self._build_no_retrieval_reply(llm_intent.label)
+                        answer_text = self._build_no_retrieval_reply(label)
                     return {
                         "mode": "conversational",
                         "response": answer_text,
                         "sources": [],
                         "products_matched": [],
-                        "intent": llm_intent.label.lower(),
+                        "intent": label.lower(),
                         "intent_type": "NO_RETRIEVAL",
                         "suggested_action": None,
                         "confidence": 1.0,
@@ -219,6 +446,20 @@ class ConversationalMode:
 
         # Match relevant products
         products = self.product_matcher.match_products(message, top_k=3)
+
+        # If it's not about the domain and no products match, treat as off-topic.
+        if not _is_domain_related(message) and not products:
+            answer_text = self._build_no_retrieval_reply("OFF_TOPIC")
+            return {
+                "mode": "conversational",
+                "response": answer_text,
+                "sources": [],
+                "products_matched": [],
+                "intent": "off_topic",
+                "intent_type": "NO_RETRIEVAL",
+                "suggested_action": None,
+                "confidence": 1.0,
+            }
 
         # Classify high-level semantic intent before retrieval (OVERVIEW, BUSINESS_UNIT, PRODUCT_LIST, etc.)
         session_for_intent = self.state_manager.get_session(session_id) or {}
@@ -514,24 +755,52 @@ class ConversationalMode:
         message_lower = message.lower()
 
         # Quote/Purchase intents
-        if any(word in message_lower for word in ["quote", "how much", "price", "cost", "premium"]):
+        if any(
+            word in message_lower
+            for word in [
+                "quote",
+                "how much",
+                "price",
+                "cost",
+                "premium",
+                "afford",
+                "budget",
+                "payment",
+                "installment",
+                "monthly",
+            ]
+        ):
             return "quote"
 
         if any(word in message_lower for word in ["buy", "purchase", "apply", "get insurance"]):
             return "buy"
 
         # Discovery / learning intents
-        if any(word in message_lower for word in ["what is", "tell me about", "explain", "how does"]):
+        if any(word in message_lower for word in ["what is", "tell me about", "explain", "how does", "guide me", "learn about"]):
             return "learn"
 
-        if any(word in message_lower for word in ["compare", "difference", "vs", "versus"]):
+        if any(word in message_lower for word in ["compare", "difference", "vs", "versus", "better than", "which is better", "which one is better"]):
             return "compare"
 
-        if any(word in message_lower for word in ["need", "looking for", "want", "recommend"]):
+        if any(
+            word in message_lower
+            for word in [
+                "need",
+                "looking for",
+                "want",
+                "recommend",
+                "suggest",
+                "advise",
+                "help me choose",
+            ]
+        ):
             return "discover"
 
         # Claims/Support
-        if any(word in message_lower for word in ["claim", "file", "submit"]):
+        if any(
+            word in message_lower
+            for word in ["claim", "file", "submit", "accident", "incident", "loss", "damage", "hospital", "urgent"]
+        ):
             return "claim"
 
         # Default
@@ -547,6 +816,8 @@ class ConversationalMode:
             return None
 
         # Greetings
+        if _is_greeting(m) and any(k in m for k in ["help", "assist", "support"]):
+            return "HELP"
         if _is_greeting(m):
             return "GREETING"
 
@@ -558,6 +829,14 @@ class ConversationalMode:
             "thanks!",
             "thx",
             "thank u",
+            "thanks a lot",
+            "much appreciated",
+            "appreciate it",
+            "cheers",
+            "ty",
+            "thnx",
+            "🙏",
+            "👍",
         }
         if m in thanks_phrases:
             return "THANKS"
@@ -570,6 +849,13 @@ class ConversationalMode:
             "goodbye!",
             "see you",
             "see you later",
+            "see ya",
+            "cya",
+            "catch you later",
+            "talk later",
+            "i'm done",
+            "that is all",
+            "that's all",
         }
         if m in goodbye_phrases:
             return "GOODBYE"
@@ -582,12 +868,44 @@ class ConversationalMode:
             "how are u?",
             "how's it going",
             "how's it going?",
-            "hi"
-            "whatsapp"
-            "hello"
+            "hi",
+            "whatsapp",
+            "hello",
+            "what's up",
+            "whats up",
+            "wassup",
+            "are you there",
+            "you there",
+            "you around",
+            "available?",
+            "busy?",
         }
         if m in small_talk_phrases:
             return "SMALL_TALK"
+
+
+        # Off-topic personal/identity questions (avoid retrieval)
+        if any(
+            k in m
+            for k in [
+                "do you know",
+                "who is",
+                "who's",
+                "who are",
+                "do you know about",
+                "what's your name",
+                "what is your name",
+                "where are you",
+                "are you real",
+            ]
+        ):
+            if "old mutual" not in m and "policy" not in m and "insurance" not in m:
+                return "OFF_TOPIC"
+
+        # Personal feelings without a clear product/insurance context
+        if any(k in m for k in ["i feel", "i'm feeling", "i am feeling", "i feel like", "i feel so", "i'm sad", "i am sad"]):
+            if not any(k in m for k in ["insurance", "policy", "claim", "quote", "premium", "cover", "coverage"]):
+                return "OFF_TOPIC"
 
         return None
 
@@ -608,9 +926,18 @@ class ConversationalMode:
             return "You’re welcome. Feel free to come back any time you need help with Old Mutual products or services."
         if kind == "SMALL_TALK":
             return "I’m doing well, thank you for asking. How can I help you with Old Mutual products or services today?"
+        if kind == "HELP":
+            return (
+                "Sure — what do you need help with? You can ask about a product, coverage, claims, or getting a quote."
+            )
+        if kind == "OFF_TOPIC":
+            return (
+                "I’m here to help with Old Mutual products and services. "
+                "If you have a question about insurance, savings, or claims, I can help with that."
+            )
 
         # Fallback – should rarely be hit.
-        return "How can I help you with Old Mutual products or services today?"
+        return "I’m here to help with Old Mutual products and services. What would you like to know?"
 
     def _classify_intent(
         self,
@@ -716,7 +1043,20 @@ class ConversationalMode:
             return "FOLLOW_UP"
 
         # Business-unit style without explicit "Old Mutual" but clearly about a function
-        if any(k in m for k in ["investment arm", "investment business", "financial services arm"]):
+        if any(
+            k in m
+            for k in [
+                "investment arm",
+                "investment business",
+                "financial services arm",
+                "unit trust",
+                "unit trusts",
+                "collective investment",
+                "collective investment scheme",
+                "mutual fund",
+                "mutual funds",
+            ]
+        ):
             return "BUSINESS_UNIT"
 
         # Fallbacks based on coarse intent and presence of "old mutual"
@@ -752,7 +1092,7 @@ class ConversationalMode:
 
         # Build human-readable bullets with a few flagship products per category
         lines: List[str] = []
-        lines.append("According to our documentation, Old Mutual Uganda offers:")
+        lines.append("Here’s an overview of what Old Mutual Uganda offers:")
 
         for cat, items in sorted(by_category.items()):
             # Sort products by name and pick a small sample so the list stays concise.

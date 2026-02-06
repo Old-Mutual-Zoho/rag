@@ -48,6 +48,8 @@ Your job is to decide whether a single user message is:
 - SMALL_TALK    (e.g. "how are you", "what's up")
 - THANKS        (e.g. "thanks", "thank you")
 - GOODBYE       (e.g. "bye", "see you")
+- HELP          (user asks for help without a clear topic)
+- OFF_TOPIC     (personal/irrelevant questions not about Old Mutual or insurance)
 - INFO_QUERY    (general informational question about Old Mutual, insurance, products, coverage, claims, processes)
 - PRODUCT_QUERY (question clearly about a specific product or benefit)
 - COMPARISON    (compare products, companies, or options)
@@ -55,13 +57,13 @@ Your job is to decide whether a single user message is:
 
 You MUST respond with STRICT JSON using this shape:
 {
-  "label": "GREETING" | "SMALL_TALK" | "THANKS" | "GOODBYE" | "INFO_QUERY" | "PRODUCT_QUERY" | "COMPARISON" | "OTHER",
+    "label": "GREETING" | "SMALL_TALK" | "THANKS" | "GOODBYE" | "HELP" | "OFF_TOPIC" | "INFO_QUERY" | "PRODUCT_QUERY" | "COMPARISON" | "OTHER",
   "intent_type": "NO_RETRIEVAL" | "INFORMATIONAL",
   "should_retrieve": true | false
 }
 
 Rules:
-- Use intent_type = "NO_RETRIEVAL" for GREETING, SMALL_TALK, THANKS, GOODBYE.
+- Use intent_type = "NO_RETRIEVAL" for GREETING, SMALL_TALK, THANKS, GOODBYE, HELP, OFF_TOPIC.
 - Use intent_type = "INFORMATIONAL" only when the user is clearly asking for information.
 - should_retrieve should be true only when intent_type = "INFORMATIONAL".
 - For vague or short messages that are not clearly asking for information, prefer NO_RETRIEVAL.
@@ -92,6 +94,21 @@ Rules:
             label = str(obj.get("label") or "OTHER").upper()
             intent_type = str(obj.get("intent_type") or "").upper()
             should_retrieve = bool(obj.get("should_retrieve", False))
+
+            allowed_labels = {
+                "GREETING",
+                "SMALL_TALK",
+                "THANKS",
+                "GOODBYE",
+                "HELP",
+                "OFF_TOPIC",
+                "INFO_QUERY",
+                "PRODUCT_QUERY",
+                "COMPARISON",
+                "OTHER",
+            }
+            if label not in allowed_labels:
+                label = "OTHER"
 
             if intent_type not in {"NO_RETRIEVAL", "INFORMATIONAL"}:
                 # Default conservatively to INFORMATIONAL only when explicit.
