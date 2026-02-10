@@ -96,72 +96,94 @@ def retrieve_context(
     """
     from src.utils.synonym_expander import SynonymExpander
 
-    expander = SynonymExpander()
-    search_query = expander.expand_query(question)
+    try:
+        expander = SynonymExpander()
+        search_query = expander.expand_query(question)
+        logger.debug(f"Expanded query: '{question}' -> '{search_query}'")
 
-    embedder = _embedder_from_config(cfg)
-    store = _vector_store_from_config(cfg)
+        logger.info(f"Initializing embedder with provider: {cfg.embeddings.provider}")
+        embedder = _embedder_from_config(cfg)
 
-    # Fetch extra candidates so we can re-rank by product-term overlap (e.g. "Somesa" in chunk)
-    fetch_k = min(top_k * 2, 20)
-    qvec = embedder.embed_query(search_query)
+        logger.info(f"Initializing vector store with provider: {cfg.vector_store.provider}")
+        store = _vector_store_from_config(cfg)
 
-    store_class = type(store).__name__
-    if store_class == "PgVectorStore":
-        # Table/collection creation is handled during ingest/startup; avoid
-        # running DDL on every query to keep latency low.
-        hits = store.search(query_vector=qvec, limit=fetch_k, filters=filters)
-    elif store_class == "QdrantVectorStore":
-        kw: Dict[str, Any] = {"query_vector": qvec, "limit": fetch_k}
-        if filters:
-            from qdrant_client.http import models as qm
+        # Fetch extra candidates so we can re-rank by product-term overlap (e.g. "Somesa" in chunk)
+        fetch_k = min(top_k * 2, 20)
 
-            conditions: List[qm.FieldCondition] = []
-            for k, v in filters.items():
-                if v is None:
-                    continue
-                # Our public filter API uses filters["products"] = [doc_id, ...]
-                # to restrict results by payload.doc_id.
-                if k == "products" and isinstance(v, (list, tuple)):
-                    vals = [x for x in v if x]
-                    if not vals:
+        logger.debug(f"Embedding query: {search_query[:100]}...")
+        qvec = embedder.embed_query(search_query)
+        logger.debug(f"Query vector shape: {len(qvec)}")
+
+        store_class = type(store).__name__
+        logger.info(f"Searching with {store_class}, fetch_k={fetch_k}")
+
+        if store_class == "PgVectorStore":
+            # Table/collection creation is handled during ingest/startup; avoid
+            # running DDL on every query to keep latency low.
+            hits = store.search(query_vector=qvec, limit=fetch_k, filters=filters)
+        elif store_class == "QdrantVectorStore":
+            kw: Dict[str, Any] = {"query_vector": qvec, "limit": fetch_k}
+            if filters:
+                from qdrant_client.http import models as qm
+
+                conditions: List[qm.FieldCondition] = []
+                for k, v in filters.items():
+                    if v is None:
                         continue
-                    # Qdrant payload is flat (doc_id stored at top level in payload).
-                    # Use MatchAny for lists.
-                    if hasattr(qm, "MatchAny"):
-                        conditions.append(qm.FieldCondition(key="doc_id", match=qm.MatchAny(any=vals)))
-                    else:  # pragma: no cover - very old qdrant-client
-                        # Fallback: OR as should-clause
-                        any_conditions = [qm.FieldCondition(key="doc_id", match=qm.MatchValue(value=x)) for x in vals]
-                        kw["filter"] = qm.Filter(should=any_conditions)
-                        conditions = []
-                        break
-                    continue
+                    # Our public filter API uses filters["products"] = [doc_id, ...]
+                    # to restrict results by payload.doc_id.
+                    if k == "products" and isinstance(v, (list, tuple)):
+                        vals = [x for x in v if x]
+                        if not vals:
+                            continue
+                        # Qdrant payload is flat (doc_id stored at top level in payload).
+                        # Use MatchAny for lists.
+                        if hasattr(qm, "MatchAny"):
+                            conditions.append(qm.FieldCondition(key="doc_id", match=qm.MatchAny(any=vals)))
+                        else:  # pragma: no cover - very old qdrant-client
+                            # Fallback: OR as should-clause
+                            any_conditions = [qm.FieldCondition(key="doc_id", match=qm.MatchValue(value=x)) for x in vals]
+                            kw["filter"] = qm.Filter(should=any_conditions)
+                            conditions = []
+                            break
+                        continue
 
-                # Scalar filters (category, type, chunk_type, etc.)
-                conditions.append(qm.FieldCondition(key=k, match=qm.MatchValue(value=v)))
-            if conditions:
-                kw["filter"] = qm.Filter(must=conditions)
-        hits = store.search(**kw)
-    else:
-        hits = store.search(query_vector=qvec, limit=fetch_k, filters=filters or {})
+                    # Scalar filters (category, type, chunk_type, etc.)
+                    conditions.append(qm.FieldCondition(key=k, match=qm.MatchValue(value=v)))
+                if conditions:
+                    kw["filter"] = qm.Filter(must=conditions)
+            hits = store.search(**kw)
+        else:
+            hits = store.search(query_vector=qvec, limit=fetch_k, filters=filters or {})
 
-    if cfg.retrieval.hybrid.enabled:
-        from src.rag.keyword_search import BM25KeywordSearch
+        logger.info(f"Retrieved {len(hits)} hits from vector store")
 
-        bm25 = BM25KeywordSearch()
-        if bm25.load_index():
-            bm25_hits = bm25.search(query=search_query, top_k=fetch_k, filters=filters)
-            seen = {h["id"] for h in hits}
-            for h in bm25_hits:
-                if h["id"] not in seen and len(hits) < fetch_k:
-                    hits.append(h)
-                    seen.add(h["id"])
-            hits = hits[:fetch_k]
+        if cfg.retrieval.hybrid.enabled:
+            from src.rag.keyword_search import BM25KeywordSearch
 
-    # Re-rank: prefer chunks that contain query/product terms (e.g. "Somesa" in title/text)
-    _rerank_by_term_overlap(hits, search_query)
-    return hits[:top_k]
+            logger.info("Hybrid search enabled, merging with BM25 results")
+            bm25 = BM25KeywordSearch()
+            if bm25.load_index():
+                bm25_hits = bm25.search(query=search_query, top_k=fetch_k, filters=filters)
+                logger.info(f"BM25 returned {len(bm25_hits)} hits")
+                seen = {h["id"] for h in hits}
+                for h in bm25_hits:
+                    if h["id"] not in seen and len(hits) < fetch_k:
+                        hits.append(h)
+                        seen.add(h["id"])
+                hits = hits[:fetch_k]
+            else:
+                logger.warning("BM25 index not found, skipping hybrid merge")
+
+        # Re-rank: prefer chunks that contain query/product terms (e.g. "Somesa" in title/text)
+        _rerank_by_term_overlap(hits, search_query)
+        final_hits = hits[:top_k]
+        logger.info(f"Returning {len(final_hits)} hits after reranking")
+        return final_hits
+
+    except Exception as e:
+        logger.error(f"Error during retrieval for question '{question}': {type(e).__name__}: {e}", exc_info=True)
+        return []  # Return empty list instead of raising, so generation can handle gracefully
 
 
 def get_vector_table_count(cfg: RAGConfig) -> Optional[int]:

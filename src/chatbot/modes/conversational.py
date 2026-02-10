@@ -91,14 +91,12 @@ class ConversationalMode:
         self.product_matcher = product_matcher
         self.state_manager = state_manager
 
-        # Optional LLM-based intent classifier & small-talk responder.
+        # Optional LLM-based small-talk responder.
         try:
-            from src.chatbot.intent_classifier import IntentClassifier, SmallTalkResponder
+            from src.chatbot.intent_classifier import SmallTalkResponder
 
-            self.intent_classifier = IntentClassifier()
             self.small_talk_responder = SmallTalkResponder()
         except Exception:
-            self.intent_classifier = None
             self.small_talk_responder = None
 
         # Lazily import response processor to avoid circular imports at module load time
@@ -173,12 +171,18 @@ class ConversationalMode:
                 return await self._process_product_guide_action({"action": section_action}, session_id)
 
         # NO_RETRIEVAL intents (greetings, small talk, thanks, goodbyes).
-        # First, apply a very small heuristic gate for obvious cases.
         if form_data is None:
             no_ret_kind = self._detect_no_retrieval_intent(message)
             if no_ret_kind:
-                # Obvious small-talk/greeting/thanks/goodbye: skip classifier and RAG.
-                answer_text = self._build_no_retrieval_reply(no_ret_kind)
+                # Small-talk/greeting/thanks/goodbye: skip RAG.
+                if self.small_talk_responder is not None:
+                    try:
+                        answer_text = await self.small_talk_responder.respond(message, no_ret_kind)
+                    except Exception:
+                        answer_text = self._build_no_retrieval_reply(no_ret_kind)
+                else:
+                    answer_text = self._build_no_retrieval_reply(no_ret_kind)
+
                 return {
                     "mode": "conversational",
                     "response": answer_text,
@@ -190,118 +194,28 @@ class ConversationalMode:
                     "confidence": 1.0,
                 }
 
-            # For more ambiguous inputs, fall back to LLM-based intent classification
-            # when available. This further separates small talk vs informational queries.
-            if self.intent_classifier is not None:
-                try:
-                    llm_intent = await self.intent_classifier.classify(message)
-                except Exception:
-                    llm_intent = None
-
-                if llm_intent and llm_intent.intent_type == "NO_RETRIEVAL":
-                    if self.small_talk_responder is not None:
-                        answer_text = await self.small_talk_responder.respond(message, llm_intent.label)
-                    else:
-                        answer_text = self._build_no_retrieval_reply(llm_intent.label)
-                    return {
-                        "mode": "conversational",
-                        "response": answer_text,
-                        "sources": [],
-                        "products_matched": [],
-                        "intent": llm_intent.label.lower(),
-                        "intent_type": "NO_RETRIEVAL",
-                        "suggested_action": None,
-                        "confidence": 1.0,
-                    }
-
         # Detect coarse intent (quote/buy/learn/etc.)
         intent = self._detect_intent(message)
 
         # Match relevant products
         products = self.product_matcher.match_products(message, top_k=3)
 
-        # Classify high-level semantic intent before retrieval (OVERVIEW, BUSINESS_UNIT, PRODUCT_LIST, etc.)
-        session_for_intent = self.state_manager.get_session(session_id) or {}
-        semantic_intent = self._classify_intent(
-            message=message,
-            coarse_intent=intent,
-            products=products,
-            conversation_state=session_for_intent,
-        )
-
-        # For high-level OVERVIEW questions (e.g. "What does Old Mutual offer?")
-        # return a structured, category-based summary built directly from the
-        # product index instead of deep-diving into a couple of random products.
-        if semantic_intent == "OVERVIEW" and not products:
-            overview_text, _overview_sources = self._build_overview_summary()
-            return {
-                "mode": "conversational",
-                "response": overview_text,
-                "sources": [],
-                "products_matched": [],
-                "intent": intent,
-                "intent_type": semantic_intent,
-                "suggested_action": None,
-                "confidence": 0.7,
-            }
-
         # Build filters for RAG retrieval.
-        # Key principle: default to ONE product when we're confident; otherwise
-        # leave retrieval unfiltered so the model can ask a clarifying question.
         filters: Dict[str, Any] = {}
         if products:
             top_score = float(products[0][0] or 0.0)
             second_score = float(products[1][0] or 0.0) if len(products) > 1 else 0.0
             is_confident = (top_score >= 1.2) and (top_score >= second_score + 0.5)
 
-            if intent == "compare" or semantic_intent == "COMPARISON":
+            if intent == "compare":
                 # Comparing products: allow multiple doc_ids.
                 filters["products"] = [p[2]["product_id"] for p in products[:3]]
             elif is_confident:
                 # Single-product intent: restrict to the best match.
                 filters["products"] = [products[0][2]["product_id"]]
-            else:
-                # Not confident: avoid accidental wrong-product filtering.
-                filters = {}
-        elif semantic_intent == "PRODUCT_LIST":
-            # "What products do you have under X?" – focus on product documents.
-            filters["type"] = "product"
-        elif semantic_intent == "BUSINESS_UNIT":
-            # Questions like "What does Old Mutual Investments do?"
-            # Prefer info/about-us style pages over individual products.
-            filters["type"] = "info_page"
 
         # Retrieve relevant documents (hybrid BM25 + vector via APIRAGAdapter).
-        # Tune depth per high-level intent:
-        # - OVERVIEW/BUSINESS_UNIT: fetch more context so the LLM can summarise.
-        # - PRODUCT_DETAIL: tighter, product-specific chunks only.
-        # - default: use config top_k.
-        top_k: Optional[int]
-        if semantic_intent in {"OVERVIEW", "BUSINESS_UNIT"}:
-            top_k = 15
-        elif semantic_intent == "PRODUCT_DETAIL":
-            top_k = 5
-        else:
-            top_k = None
-
-        retrieval_results = await self.rag.retrieve(query=message, filters=filters or None, top_k=top_k)
-
-        # Defensive gate: for OVERVIEW intents, ensure we don't answer using only
-        # product-level documents. If all hits are product chunks, enrich with
-        # high-level info pages (about-us, business units).
-        if semantic_intent == "OVERVIEW":
-            has_non_product = any(
-                (h.get("payload") or {}).get("type") and (h.get("payload") or {}).get("type") != "product"
-                for h in retrieval_results
-            )
-            if not has_non_product:
-                extra_info_hits = await self.rag.retrieve(query=message, filters={"type": "info_page"}, top_k=5)
-                if extra_info_hits:
-                    seen_ids = {h["id"] for h in retrieval_results}
-                    for h in extra_info_hits:
-                        if h["id"] not in seen_ids:
-                            retrieval_results.append(h)
-                            seen_ids.add(h["id"])
+        retrieval_results = await self.rag.retrieve(query=message, filters=filters or None, top_k=None)
 
         # Generate response
         response = await self.rag.generate(query=message, context_docs=retrieval_results, conversation_history=self._get_recent_history(session_id))
@@ -423,7 +337,7 @@ class ConversationalMode:
             "sources": response.get("sources", []),
             "products_matched": [p[2]["name"] for p in products],
             "intent": intent,
-            "intent_type": semantic_intent,
+            "intent_type": "INFORMATIONAL",
             "suggested_action": suggested_action,
             "confidence": response.get("confidence", 0.5),
         }
@@ -611,173 +525,6 @@ class ConversationalMode:
 
         # Fallback – should rarely be hit.
         return "How can I help you with Old Mutual products or services today?"
-
-    def _classify_intent(
-        self,
-        *,
-        message: str,
-        coarse_intent: str,
-        products: List[Any],
-        conversation_state: Dict[str, Any],
-    ) -> str:
-        """
-        High-level semantic intent classifier used *before* retrieval.
-
-        Intent types:
-        - OVERVIEW: "What does Old Mutual offer?"
-        - BUSINESS_UNIT: "What does Old Mutual Investments do?"
-        - PRODUCT_LIST: "What products do you have under Life Insurance?"
-        - PRODUCT_DETAIL: "Tell me about Old Mutual FlexiCover"
-        - COMPARISON: "Compare Old Mutual vs Sanlam"
-        - FOLLOW_UP: short, contextual questions like "What about investments?"
-        """
-        m = (message or "").strip().lower()
-        if not m:
-            return "FOLLOW_UP"
-
-        ctx = conversation_state.get("context") or {}
-
-        # Explicit comparison cues
-        if any(k in m for k in ["compare", "difference between", " vs ", " versus "]) or coarse_intent == "compare":
-            return "COMPARISON"
-
-        # Company-/group-level overview questions
-        if "old mutual" in m:
-            if any(k in m for k in ["investments", "financial services", "asset management", "life assurance"]):
-                return "BUSINESS_UNIT"
-            if any(
-                k in m
-                for k in [
-                    "what do you offer",
-                    "what do you have to offer",
-                    "what does old mutual offer",
-                    "what does old mutual have to offer",
-                    "what products do you have",
-                    "what services do you have",
-                    "what products do you offer",
-                    "what services do you offer",
-                    "what do you do",
-                    "about you",
-                    "about old mutual",
-                ]
-            ):
-                return "OVERVIEW"
-
-        # Product list questions: asking for a menu of options under a category
-        if any(
-            k in m
-            for k in [
-                "products do you have under",
-                "plans do you have under",
-                "products under",
-                "plans under",
-                "options under",
-            ]
-        ):
-            return "PRODUCT_LIST"
-        if any(
-            k in m
-            for k in [
-                "what products do you have",
-                "what plans do you have",
-                "what options do you have",
-            ]
-        ) and any(
-            cat in m
-            for cat in [
-                "life insurance",
-                "life cover",
-                "health insurance",
-                "medical insurance",
-                "motor insurance",
-                "car insurance",
-                "travel insurance",
-                "savings",
-                "investment",
-                "investments",
-            ]
-        ):
-            return "PRODUCT_LIST"
-
-        # Product detail: strong match to a specific product name
-        if products:
-            top_score = float(products[0][0] or 0.0)
-            if top_score >= 1.2 and coarse_intent in {"learn", "discover", "general"}:
-                return "PRODUCT_DETAIL"
-
-        # Follow-up style: short queries that rely on prior context
-        tokens = m.split()
-        if len(tokens) <= 4 and any(
-            phrase in m for phrase in ["what about", "how about", "and ", "more about", "tell me more"]
-        ):
-            return "FOLLOW_UP"
-        if len(tokens) <= 2 and ctx:
-            # Single-word/very short follow-ups like "investments?" or "motor?"
-            return "FOLLOW_UP"
-
-        # Business-unit style without explicit "Old Mutual" but clearly about a function
-        if any(k in m for k in ["investment arm", "investment business", "financial services arm"]):
-            return "BUSINESS_UNIT"
-
-        # Fallbacks based on coarse intent and presence of "old mutual"
-        if "old mutual" in m and coarse_intent in {"learn", "discover", "general"}:
-            return "OVERVIEW"
-
-        if coarse_intent == "discover":
-            return "OVERVIEW"
-
-        # Very short, low-information inputs (e.g. "hello", "hi") should never be
-        # treated as OVERVIEW. Treat them as FOLLOW_UP so that they can be gated
-        # by no-retrieval logic upstream.
-        if len(tokens) <= 2:
-            return "FOLLOW_UP"
-
-        return "FOLLOW_UP" if ctx else "OVERVIEW"
-
-    def _build_overview_summary(self) -> tuple[str, List[Dict[str, Any]]]:
-        """
-        Build a high-level overview answer from the product index, grouped by category.
-
-        This is used for OVERVIEW intent such as "What does Old Mutual offer?"
-        so that the user sees the breadth of offerings (by business line) instead
-        of a deep dive into just one or two products.
-        """
-        # Collect products by top-level category name (e.g. "personal", "business")
-        by_category: Dict[str, List[Dict[str, Any]]] = {}
-        for p in self.product_matcher.product_index.values():
-            cat = (p.get("category_name") or "Other").strip()
-            if not cat:
-                cat = "Other"
-            by_category.setdefault(cat, []).append(p)
-
-        # Build human-readable bullets with a few flagship products per category
-        lines: List[str] = []
-        lines.append("According to our documentation, Old Mutual Uganda offers:")
-
-        for cat, items in sorted(by_category.items()):
-            # Sort products by name and pick a small sample so the list stays concise.
-            items_sorted = sorted(items, key=lambda x: (x.get("name") or "").lower())
-            sample = items_sorted[:3]
-            names = [i.get("name") for i in sample if i.get("name")]
-            if not names:
-                continue
-
-            more_suffix = " and more" if len(items_sorted) > len(sample) else ""
-            lines.append(f"- **{cat}**: {', '.join(names)}{more_suffix}.")
-
-        if len(lines) == 1:
-            # No products indexed for some reason – fall back to a generic message.
-            lines.append(
-                "- **Savings & investments**, **life insurance**, **health cover**, and **general insurance** products tailored to different needs."
-            )
-
-        lines.append(
-            "If you tell me what you're most interested in (for example life insurance, health, motor, or savings & investments), I can explain those in more detail."
-        )
-
-        # Second return value kept for backward-compatibility but is unused
-        # by the conversational pipeline (no retrieval → no sources).
-        return "\n".join(lines), []
 
     def _get_recent_history(self, session_id: str, limit: int = 5) -> List[Dict]:
         """Get recent conversation history"""

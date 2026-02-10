@@ -94,10 +94,6 @@ def ingest_chunks_to_qdrant(
             payload = {k: v for k, v in obj.items() if v is not None}
             if "text" not in payload:
                 payload["text"] = text
-            # Ensure a stable id is always present in payload for vector stores
-            # that may rewrite the primary key (e.g. Qdrant UUID point IDs).
-            if "id" not in payload:
-                payload["id"] = chunk_id
             rows.append({"id": chunk_id, "text": text, "payload": payload})
 
     if not rows:

@@ -1,5 +1,6 @@
 import os
 import logging
+import asyncio
 from typing import Any, Dict, List, Tuple
 from google import genai
 from google.genai import types
@@ -34,6 +35,7 @@ class MiaGenerator:
         if not api_key:
             raise RuntimeError("CRITICAL: GEMINI_API_KEY is missing.")
 
+        # Initialize client with API key - google-genai 1.0.0+ takes api_key in constructor
         self.client = genai.Client(api_key=api_key)
         self.max_context_chars = max_context_chars
         self.min_score = min_score
@@ -46,10 +48,15 @@ class MiaGenerator:
 
         filtered_hits = [h for h in hits if h.get("score", 0) >= self.min_score]
         if not filtered_hits:
-            return "", 0, 0.0
+            # If filtering by score removes all hits, use all hits anyway (better than nothing)
+            logger.warning(f"All hits below min_score {self.min_score}, using all {len(hits)} hits anyway")
+            filtered_hits = hits
 
         filtered_hits.sort(key=lambda x: x.get("score", 0), reverse=True)
         avg_score = sum(h.get("score", 0) for h in filtered_hits) / len(filtered_hits)
+
+        # Load chunk texts from file if payload doesn't contain text field
+        chunk_texts = self._load_chunk_texts_if_needed(filtered_hits)
 
         context_parts = []
         current_length = 0
@@ -57,7 +64,18 @@ class MiaGenerator:
 
         for idx, h in enumerate(filtered_hits[:self.max_sources], 1):
             p = h.get("payload") or h
-            chunk = f"[Source {idx}] **{p.get('title', 'Unknown')}**: {p.get('text', '')}\n"
+            chunk_id = h.get("id") or p.get("id")
+
+            # Try to get text from payload first, then from loaded chunks
+            text = p.get("text", "").strip()
+            if not text and chunk_id in chunk_texts:
+                text = chunk_texts[chunk_id]
+
+            if not text:
+                logger.warning(f"No text found for chunk {chunk_id}, skipping")
+                continue
+
+            chunk = f"[Source {idx}] **{p.get('title', 'Unknown')}**: {text}\n"
             if current_length + len(chunk) > self.max_context_chars:
                 break
             context_parts.append(chunk)
@@ -65,6 +83,63 @@ class MiaGenerator:
             sources_used += 1
 
         return "\n".join(context_parts), sources_used, avg_score
+
+    def _load_chunk_texts_if_needed(self, hits: List[Dict[str, Any]]) -> Dict[str, str]:
+        """Load chunk texts from website_chunks.jsonl when payload doesn't contain text."""
+        import json
+        from pathlib import Path
+
+        # Check if any hit is missing text in payload
+        needs_loading = False
+        for h in hits:
+            p = h.get("payload") or h
+            if not p.get("text"):
+                needs_loading = True
+                break
+
+        if not needs_loading:
+            return {}
+
+        # Collect IDs that need text
+        needed_ids = set()
+        for h in hits:
+            p = h.get("payload") or h
+            if not p.get("text"):
+                chunk_id = h.get("id") or p.get("id")
+                if chunk_id:
+                    needed_ids.add(chunk_id)
+
+        if not needed_ids:
+            return {}
+
+        # Load from chunks file
+        chunks_path = Path(__file__).parent.parent.parent / "data" / "processed" / "website_chunks.jsonl"
+        chunk_texts = {}
+
+        if not chunks_path.exists():
+            logger.warning(f"Chunks file not found: {chunks_path}")
+            return {}
+
+        try:
+            with open(chunks_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        chunk = json.loads(line)
+                        chunk_id = chunk.get("id")
+                        if chunk_id in needed_ids:
+                            chunk_texts[chunk_id] = chunk.get("text", "")
+                            if len(chunk_texts) >= len(needed_ids):
+                                break  # Found all needed chunks
+                    except json.JSONDecodeError:
+                        continue
+
+            logger.info(f"Loaded {len(chunk_texts)} chunk texts from file")
+            return chunk_texts
+        except Exception as e:
+            logger.error(f"Error loading chunk texts: {e}")
+            return {}
 
     async def generate(self, question: str, hits: List[Dict[str, Any]]) -> str:
         context, num_sources, avg_score = self._build_context(hits)
@@ -76,26 +151,32 @@ class MiaGenerator:
 
         full_prompt = f"{context_note}\n\n**User Question:** {question}\n\n**Retrieved Data:**\n{context or 'None'}"
 
+        logger.info(f"Generating response for question: {question[:100]}... with {num_sources} sources")
+
         try:
-            # Use the async client wrapper provided by google-genai.
-            # Docs: https://googleapis.github.io/python-genai/
-            response = await self.client.aio.models.generate_content(
-                model=MODEL_NAME,
-                contents=full_prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=SYSTEM_INSTRUCTION,
-                    temperature=self.temperature,
-                    max_output_tokens=600,
-                ),
-            )
+            # Use google-genai 1.0.0 API: use asyncio.to_thread for blocking calls
+            def _sync_generate():
+                response = self.client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=full_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=SYSTEM_INSTRUCTION,
+                        temperature=self.temperature,
+                        max_output_tokens=600,
+                    ),
+                )
+                return response
+
+            response = await asyncio.to_thread(_sync_generate)
 
             text = (getattr(response, "text", "") or "").strip()
             if not text:
                 logger.warning("GenAI returned empty text response.")
                 return "I'm having trouble retrieving those details. Please call 0800-100-900 for immediate help."
 
+            logger.info("Successfully generated response from Gemini API")
             return text
 
         except Exception as e:
-            logger.error(f"GenAI error: {e}", exc_info=True)
+            logger.error(f"GenAI error when generating response: {type(e).__name__}: {e}", exc_info=True)
             return "I'm having trouble retrieving those details. Please call 0800-100-900 for immediate help."
