@@ -282,9 +282,10 @@ class ConversationalMode:
             ctx["pending_section_offer"] = "show_benefits"
             self.state_manager.update_session(session_id, {"context": ctx})
 
-        sources_block = self._format_sources(response.get("sources", []))
-        if sources_block:
-            answer_text = f"{answer_text}\n\n{sources_block}" if answer_text else sources_block
+        # Sources removed from conversation response per user request
+        # sources_block = self._format_sources(response.get("sources", []))
+        # if sources_block:
+        #     answer_text = f"{answer_text}\n\n{sources_block}" if answer_text else sources_block
 
         # If response processor already queued a follow-up, prefer that text over our generic follow_up_prompt
         if follow_up_flag:
