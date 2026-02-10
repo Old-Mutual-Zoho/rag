@@ -27,7 +27,7 @@ class MiaGenerator:
     def __init__(
         self,
         max_context_chars: int = 8000,
-        min_score: float = 0.65,
+        min_score: float = 0.55,
         max_sources: int = 5,
         temperature: float = 0.2  # Lowered for financial accuracy
     ):
@@ -141,7 +141,7 @@ class MiaGenerator:
             logger.error(f"Error loading chunk texts: {e}")
             return {}
 
-    async def generate(self, question: str, hits: List[Dict[str, Any]]) -> str:
+    async def generate(self, question: str, hits: List[Dict[str, Any]], conversation_history: List[Dict] = None) -> str:
         context, num_sources, avg_score = self._build_context(hits)
 
         context_note = (
@@ -149,7 +149,21 @@ class MiaGenerator:
             else "No specific documents found. Provide a general response."
         )
 
-        full_prompt = f"{context_note}\n\n**User Question:** {question}\n\n**Retrieved Data:**\n{context or 'None'}"
+        # Format conversation history
+        history_text = ""
+        if conversation_history:
+            history_lines = []
+            for msg in conversation_history[-5:]:  # Last 5 messages for context
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role == "user":
+                    history_lines.append(f"User: {content}")
+                elif role == "assistant":
+                    history_lines.append(f"Assistant: {content}")
+            if history_lines:
+                history_text = "\n\n**Recent Conversation:**\n" + "\n".join(history_lines) + "\n"
+
+        full_prompt = f"{context_note}\n\n**User Question:** {question}{history_text}\n\n**Retrieved Data:**\n{context or 'None'}"
 
         logger.info(f"Generating response for question: {question[:100]}... with {num_sources} sources")
 
