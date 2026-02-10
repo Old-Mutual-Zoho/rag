@@ -266,17 +266,25 @@ class ConversationalMode:
         # Append a natural follow-up prompt when the user is learning about a product.
         follow_up_prompt = None
         if intent in ("learn", "general", "compare", "discover") and (digital_flow or top_product):
-            # Offer benefits as the next step, but keep the UX conversational.
-            follow_up_prompt = (
-                "Do you have any more questions, or should I share the benefits? "
-                "Reply 'yes' for benefits, or type your next question."
-            )
+            topic_label = topic_name or "this product"
+            answer_lower = (answer_text or "").lower()
+            mentions_benefits = "benefit" in answer_lower
+
+            # Offer benefits only if we didn't already include them.
+            if mentions_benefits:
+                follow_up_prompt = f"Would you like anything else about {topic_label}, such as pricing or eligibility?"
+            else:
+                follow_up_prompt = f"Want me to share the key benefits of {topic_label}?"
 
             # Store what a simple "yes" should do next.
             session = self.state_manager.get_session(session_id) or {}
             ctx = dict(session.get("context") or {})
             ctx["pending_section_offer"] = "show_benefits"
             self.state_manager.update_session(session_id, {"context": ctx})
+
+        sources_block = self._format_sources(response.get("sources", []))
+        if sources_block:
+            answer_text = f"{answer_text}\n\n{sources_block}" if answer_text else sources_block
 
         # If response processor already queued a follow-up, prefer that text over our generic follow_up_prompt
         if follow_up_flag:
@@ -548,3 +556,25 @@ class ConversationalMode:
             "min_premium": product.get("min_premium"),
             "actions": [{"type": "learn_more", "label": "Learn More"}, {"type": "get_quote", "label": "Get a Quote"}],
         }
+
+    def _format_sources(self, sources: List[Dict]) -> str:
+        if not sources:
+            return ""
+
+        items = []
+        seen = set()
+        for s in sources:
+            payload = s.get("payload") or s
+            title = (payload.get("title") or "Source").strip()
+            url = (payload.get("url") or "").strip()
+            if not url:
+                continue
+            key = (title, url)
+            if key in seen:
+                continue
+            seen.add(key)
+            items.append(f"- {title}: {url}")
+
+        if not items:
+            return ""
+        return "Sources:\n" + "\n".join(items)

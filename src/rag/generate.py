@@ -1,6 +1,7 @@
 import os
 import logging
 import asyncio
+import random
 from typing import Any, Dict, List, Tuple
 from google import genai
 from google.genai import types
@@ -16,10 +17,10 @@ MODEL_NAME = "gemini-2.5-flash"
 SYSTEM_INSTRUCTION = """
 You are MIA, the Senior Virtual Assistant for Old Mutual Uganda.
 PROTOCOL:
-1. ALWAYS prioritize 'Retrieved Data'. Cite: "According to our documentation..."
-2. If context is empty, give a general overview and provide contact: 0800-100-900.
+1. Prioritize 'Retrieved Data' but respond naturally without scripted phrases.
+2. If context is empty, give a general overview. Offer contact details only if the user asks for quotes/contact or next steps.
 3. FORMAT: Bullet points, **bold** terms, under 12 lines.
-4. TONE: Professional, friendly, sales-oriented.
+4. TONE: Professional, friendly, sales-oriented. Avoid generic greetings.
 """.strip()
 
 
@@ -41,6 +42,38 @@ class MiaGenerator:
         self.min_score = min_score
         self.max_sources = max_sources
         self.temperature = temperature
+
+    def _build_history_summary(self, conversation_history: List[Dict]) -> str:
+        if not conversation_history:
+            return ""
+
+        last_user = ""
+        last_assistant = ""
+        for msg in reversed(conversation_history):
+            role = msg.get("role")
+            content = (msg.get("content") or "").strip()
+            if role == "assistant" and not last_assistant and content:
+                last_assistant = content
+            if role == "user" and not last_user and content:
+                last_user = content
+            if last_user and last_assistant:
+                break
+
+        if not last_user and not last_assistant:
+            return ""
+
+        def _shorten(text: str, max_len: int = 240) -> str:
+            cleaned = " ".join(text.split())
+            if len(cleaned) <= max_len:
+                return cleaned
+            return cleaned[: max_len - 3].rstrip() + "..."
+
+        parts = []
+        if last_user:
+            parts.append(f"User asked about: {_shorten(last_user)}")
+        if last_assistant:
+            parts.append(f"Assistant replied: {_shorten(last_assistant)}")
+        return " | ".join(parts)
 
     def _build_context(self, hits: List[Dict[str, Any]]) -> Tuple[str, int, float]:
         if not hits:
@@ -150,6 +183,12 @@ class MiaGenerator:
         )
 
         # Format conversation history
+        summary_text = ""
+        if conversation_history:
+            summary = self._build_history_summary(conversation_history)
+            if summary:
+                summary_text = f"\n\n**Conversation Summary:** {summary}"
+
         history_text = ""
         if conversation_history:
             history_lines = []
@@ -163,34 +202,47 @@ class MiaGenerator:
             if history_lines:
                 history_text = "\n\n**Recent Conversation:**\n" + "\n".join(history_lines) + "\n"
 
-        full_prompt = f"{context_note}\n\n**User Question:** {question}{history_text}\n\n**Retrieved Data:**\n{context or 'None'}"
+        full_prompt = f"{context_note}{summary_text}\n\n**User Question:** {question}{history_text}\n\n**Retrieved Data:**\n{context or 'None'}"
 
         logger.info(f"Generating response for question: {question[:100]}... with {num_sources} sources")
 
-        try:
-            # Use google-genai 1.0.0 API: use asyncio.to_thread for blocking calls
-            def _sync_generate():
-                response = self.client.models.generate_content(
-                    model=MODEL_NAME,
-                    contents=full_prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM_INSTRUCTION,
-                        temperature=self.temperature,
-                        max_output_tokens=600,
-                    ),
+        # Use google-genai 1.0.0 API: use asyncio.to_thread for blocking calls
+        def _sync_generate():
+            response = self.client.models.generate_content(
+                model=MODEL_NAME,
+                contents=full_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_INSTRUCTION,
+                    temperature=self.temperature,
+                    max_output_tokens=600,
+                ),
+            )
+            return response
+
+        max_attempts = 3
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await asyncio.to_thread(_sync_generate)
+
+                text = (getattr(response, "text", "") or "").strip()
+                if not text:
+                    logger.warning("GenAI returned empty text response.")
+                    return "I'm having trouble retrieving those details right now. Please try again in a moment."
+
+                logger.info("Successfully generated response from Gemini API")
+                return text
+            except Exception as e:
+                if attempt >= max_attempts:
+                    logger.error(f"GenAI error when generating response: {type(e).__name__}: {e}", exc_info=True)
+                    break
+                backoff = (2 ** (attempt - 1)) + random.uniform(0, 0.5)
+                logger.warning(
+                    "GenAI request failed on attempt %s/%s (%s). Retrying in %.2fs...",
+                    attempt,
+                    max_attempts,
+                    type(e).__name__,
+                    backoff,
                 )
-                return response
+                await asyncio.sleep(backoff)
 
-            response = await asyncio.to_thread(_sync_generate)
-
-            text = (getattr(response, "text", "") or "").strip()
-            if not text:
-                logger.warning("GenAI returned empty text response.")
-                return "I'm having trouble retrieving those details. Please call 0800-100-900 for immediate help."
-
-            logger.info("Successfully generated response from Gemini API")
-            return text
-
-        except Exception as e:
-            logger.error(f"GenAI error when generating response: {type(e).__name__}: {e}", exc_info=True)
-            return "I'm having trouble retrieving those details. Please call 0800-100-900 for immediate help."
+        return "I'm having trouble retrieving those details right now. Please try again in a moment."

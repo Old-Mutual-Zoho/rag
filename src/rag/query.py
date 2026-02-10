@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import logging
 import os
+import json
+import time
 from typing import Any, Dict, List, Optional
 
 from src.utils.rag_config_loader import RAGConfig
@@ -15,6 +17,33 @@ logger = logging.getLogger(__name__)
 
 # Minimum length for a "term" when re-ranking by overlap (skip "a", "is", etc.)
 _MIN_TERM_LEN = 2
+
+_CACHE_TTL_S = 300
+_EMBEDDING_CACHE: Dict[str, Dict[str, Any]] = {}
+_RETRIEVAL_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def _cache_get(cache: Dict[str, Dict[str, Any]], key: str) -> Optional[Any]:
+    item = cache.get(key)
+    if not item:
+        return None
+    if time.monotonic() - item["ts"] > _CACHE_TTL_S:
+        cache.pop(key, None)
+        return None
+    return item["value"]
+
+
+def _cache_set(cache: Dict[str, Dict[str, Any]], key: str, value: Any) -> None:
+    cache[key] = {"ts": time.monotonic(), "value": value}
+
+
+def _make_filters_key(filters: Optional[Dict[str, Any]]) -> str:
+    if not filters:
+        return ""
+    try:
+        return json.dumps(filters, sort_keys=True, default=str)
+    except TypeError:
+        return str(filters)
 
 
 def _rerank_by_term_overlap(hits: List[Dict[str, Any]], search_query: str) -> None:
@@ -97,9 +126,28 @@ def retrieve_context(
     from src.utils.synonym_expander import SynonymExpander
 
     try:
+        start_ts = time.monotonic()
         expander = SynonymExpander()
         search_query = expander.expand_query(question)
         logger.debug(f"Expanded query: '{question}' -> '{search_query}'")
+
+        filters_key = _make_filters_key(filters)
+        retrieval_cache_key = "|".join(
+            [
+                str(cfg.vector_store.provider),
+                str(cfg.vector_store.collection),
+                str(cfg.embeddings.provider),
+                str(cfg.embeddings.model),
+                str(cfg.retrieval.hybrid.enabled),
+                str(top_k),
+                search_query,
+                filters_key,
+            ]
+        )
+        cached_hits = _cache_get(_RETRIEVAL_CACHE, retrieval_cache_key)
+        if cached_hits is not None:
+            logger.info("Retrieval cache hit for query")
+            return list(cached_hits)
 
         logger.info(f"Initializing embedder with provider: {cfg.embeddings.provider}")
         embedder = _embedder_from_config(cfg)
@@ -110,13 +158,20 @@ def retrieve_context(
         # Fetch extra candidates so we can re-rank by product-term overlap (e.g. "Somesa" in chunk)
         fetch_k = min(top_k * 2, 20)
 
+        embed_start = time.monotonic()
         logger.debug(f"Embedding query: {search_query[:100]}...")
-        qvec = embedder.embed_query(search_query)
+        embed_cache_key = "|".join([str(cfg.embeddings.provider), str(cfg.embeddings.model), search_query])
+        qvec = _cache_get(_EMBEDDING_CACHE, embed_cache_key)
+        if qvec is None:
+            qvec = embedder.embed_query(search_query)
+            _cache_set(_EMBEDDING_CACHE, embed_cache_key, qvec)
+        embed_ms = (time.monotonic() - embed_start) * 1000
         logger.debug(f"Query vector shape: {len(qvec)}")
 
         store_class = type(store).__name__
         logger.info(f"Searching with {store_class}, fetch_k={fetch_k}")
 
+        vector_start = time.monotonic()
         if store_class == "PgVectorStore":
             # Table/collection creation is handled during ingest/startup; avoid
             # running DDL on every query to keep latency low.
@@ -156,12 +211,15 @@ def retrieve_context(
         else:
             hits = store.search(query_vector=qvec, limit=fetch_k, filters=filters or {})
 
+        vector_ms = (time.monotonic() - vector_start) * 1000
         logger.info(f"Retrieved {len(hits)} hits from vector store")
 
+        bm25_ms = 0.0
         if cfg.retrieval.hybrid.enabled:
             from src.rag.keyword_search import BM25KeywordSearch
 
             logger.info("Hybrid search enabled, merging with BM25 results")
+            bm25_start = time.monotonic()
             bm25 = BM25KeywordSearch()
             if bm25.load_index():
                 bm25_hits = bm25.search(query=search_query, top_k=fetch_k, filters=filters)
@@ -174,11 +232,31 @@ def retrieve_context(
                 hits = hits[:fetch_k]
             else:
                 logger.warning("BM25 index not found, skipping hybrid merge")
+            bm25_ms = (time.monotonic() - bm25_start) * 1000
 
         # Re-rank: prefer chunks that contain query/product terms (e.g. "Somesa" in title/text)
+        rerank_start = time.monotonic()
         _rerank_by_term_overlap(hits, search_query)
         final_hits = hits[:top_k]
+        rerank_ms = (time.monotonic() - rerank_start) * 1000
         logger.info(f"Returning {len(final_hits)} hits after reranking")
+        _cache_set(_RETRIEVAL_CACHE, retrieval_cache_key, list(final_hits))
+
+        total_ms = (time.monotonic() - start_ts) * 1000
+        if final_hits:
+            avg_score = sum(float(h.get("score") or 0) for h in final_hits) / len(final_hits)
+        else:
+            avg_score = 0.0
+        logger.info(
+            "Retrieval metrics: hits=%s avg_score=%.4f embed_ms=%.1f vector_ms=%.1f bm25_ms=%.1f rerank_ms=%.1f total_ms=%.1f",
+            len(final_hits),
+            avg_score,
+            embed_ms,
+            vector_ms,
+            bm25_ms,
+            rerank_ms,
+            total_ms,
+        )
         return final_hits
 
     except Exception as e:

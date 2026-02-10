@@ -216,7 +216,7 @@ class APIRAGAdapter:
                 logger.error("MiaGenerator.generate raised unexpectedly: %s", e, exc_info=True)
                 return _extractive_answer()
 
-            fallback_phrase = "I'm having trouble retrieving those details. Please call 0800-100-900 for immediate help."
+            fallback_phrase = "I'm having trouble retrieving those details right now. Please try again in a moment."
             if not answer or fallback_phrase in answer:
                 # LLM unavailable / failed -> use extractive context instead.
                 return _extractive_answer()
