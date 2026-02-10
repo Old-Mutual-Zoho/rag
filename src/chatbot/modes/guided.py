@@ -12,6 +12,7 @@ from ..flows.personal_accident import PersonalAccidentFlow
 from ..flows.travel_insurance import TravelInsuranceFlow
 from ..flows.serenicare import SerenicareFlow
 from ..flows.dynamic_question_engine import DynamicQuestionEngineFlow
+from ..flows.agent_handoff import AgentHandoffFlow
 
 
 class GuidedMode:
@@ -31,6 +32,7 @@ class GuidedMode:
             "travel_insurance": TravelInsuranceFlow(product_catalog, db),
             "motor_private": MotorPrivateFlow(product_catalog, db),
             "serenicare": SerenicareFlow(product_catalog, db),
+            "agent_handoff": AgentHandoffFlow(db),
         }
 
     async def process(self, user_input, session_id: str, user_id: str) -> Dict:

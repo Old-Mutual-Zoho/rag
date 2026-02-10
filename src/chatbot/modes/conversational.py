@@ -302,7 +302,7 @@ class ConversationalMode:
             if digital_flow:
                 suggested_action = {
                     "type": "switch_to_guided",
-                    "message": "I can get you a quotation now.",
+                    "message": "Ready to get started? I can guide you through a few questions to provide a quote.",
                     "flow": "journey",
                     "initial_data": {"product_flow": digital_flow},
                     "buttons": [
@@ -313,20 +313,22 @@ class ConversationalMode:
             elif products:
                 top = products[0][2]
                 suggested_action = {
-                    "type": "access_info",
-                    "message": (
-                        f"{top.get('name', 'This product')} is not available as a digital buy/quote journey in this chatbot. "
-                        "To access it, please visit an Old Mutual branch/agent or contact customer support."
-                        + (f"\n\nMore details: {top.get('url')}" if top.get("url") else "")
-                    ),
+                    "type": "switch_to_guided",
+                    "message": f"{top.get('name', 'This product')} requires agent assistance. Please share your contact details.",
+                    "flow": "agent_handoff",
+                    "initial_data": {"product_name": top.get("name"), "product_url": top.get("url")},
+                    "buttons": [
+                        {"label": "Share details", "action": "start_guided"},
+                        {"label": "Not now", "action": "continue_chat"},
+                    ],
                 }
             else:
                 suggested_action = {
                     "type": "switch_to_guided",
-                    "message": "I can guide you through our available digital products to get a quote.",
-                    "flow": "journey",
+                    "message": "Let me help you find the right solution. Please share your details.",
+                    "flow": "agent_handoff",
                     "buttons": [
-                        {"label": "Start", "action": "start_guided"},
+                        {"label": "Share details", "action": "start_guided"},
                         {"label": "Not now", "action": "continue_chat"},
                     ],
                 }

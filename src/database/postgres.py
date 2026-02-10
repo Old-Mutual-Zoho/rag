@@ -105,6 +105,17 @@ class SerenicareApplication:
     updated_at: datetime = field(default_factory=datetime.utcnow)
 
 
+@dataclass
+class AgentHandoffLead:
+    id: str
+    user_id: str
+    status: str = "new"
+    product_name: Optional[str] = None
+    product_url: Optional[str] = None
+    contact_details: Dict[str, Any] = field(default_factory=dict)
+    created_at: datetime = field(default_factory=datetime.utcnow)
+
+
 class PostgresDB:
     """
     In-memory stand‑in for a Postgres-backed data access layer.
@@ -125,6 +136,8 @@ class PostgresDB:
         self._travel_applications: Dict[str, TravelInsuranceApplication] = {}
         # Serenicare applications
         self._serenicare_applications: Dict[str, SerenicareApplication] = {}
+        # Agent handoff leads
+        self._agent_handoff_leads: Dict[str, AgentHandoffLead] = {}
 
     # ------------------------------------------------------------------ #
     # Schema / lifecycle
@@ -407,3 +420,37 @@ class PostgresDB:
         key_fn = orderable.get(order_by) or orderable["created_at"]
         apps.sort(key=key_fn, reverse=descending)
         return apps
+
+    # ------------------------------------------------------------------ #
+    # Agent handoff leads persistence
+    # ------------------------------------------------------------------ #
+    def create_agent_handoff_lead(self, user_id: str, data: Optional[Dict[str, Any]] = None) -> AgentHandoffLead:
+        lead_id = str(uuid.uuid4())
+        d = data or {}
+        lead = AgentHandoffLead(
+            id=lead_id,
+            user_id=user_id,
+            status="new",
+            product_name=d.get("product_name"),
+            product_url=d.get("product_url"),
+            contact_details=d,
+        )
+        self._agent_handoff_leads[lead_id] = lead
+        return lead
+
+    def get_agent_handoff_lead(self, lead_id: str) -> Optional[AgentHandoffLead]:
+        return self._agent_handoff_leads.get(str(lead_id))
+
+    def list_agent_handoff_leads(
+        self,
+        user_id: Optional[str] = None,
+        status: Optional[str] = None,
+        descending: bool = True,
+    ) -> List[AgentHandoffLead]:
+        leads = list(self._agent_handoff_leads.values())
+        if user_id:
+            leads = [l for l in leads if l.user_id == user_id]
+        if status:
+            leads = [l for l in leads if l.status == status]
+        leads.sort(key=lambda l: l.created_at, reverse=descending)
+        return leads

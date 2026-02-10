@@ -137,3 +137,18 @@ class SerenicareApplication(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class AgentHandoffLead(Base):
+    __tablename__ = "agent_handoff_leads"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+
+    status: Mapped[str] = mapped_column(String(32), default="new", nullable=False)
+
+    product_name: Mapped[Optional[str]] = mapped_column(String(256), nullable=True)
+    product_url: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    contact_details: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
