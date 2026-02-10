@@ -449,8 +449,8 @@ class PostgresDB:
     ) -> List[AgentHandoffLead]:
         leads = list(self._agent_handoff_leads.values())
         if user_id:
-            leads = [l for l in leads if l.user_id == user_id]
+            leads = [lead for lead in leads if lead.user_id == user_id]
         if status:
-            leads = [l for l in leads if l.status == status]
-        leads.sort(key=lambda l: l.created_at, reverse=descending)
+            leads = [lead for lead in leads if lead.status == status]
+        leads.sort(key=lambda lead: lead.created_at, reverse=descending)
         return leads
