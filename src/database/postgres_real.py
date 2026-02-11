@@ -23,7 +23,6 @@ from src.database.models import (
     PersonalAccidentApplication,
     TravelInsuranceApplication,
     SerenicareApplication,
-    AgentHandoffLead,
 )
 
 
@@ -388,45 +387,5 @@ class PostgresDB:
                 "updated_at": SerenicareApplication.updated_at,
             }
             col = orderable.get(order_by) or SerenicareApplication.created_at
-            stmt = stmt.order_by(col.desc() if descending else col.asc())
-            return list(s.execute(stmt).scalars().all())
-
-    # ------------------------------------------------------------------ #
-    # Agent handoff leads
-    # ------------------------------------------------------------------ #
-    def create_agent_handoff_lead(self, user_id: str, data: Optional[Dict[str, Any]] = None) -> AgentHandoffLead:
-        d = data or {}
-        with self._session() as s:
-            lead = AgentHandoffLead(
-                id=str(uuid4()),
-                user_id=user_id,
-                status="new",
-                product_name=d.get("product_name"),
-                product_url=d.get("product_url"),
-                contact_details=d,
-            )
-            s.add(lead)
-            s.flush()
-            s.refresh(lead)
-            return lead
-
-    def get_agent_handoff_lead(self, lead_id: str) -> Optional[AgentHandoffLead]:
-        with self._session() as s:
-            stmt = select(AgentHandoffLead).where(AgentHandoffLead.id == str(lead_id))
-            return s.execute(stmt).scalar_one_or_none()
-
-    def list_agent_handoff_leads(
-        self,
-        user_id: Optional[str] = None,
-        status: Optional[str] = None,
-        descending: bool = True,
-    ) -> List[AgentHandoffLead]:
-        with self._session() as s:
-            stmt = select(AgentHandoffLead)
-            if user_id:
-                stmt = stmt.where(AgentHandoffLead.user_id == str(user_id))
-            if status:
-                stmt = stmt.where(AgentHandoffLead.status == status)
-            col = AgentHandoffLead.created_at
             stmt = stmt.order_by(col.desc() if descending else col.asc())
             return list(s.execute(stmt).scalars().all())
