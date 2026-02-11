@@ -4,6 +4,7 @@ Conversational mode - RAG-powered free-form chat
 
 from typing import Any, Dict, List, Optional
 import logging
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,27 @@ def _detect_digital_flow(message: str) -> str | None:
     return None
 
 
+def _is_broad_product_query(message: str) -> bool:
+    m = (message or "").lower()
+    if not m:
+        return False
+    broad_markers = [
+        "policies",
+        "policy",
+        "options",
+        "products",
+        "plans",
+        "covers",
+        "types of",
+        "available",
+    ]
+    if any(k in m for k in broad_markers):
+        return True
+    if "can i get" in m and any(k in m for k in ["insurance", "cover", "policy"]):
+        return True
+    return False
+
+
 def _is_affirmative(message: str) -> bool:
     m = (message or "").strip().lower()
     return m in {"yes", "y", "yeah", "yep", "sure", "ok", "okay", "please", "go ahead", "go on"}
@@ -72,6 +94,24 @@ def _build_section_query(product_name: str, section: str) -> str:
     if section == "show_pricing":
         return f"Explain how pricing/premiums work for {base}. If exact prices are not available, explain the factors that affect cost."
     return f"Explain {base} insurance product, its benefits, coverage, and eligibility."
+
+
+def _build_overview_query(product_name: str) -> str:
+    base = product_name or "this insurance product"
+    return f"Explain {base} insurance product, its benefits, coverage, and eligibility."
+
+
+def _infer_recommendation_hint(message: str) -> str | None:
+    m = (message or "").lower()
+    if "accident" in m:
+        return "personal accident"
+    if any(k in m for k in ["travel", "trip"]):
+        return "travel insurance"
+    if any(k in m for k in ["motor", "car", "vehicle", "auto"]):
+        return "motor private"
+    if any(k in m for k in ["medical", "health", "hospital"]):
+        return "serenicare"
+    return None
 
 
 def _next_section_offer(action: str, *, is_digital: bool) -> tuple[str | None, str | None]:
@@ -195,7 +235,10 @@ class ConversationalMode:
                 }
 
         # Detect coarse intent (quote/buy/learn/etc.)
+        broad_query = _is_broad_product_query(message)
         intent = self._detect_intent(message)
+        if broad_query and intent in ("learn", "general"):
+            intent = "discover"
 
         # Match relevant products
         products = self.product_matcher.match_products(message, top_k=3)
@@ -207,12 +250,29 @@ class ConversationalMode:
             second_score = float(products[1][0] or 0.0) if len(products) > 1 else 0.0
             is_confident = (top_score >= 1.2) and (top_score >= second_score + 0.5)
 
+            # Detect if user is asking about a specific product (e.g., "what is serenicare")
+            detected_product = _detect_digital_flow(message)
+
+            logger.info(
+                "[RAG] Product match: top_score=%s, is_confident=%s, detected=%s, products=%s",
+                top_score, is_confident, detected_product, [p[2]["name"] for p in products[:1]]
+            )
+
             if intent == "compare":
                 # Comparing products: allow multiple doc_ids.
                 filters["products"] = [p[2]["product_id"] for p in products[:3]]
-            elif is_confident:
-                # Single-product intent: restrict to the best match.
+            elif detected_product:
+                # User explicitly asked about a specific product - filter to that product only
+                # Find matching product in the list
+                for p in products:
+                    if p[2].get("product_id") and detected_product in p[2].get("product_id", ""):
+                        filters["products"] = [p[2]["product_id"]]
+                        logger.info("[RAG] Applying explicit product filter: %s", p[2]["product_id"])
+                        break
+            elif is_confident and not broad_query:
+                # Single-product intent with high confidence: restrict to the best match.
                 filters["products"] = [products[0][2]["product_id"]]
+                logger.info("[RAG] Applying confident product filter: %s", products[0][2]["product_id"])
 
         # Retrieve relevant documents (hybrid BM25 + vector via APIRAGAdapter).
         retrieval_results = await self.rag.retrieve(query=message, filters=filters or None, top_k=None)
@@ -234,9 +294,17 @@ class ConversationalMode:
             )
             answer_text = processed.get("message")
             follow_up_flag = processed.get("follow_up", False)
+            processed_reason = (processed.get("metadata") or {}).get("reason")
         else:
             answer_text = response["answer"]
             follow_up_flag = False
+            processed_reason = None
+
+        if processed_reason == "incomplete_input" and not products:
+            recommendation = await self._build_recommendation_response(message, session_id)
+            if recommendation:
+                answer_text = recommendation
+                follow_up_flag = True
 
         # Determine product topic for follow-up guidance.
         digital_flow = _detect_digital_flow(message)
@@ -265,7 +333,17 @@ class ConversationalMode:
 
         # Append a natural follow-up prompt when the user is learning about a product.
         follow_up_prompt = None
-        if intent in ("learn", "general", "compare", "discover") and (digital_flow or top_product):
+        related_products_block = None
+        if broad_query and products:
+            related_names = [p[2].get("name") for p in products if p[2].get("name")]
+            if related_names:
+                related_list = "\n".join([f"- {name}" for name in related_names[:4]])
+                related_products_block = f"Related products you can consider:\n{related_list}"
+        if broad_query and "accident" in (message or "").lower():
+            follow_up_prompt = (
+                "Is this about Personal Accident cover for an individual, or Group Personal Accident for employees?"
+            )
+        elif intent in ("learn", "general", "compare", "discover") and (digital_flow or top_product):
             topic_label = topic_name or "this product"
             answer_lower = (answer_text or "").lower()
             mentions_benefits = "benefit" in answer_lower
@@ -293,7 +371,10 @@ class ConversationalMode:
             # Keep the model-provided message as-is.
             pass
         elif follow_up_prompt:
-            answer_text = f"{answer_text}\n\n{follow_up_prompt}" if answer_text else follow_up_prompt
+            answer_parts = [p for p in [answer_text, related_products_block, follow_up_prompt] if p]
+            answer_text = "\n\n".join(answer_parts)
+        elif related_products_block:
+            answer_text = f"{answer_text}\n\n{related_products_block}" if answer_text else related_products_block
 
         # Determine if we should suggest guided mode
         suggested_action = None
@@ -433,6 +514,56 @@ class ConversationalMode:
             "mode": "conversational",
             "response": response_text,
         }
+
+    async def _build_recommendation_response(self, message: str, session_id: str) -> Optional[str]:
+        hint = _infer_recommendation_hint(message)
+        if not hint:
+            return None
+
+        rec_products = self.product_matcher.match_products(hint, top_k=1)
+        if not rec_products:
+            return None
+
+        top_score, _, product = rec_products[0]
+        if float(top_score or 0.0) < 1.0:
+            return None
+
+        hint_tokens = set(re.findall(r"\b[\w']+\b", hint.lower()))
+        hint_tokens -= {"insurance", "cover", "policy", "plan", "personal", "business"}
+        name_tokens = set(re.findall(r"\b[\w']+\b", (product.get("name") or "").lower()))
+        slug_tokens = set(re.findall(r"\b[\w']+\b", (product.get("slug") or "").lower()))
+        if hint_tokens and not (hint_tokens & name_tokens or hint_tokens & slug_tokens):
+            return None
+
+        product_name = product.get("name") or hint.title()
+        product_id = product.get("product_id")
+
+        query = _build_overview_query(product_name)
+        filters = {"products": [product_id]} if product_id else None
+        hits = await self.rag.retrieve(query=query, filters=filters)
+        gen = await self.rag.generate(query=query, context_docs=hits, conversation_history=self._get_recent_history(session_id))
+
+        explanation = (gen.get("answer") or "").strip()
+        if "accident" in hint.lower():
+            question = (
+                "Is this about Personal Accident cover for an individual, or Group Personal Accident for employees?"
+            )
+        else:
+            question = f"Is {product_name} the cover you meant, or should I suggest something else?"
+
+        parts = [p for p in [explanation, question] if p]
+
+        session = self.state_manager.get_session(session_id) or {}
+        ctx = dict(session.get("context") or {})
+        ctx["product_topic"] = {
+            "digital_flow": _detect_digital_flow(hint),
+            "name": product_name,
+            "doc_id": product_id,
+            "url": product.get("url"),
+        }
+        self.state_manager.update_session(session_id, {"context": ctx})
+
+        return "\n\n".join(parts)
 
     def _detect_intent(self, message: str) -> str:
         """Detect coarse user intent from message (quote/buy/learn/compare/discover/claim/general)."""

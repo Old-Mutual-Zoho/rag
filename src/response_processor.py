@@ -71,7 +71,15 @@ class ResponseProcessor:
 
             # If user input looks incomplete, ask a clarifying question — unless the query
             # matches a product we already resolved (e.g. user typed "serenicare" and we have Serenicare).
-            if self._is_incomplete_input(user_input) and not self._query_matches_product(user_input, products_matched):
+            # Also skip this check if products_matched list is populated, since that means we found relevant products.
+            has_matched_products = products_matched is not None and len(products_matched) > 0
+            query_matches = self._query_matches_product(user_input, products_matched)
+
+            if self._is_incomplete_input(user_input) and not has_matched_products and not query_matches:
+                logger.info(
+                    "Incomplete input detected: user_input='%s', has_products=%s, query_matches=%s",
+                    user_input, has_matched_products, query_matches
+                )
                 question = self.followup_manager.create_clarifying_question(user_input)
                 # Persist followup in session if possible
                 if self.state_manager and session_id:
@@ -135,9 +143,15 @@ class ResponseProcessor:
 
     @staticmethod
     def _is_incomplete_input(user_input: str) -> bool:
+        """Check if user input appears too short or vague to process.
+
+        Note: This should be used in conjunction with product matching checks,
+        as product names alone (e.g., "serenicare") are valid complete queries.
+        """
         if not user_input or not user_input.strip():
             return True
-        # Very short inputs (1-2 tokens) likely need clarification
+        # Very short inputs (1-2 tokens) might need clarification
+        # But this should be overridden if products are matched
         tokens = user_input.strip().split()
         if len(tokens) <= 2:
             return True
@@ -145,16 +159,27 @@ class ResponseProcessor:
 
     @staticmethod
     def _query_matches_product(user_input: str, products_matched: Optional[list]) -> bool:
-        """True if we have matched products and the user query is that product name (e.g. 'serenicare' -> Serenicare)."""
+        """True if we have matched products and the user query is that product name.
+
+        Examples:
+        - 'serenicare' matches ['Serenicare']
+        - 'Personal accident' matches ['Personal Accident Insurance']
+        - 'motor' matches ['Motor Private Insurance']
+        """
         if not user_input or not products_matched:
             return False
         q = user_input.strip().lower()
         if not q:
             return False
+
         for name in products_matched:
             if not name:
                 continue
             n = (name or "").strip().lower()
+            # Check if query is product name or partial match
             if q == n or q in n or n in q:
+                logger.debug("Query '%s' matches product '%s'", user_input, name)
                 return True
+
+        logger.debug("Query '%s' does not match any of %s", user_input, products_matched)
         return False

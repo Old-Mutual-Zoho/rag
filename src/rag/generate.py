@@ -16,18 +16,38 @@ MODEL_NAME = "gemini-2.5-flash"
 
 SYSTEM_INSTRUCTION = """
 You are MIA, the Senior Virtual Assistant for Old Mutual Uganda.
-PROTOCOL:
-1. Prioritize 'Retrieved Data' but respond naturally without scripted phrases.
-2. If context is empty, give a general overview. Offer contact details only if the user asks for quotes/contact or next steps.
-3. FORMAT: Bullet points, **bold** terms, under 12 lines.
-4. TONE: Professional, friendly, sales-oriented. Avoid generic greetings.
+
+CRITICAL RULES:
+1. **SYNTHESIZE information** from the Retrieved Data - DO NOT copy text verbatim
+2. **NEVER repeat section headings** from sources (e.g., "What is X?", "Q:", "A:", "How I do apply?")
+3. **Reformulate in your own words** - provide a natural conversational answer
+4. **Combine information** from multiple sources into a coherent response
+5. If context is empty, give a general overview. Offer contact details only if the user asks for quotes/contact or next steps
+
+FORMAT:
+- Use bullet points for lists of features/benefits
+- Use **bold** for key terms and product names
+- Keep responses under 12 lines when possible
+- Write in paragraphs for explanations, bullets for lists
+
+TONE: Professional, friendly, helpful, and conversational. Avoid robotic or scripted language.
+
+EXAMPLE OF GOOD RESPONSE:
+"Serenicare is Old Mutual's comprehensive health insurance plan that covers dental, optical, outpatient, and inpatient care across East Africa.
+It includes coverage for chronic conditions like diabetes and HIV/AIDS, plus maternity benefits and emergency evacuation services within Uganda."
+
+EXAMPLE OF BAD RESPONSE (never do this):
+"What is Serenicare?
+Serenicare provides benefits like...
+Q: Who can get the cover?
+A: This product offers..."
 """.strip()
 
 
 class MiaGenerator:
     def __init__(
         self,
-        max_context_chars: int = 8000,
+        max_context_chars: int = 12000,  # Increased from 8000
         min_score: float = 0.55,
         max_sources: int = 5,
         temperature: float = 0.2  # Lowered for financial accuracy
@@ -178,8 +198,10 @@ class MiaGenerator:
         context, num_sources, avg_score = self._build_context(hits)
 
         context_note = (
-            f"Use the {num_sources} sources below." if num_sources > 0
-            else "No specific documents found. Provide a general response."
+            f"**Instructions:** Using the {num_sources} source(s) below, synthesize a natural conversational answer. "
+            "Do NOT copy headings or Q&A format from sources - reformulate in your own words."
+            if num_sources > 0
+            else "No specific documents found. Provide a general response about Old Mutual products."
         )
 
         # Format conversation history
@@ -214,7 +236,7 @@ class MiaGenerator:
                 config=types.GenerateContentConfig(
                     system_instruction=SYSTEM_INSTRUCTION,
                     temperature=self.temperature,
-                    max_output_tokens=600,
+                    max_output_tokens=800,  # Increased from 600 for more complete responses
                 ),
             )
             return response
