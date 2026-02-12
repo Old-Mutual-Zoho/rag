@@ -474,6 +474,32 @@ async def get_session_state(session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@api_router.get("/forms/draft/{session_id}/{flow_name}", tags=["Forms"])
+async def get_form_draft(session_id: str, flow_name: str):
+    """Fetch the cached draft for a multi-step form flow."""
+    try:
+        draft = state_manager.get_form_draft(session_id, flow_name)
+        if not draft:
+            raise HTTPException(status_code=404, detail="Draft not found")
+        return draft
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting form draft: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.delete("/forms/draft/{session_id}/{flow_name}", tags=["Forms"])
+async def delete_form_draft(session_id: str, flow_name: str):
+    """Clear a cached draft for a multi-step form flow."""
+    try:
+        state_manager.clear_form_draft(session_id, flow_name)
+        return {"status": "deleted", "session_id": session_id, "flow": flow_name}
+    except Exception as e:
+        logger.error(f"Error deleting form draft: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @api_router.post("/chat/start-guided", tags=["Chat"])
 async def start_guided_body(
     body: StartGuidedRequest,
