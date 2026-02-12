@@ -15,6 +15,8 @@ class RedisCache:
     def __init__(self) -> None:
         # Simple in-memory store: session_id -> data
         self._sessions: Dict[str, Dict[str, Any]] = {}
+        # In-memory form drafts: (session_id, flow_name) -> data
+        self._form_drafts: Dict[str, Dict[str, Any]] = {}
 
     # --- Session helpers used by StateManager ---------------------------------
 
@@ -32,6 +34,27 @@ class RedisCache:
 
     def delete_session(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)
+
+    # --- Form draft helpers --------------------------------------------------
+
+    def _draft_key(self, session_id: str, flow_name: str) -> str:
+        return f"{session_id}:{flow_name}"
+
+    def set_form_draft(self, session_id: str, flow_name: str, data: Dict[str, Any], ttl: int = 604800) -> None:
+        # TTL is ignored in this in-memory implementation.
+        self._form_drafts[self._draft_key(session_id, flow_name)] = dict(data)
+
+    def get_form_draft(self, session_id: str, flow_name: str) -> Optional[Dict[str, Any]]:
+        return self._form_drafts.get(self._draft_key(session_id, flow_name))
+
+    def update_form_draft(self, session_id: str, flow_name: str, updates: Dict[str, Any]) -> None:
+        key = self._draft_key(session_id, flow_name)
+        if key not in self._form_drafts:
+            return
+        self._form_drafts[key].update(updates)
+
+    def delete_form_draft(self, session_id: str, flow_name: str) -> None:
+        self._form_drafts.pop(self._draft_key(session_id, flow_name), None)
 
     # --- Misc -----------------------------------------------------------------
 
