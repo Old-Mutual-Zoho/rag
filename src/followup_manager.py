@@ -48,13 +48,8 @@ class FollowUpManager:
         return None
 
     def create_clarifying_question(self, user_input: str) -> str:
-        cleaned = (user_input or "").strip().strip("\"'")
-        if cleaned:
-            return (
-                f"When you say '{cleaned}', which cover did you have in mind? "
-                "For example Personal Accident, Serenicare, Motor Private, or Travel Sure Plus."
-            )
-        return "Which cover did you have in mind? For example Personal Accident, Serenicare, Motor Private, or Travel Sure Plus."
+        # Very simple clarifier based on missing noun or short queries
+        return f"Could you provide more details about '{user_input}'? For example, what product or policy are you referring to?"
 
     def extract_followup_from_text(self, text: str) -> str:
         # Naive extraction: return the first sentence that ends with a question mark

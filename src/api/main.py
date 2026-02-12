@@ -211,12 +211,12 @@ class APIRAGAdapter:
             # context-only extractive answer instead of surfacing the error text.
             mia = MiaGenerator()
             try:
-                answer = await mia.generate(query, context_docs, conversation_history)
+                answer = await mia.generate(query, context_docs)
             except Exception as e:  # pragma: no cover - defensive; MiaGenerator already logs
                 logger.error("MiaGenerator.generate raised unexpectedly: %s", e, exc_info=True)
                 return _extractive_answer()
 
-            fallback_phrase = "I'm having trouble retrieving those details right now. Please try again in a moment."
+            fallback_phrase = "I'm having trouble retrieving those details. Please call 0800-100-900 for immediate help."
             if not answer or fallback_phrase in answer:
                 # LLM unavailable / failed -> use extractive context instead.
                 return _extractive_answer()
