@@ -237,7 +237,7 @@ def _safe_str(v: Any) -> str:
             return None
         quote = self.db.create_quote(
             user_id=user_id,
-            product_id=app.selected_product.get("id", "travel_insurance"),
+            product_id=(app.selected_product or {}).get("id", "travel_insurance"),
             premium_amount=pricing.get("total_ugx"),
             sum_assured=None,
             underwriting_data={
@@ -248,7 +248,7 @@ def _safe_str(v: Any) -> str:
                 "emergency_contact": app.emergency_contact,
             },
             pricing_breakdown=pricing.get("breakdown"),
-            product_name=app.selected_product.get("label", "Travel Insurance"),
+            product_name=(app.selected_product or {}).get("label", "Travel Insurance"),
         )
         updates = {"quote_id": str(quote.id), "status": "quoted"}
         self.db.update_travel_application(app_id, updates)

@@ -55,7 +55,7 @@ async def test_dynamic_engine_personal_accident_buy_cta():
             "date_of_birth": "1980-01-01",
             "email": "john@example.com",
             "mobile_number": "0700000000",
-            "national_id_number": "CF123",
+            "national_id_number": "CF123456789012",
             "nationality": "UG",
             "occupation": "Engineer",
             "gender": "Male",

@@ -1254,6 +1254,8 @@ try:
     from src.api.pa_quote_forms_router import api as pa_quote_api
 
     app.include_router(pa_quote_api, prefix="/api")
+    # Also expose under versioned prefix for consistency
+    app.include_router(pa_quote_api, prefix="/api/v1")
 except Exception:
     pass
 
