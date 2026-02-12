@@ -2,7 +2,8 @@ import os
 import logging
 from typing import Any, Dict, List, Tuple
 from google import genai
-from google.genai import types
+import google.generativeai as genai
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
