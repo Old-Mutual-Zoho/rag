@@ -11,10 +11,10 @@ from typing import Any, Dict
 
 from src.chatbot.validation import (
     raise_if_errors,
-    require_str,
     validate_date_iso,
-    validate_email,
-    validate_phone_ug,
+    validate_length_range,
+    validate_motor_email_frontend,
+    validate_uganda_mobile_frontend,
 )
 
 SERENICARE_OPTIONAL_BENEFITS = [
@@ -373,17 +373,49 @@ class SerenicareFlow:
         if payload and "_raw" not in payload:
             if not self.controller:
                 errors: Dict[str, str] = {}
-                require_str(payload, "first_name", errors, label="First Name")
-                require_str(payload, "surname", errors, label="Surname")
-                validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
-                validate_email(payload.get("email", ""), errors, field="email")
+                first_name = validate_length_range(
+                    payload.get("first_name", ""),
+                    field="first_name",
+                    errors=errors,
+                    label="First Name",
+                    min_len=2,
+                    max_len=50,
+                    required=True,
+                    message="First name must be 2–50 characters.",
+                )
+                middle_name_raw = payload.get("middle_name", "")
+                middle_name = validate_length_range(
+                    middle_name_raw,
+                    field="middle_name",
+                    errors=errors,
+                    label="Middle Name",
+                    min_len=0,
+                    max_len=50,
+                    required=False,
+                    message="Middle name must be up to 50 characters.",
+                ) if middle_name_raw else ""
+                surname = validate_length_range(
+                    payload.get("surname", ""),
+                    field="surname",
+                    errors=errors,
+                    label="Surname",
+                    min_len=2,
+                    max_len=50,
+                    required=True,
+                    message="Surname must be 2–50 characters.",
+                )
+                phone_original, phone_normalized = validate_uganda_mobile_frontend(
+                    payload.get("phone_number", ""), errors, field="phone_number"
+                )
+                email = validate_motor_email_frontend(payload.get("email", ""), errors, field="email")
                 raise_if_errors(errors)
             data["about_you"] = {
-                "first_name": payload.get("first_name", ""),
-                "middle_name": payload.get("middle_name", ""),
-                "surname": payload.get("surname", ""),
-                "phone_number": payload.get("phone_number", ""),
-                "email": payload.get("email", ""),
+                "first_name": first_name if not self.controller else payload.get("first_name", ""),
+                "middle_name": middle_name if not self.controller else payload.get("middle_name", ""),
+                "surname": surname if not self.controller else payload.get("surname", ""),
+                "phone_number": phone_original if not self.controller else payload.get("phone_number", ""),
+                "phone_number_normalized": phone_normalized if not self.controller else payload.get("phone_number", ""),
+                "email": email if not self.controller else payload.get("email", ""),
             }
             app_id = data.get("application_id")
             if self.controller and app_id:

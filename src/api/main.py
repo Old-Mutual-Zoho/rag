@@ -302,6 +302,20 @@ class PersonalAccidentFullFormResponse(BaseModel):
     breakdown: Dict[str, Any]
 
 
+class MotorPrivateFullFormRequest(BaseModel):
+    """Submit the full Motor Private form in a single payload (no guided steps)."""
+
+    user_id: str = Field(..., description="External user identifier (e.g. phone number)")
+    data: Dict[str, Any] = Field(..., description="Flattened form fields for Motor Private quote")
+
+
+class MotorPrivateFullFormResponse(BaseModel):
+    quote_id: str
+    product_name: str
+    total_premium: float
+    breakdown: Dict[str, Any]
+
+
 class CreateSessionRequest(BaseModel):
     """Create a new chatbot session (e.g. when user opens the app)."""
 
@@ -1141,6 +1155,57 @@ async def submit_personal_accident_full_form(
         )
     except Exception as e:
         logger.error(f"Error submitting Personal Accident full form: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/forms/motor-private/full", response_model=MotorPrivateFullFormResponse, tags=["Forms"])
+async def submit_motor_private_full_form(
+    body: MotorPrivateFullFormRequest,
+    db: PostgresDB = Depends(get_db),
+):
+    """Accept the full Motor Private quote form in one payload and create a quote.
+
+    This reuses MotorPrivateFlow.complete_flow so all motor-specific validations run
+    server-side and a quote is persisted once.
+    """
+    from src.chatbot.flows.motor_private import MotorPrivateFlow
+
+    try:
+        # Resolve external identifier (e.g. phone) to internal user UUID
+        user = db.get_or_create_user(phone_number=body.user_id)
+        internal_user_id = str(user.id)
+
+        flow = MotorPrivateFlow(product_matcher, db)
+
+        # Run the consolidated motor validations + quote creation.
+        result = await flow.complete_flow(dict(body.data or {}), internal_user_id)
+
+        quote_id = (result.get("data") or {}).get("quote_id")
+        if not quote_id:
+            raise HTTPException(status_code=500, detail="Failed to create Motor Private quote")
+
+        quote = db.get_quote(quote_id)
+        if not quote:
+            raise HTTPException(status_code=500, detail="Motor Private quote not found after creation")
+
+        breakdown = quote.pricing_breakdown or {}
+        return MotorPrivateFullFormResponse(
+            quote_id=str(quote.id),
+            product_name="Motor Private",
+            total_premium=float(quote.premium_amount),
+            breakdown=breakdown,
+        )
+    except FormValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "error": "validation_error",
+                "message": e.message,
+                "field_errors": e.field_errors,
+            },
+        )
+    except Exception as e:
+        logger.error(f"Error submitting Motor Private full form: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
