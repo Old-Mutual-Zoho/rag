@@ -12,7 +12,7 @@ Endpoints:
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -154,8 +154,8 @@ def _load_draft(redis_cache, draft_id: str) -> Dict[str, Any]:
 @api.post("/quote-forms/personal-accident/start")
 def pa_start(
     body: Dict[str, Any],
-    db = Depends(get_db),
-    redis_cache = Depends(get_redis),
+    db=Depends(get_db),
+    redis_cache=Depends(get_redis),
 ):
     """
     Create a new PA quote draft in Redis.
@@ -196,7 +196,7 @@ def pa_update_step(
     draft_id: str,
     step_index: int,
     body: Dict[str, Any],
-    redis_cache = Depends(get_redis),
+    redis_cache=Depends(get_redis),
 ):
     """
     Update a specific step (0..3). Validates fields for that step only,
@@ -239,7 +239,7 @@ def pa_update_step(
 
 
 @api.get("/quote-forms/personal-accident/{draft_id}")
-def pa_get_draft(draft_id: str, redis_cache = Depends(get_redis)):
+def pa_get_draft(draft_id: str, redis_cache=Depends(get_redis)):
     """Return the full draft object or 404 if missing."""
     return _load_draft(redis_cache, draft_id)
 
@@ -247,8 +247,8 @@ def pa_get_draft(draft_id: str, redis_cache = Depends(get_redis)):
 @api.post("/quote-forms/personal-accident/{draft_id}/submit")
 def pa_submit(
     draft_id: str,
-    db = Depends(get_db),
-    redis_cache = Depends(get_redis),
+    db=Depends(get_db),
+    redis_cache=Depends(get_redis),
 ):
     """
     Validate full draft and persist a Quote in Postgres.
