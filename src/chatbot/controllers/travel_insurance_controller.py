@@ -62,15 +62,20 @@ class TravelInsuranceController:
         first_name = require_str(payload, "first_name", errors, label="First Name")
         middle_name = optional_str(payload, "middle_name")
         surname = require_str(payload, "surname", errors, label="Surname")
-        phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
-        email = validate_email(payload.get("email", ""), errors, field="email")
+        # Phone and email are optional here; validate only if provided
+        phone_raw = optional_str(payload, "phone_number")
+        email_raw = optional_str(payload, "email")
+        if phone_raw:
+            validate_phone_ug(phone_raw, errors, field="phone_number")
+        if email_raw:
+            validate_email(email_raw, errors, field="email")
         raise_if_errors(errors)
         updates = {"about_you": {
             "first_name": first_name,
             "middle_name": middle_name,
             "surname": surname,
-            "phone_number": phone_number,
-            "email": email,
+            "phone_number": phone_raw,
+            "email": email_raw,
         }}
         app = self.db.update_travel_application(app_id, updates)
         return self._to_dict(app) if app else None
@@ -130,12 +135,19 @@ class TravelInsuranceController:
         first_name = require_str(payload, "first_name", errors, label="First Name")
         middle_name = optional_str(payload, "middle_name")
         surname = require_str(payload, "surname", errors, label="Surname")
-        nationality_type = require_str(payload, "nationality_type", errors, label="Nationality")
-        passport_number = require_str(payload, "passport_number", errors, label="Passport Number")
-        dob = validate_date_iso(payload.get("date_of_birth", ""), errors, "date_of_birth", required=True, not_future=True)
+        # Optional fields: validate only when provided
+        nationality_type = optional_str(payload, "nationality_type")
+        passport_number = optional_str(payload, "passport_number")
+        dob_raw = optional_str(payload, "date_of_birth")
+        if dob_raw:
+            validate_date_iso(dob_raw, errors, "date_of_birth", required=True, not_future=True)
         occupation = optional_str(payload, "occupation")
-        phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
-        email = validate_email(payload.get("email", ""), errors, field="email")
+        phone_raw = optional_str(payload, "phone_number")
+        if phone_raw:
+            validate_phone_ug(phone_raw, errors, field="phone_number")
+        email_raw = optional_str(payload, "email")
+        if email_raw:
+            validate_email(email_raw, errors, field="email")
         postal_address = optional_str(payload, "postal_address")
         town_city = optional_str(payload, "town_city")
         office_number = optional_str(payload, "office_number")
@@ -148,11 +160,11 @@ class TravelInsuranceController:
             "surname": surname,
             "nationality_type": nationality_type,
             "passport_number": passport_number,
-            "date_of_birth": dob,
+            "date_of_birth": dob_raw,
             "occupation": occupation,
-            "phone_number": phone_number,
+            "phone_number": phone_raw,
             "office_number": office_number,
-            "email": email,
+            "email": email_raw,
             "postal_address": postal_address,
             "town_city": town_city,
         }
@@ -227,17 +239,13 @@ class TravelInsuranceController:
         app = self.db.update_travel_application(app_id, updates)
         return self._to_dict(app) if app else None
 
-
-def _safe_str(v: Any) -> str:
-    return ("" if v is None else str(v)).strip()
-
     def finalize_and_create_quote(self, app_id: str, user_id: str, pricing: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         app = self.db.get_travel_application(app_id)
         if not app:
             return None
         quote = self.db.create_quote(
             user_id=user_id,
-            product_id=app.selected_product.get("id", "travel_insurance"),
+            product_id=(app.selected_product or {}).get("id", "travel_insurance"),
             premium_amount=pricing.get("total_ugx"),
             sum_assured=None,
             underwriting_data={
@@ -248,7 +256,7 @@ def _safe_str(v: Any) -> str:
                 "emergency_contact": app.emergency_contact,
             },
             pricing_breakdown=pricing.get("breakdown"),
-            product_name=app.selected_product.get("label", "Travel Insurance"),
+            product_name=(app.selected_product or {}).get("label", "Travel Insurance"),
         )
         updates = {"quote_id": str(quote.id), "status": "quoted"}
         self.db.update_travel_application(app_id, updates)
@@ -274,3 +282,7 @@ def _safe_str(v: Any) -> str:
             "created_at": app.created_at.isoformat(),
             "updated_at": app.updated_at.isoformat(),
         }
+
+
+def _safe_str(v: Any) -> str:
+    return ("" if v is None else str(v)).strip()

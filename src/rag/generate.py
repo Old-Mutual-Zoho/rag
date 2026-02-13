@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Tuple
 from google import genai
 from google.genai import types
 
+
 # Setup logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

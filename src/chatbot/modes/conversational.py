@@ -352,7 +352,7 @@ class ConversationalMode:
             if mentions_benefits:
                 follow_up_prompt = f"Would you like anything else about {topic_label}, such as pricing or eligibility?"
             else:
-                follow_up_prompt = f"Want me to share the key benefits of {topic_label}?"
+                follow_up_prompt = f"Should I share the benefits of {topic_label}?"
 
             # Store what a simple "yes" should do next.
             session = self.state_manager.get_session(session_id) or {}
