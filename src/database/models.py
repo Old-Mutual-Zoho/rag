@@ -137,3 +137,34 @@ class SerenicareApplication(Base):
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+class MotorPrivateApplication(Base):
+    """Persistent storage for Motor Private guided/full-form applications.
+
+    Mirrors the logical sections in MotorPrivateFlow:
+    - vehicle_details
+    - excess_parameters
+    - additional_benefits
+    - premium_calculation
+    - about_you
+    plus an optional quote_id once a quote has been created.
+    """
+
+    __tablename__ = "motor_private_applications"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+
+    status: Mapped[str] = mapped_column(String(32), default="in_progress", nullable=False)
+
+    vehicle_details: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    excess_parameters: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # list[str]
+    additional_benefits: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # list[str]
+    premium_calculation: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    about_you: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    quote_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
