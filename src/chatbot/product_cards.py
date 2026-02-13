@@ -164,3 +164,5 @@ class ProductCardGenerator:
         icons = {"hi_001": "🏥", "li_002": "👨‍👩‍👧‍👦", "mi_001": "🚗", "ti_001": "✈️", "pa_001": "🩹", "hp_001": "🏠"}
 
         return icons.get(product_id, "📋")
+
+    # End of product cards

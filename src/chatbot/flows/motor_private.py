@@ -14,13 +14,17 @@ from datetime import date
 from src.chatbot.validation import (
     raise_if_errors,
     require_str,
-    optional_str,
     parse_int,
     parse_decimal_str,
-    validate_date_iso,
     validate_email,
     validate_in,
     validate_phone_ug,
+    validate_enum,
+    validate_length_range,
+    validate_uganda_mobile_frontend,
+    validate_motor_email_frontend,
+    validate_cover_start_date_range,
+    validate_positive_number_field,
 )
 
 MOTOR_PRIVATE_EXCESS_PARAMETERS = [
@@ -106,6 +110,146 @@ class MotorPrivateFlow:
         Convenience helper for tests/integrations that want to skip the step-by-step UI.
         """
         data = dict(collected_data or {})
+
+        # Support frontend single-form submission using MotorPrivate.ts field names.
+        # If frontend fields are present, validate and map them into the internal
+        # guided-flow structure expected by the rest of this class.
+        payload = data.copy()
+        errors: Dict[str, str] = {}
+
+        # Step 1: coverType
+        cover_type = None
+        if "coverType" in payload:
+            cover_type = validate_enum(
+                payload.get("coverType", ""),
+                field="coverType",
+                errors=errors,
+                allowed=["comprehensive", "third_party"],
+                required=True,
+                message="Please select a cover type.",
+            )
+
+        # Step 2: Personal Details
+        first_name = None
+        surname = None
+        middle_name = None
+        mobile_original = None
+        mobile_normalized = None
+        email = None
+        if "firstName" in payload or "surname" in payload or "mobile" in payload or "email" in payload:
+            first_name = validate_length_range(
+                payload.get("firstName", ""),
+                field="firstName",
+                errors=errors,
+                label="First name",
+                min_len=2,
+                max_len=50,
+                required=True,
+                message="First name must be 2–50 characters.",
+            )
+            middle_name = validate_length_range(
+                payload.get("middleName", ""),
+                field="middleName",
+                errors=errors,
+                label="Middle name",
+                min_len=0,
+                max_len=50,
+                required=False,
+                message="Middle name must be up to 50 characters.",
+            )
+            surname = validate_length_range(
+                payload.get("surname", ""),
+                field="surname",
+                errors=errors,
+                label="Surname",
+                min_len=2,
+                max_len=50,
+                required=True,
+                message="Surname must be 2–50 characters.",
+            )
+            mobile_original, mobile_normalized = validate_uganda_mobile_frontend(
+                payload.get("mobile", ""), errors, field="mobile"
+            )
+            email = validate_motor_email_frontend(payload.get("email", ""), errors, field="email")
+
+        # Step 3: Premium Calculation
+        vehicle_make_frontend = None
+        year_frontend = None
+        cover_start_frontend = None
+        rare_model_frontend = None
+        valuation_frontend = None
+        vehicle_value_frontend = None
+        if "vehicleMake" in payload or "yearOfManufacture" in payload or "coverStartDate" in payload:
+            vehicle_make_frontend = require_str(payload, "vehicleMake", errors, label="Vehicle make")
+            # 1980 -> current year + 1
+            current_year_plus_one = date.today().year + 1
+            year_frontend = parse_int(
+                {"yearOfManufacture": payload.get("yearOfManufacture")},
+                "yearOfManufacture",
+                errors,
+                min_value=1980,
+                max_value=current_year_plus_one,
+                required=True,
+            )
+            cover_start_frontend = validate_cover_start_date_range(
+                payload.get("coverStartDate", ""), errors, field="coverStartDate"
+            )
+            rare_model_frontend = validate_enum(
+                payload.get("isRareModel", ""),
+                field="isRareModel",
+                errors=errors,
+                allowed=["yes", "no"],
+                required=True,
+                message="Please select if the vehicle is a rare model.",
+            )
+            valuation_frontend = validate_enum(
+                payload.get("hasUndergoneValuation", ""),
+                field="hasUndergoneValuation",
+                errors=errors,
+                allowed=["yes", "no"],
+                required=True,
+                message="Please indicate if the vehicle has undergone valuation.",
+            )
+            vehicle_value_frontend = validate_positive_number_field(
+                payload.get("vehicleValueUgx", ""),
+                field="vehicleValueUgx",
+                errors=errors,
+                message="Vehicle value must be a positive number.",
+            )
+
+        raise_if_errors(errors)  # If any of the above validations ran and failed
+
+        # Map validated frontend fields into the internal structure the rest of
+        # the flow expects, but only when present to avoid breaking callers
+        # that already send the internal guided-flow shape.
+        internal = data.setdefault("motor_frontend", {})
+        if cover_type is not None:
+            internal["cover_type"] = cover_type
+        if first_name is not None:
+            internal["first_name"] = first_name
+        if middle_name is not None:
+            internal["middle_name"] = middle_name
+        if surname is not None:
+            internal["surname"] = surname
+        if mobile_original is not None:
+            internal["mobile"] = mobile_original
+        if mobile_normalized:
+            internal["mobile_normalized"] = mobile_normalized  # e.g. 2567XXXXXXXX
+        if email is not None:
+            internal["email"] = email
+        if vehicle_make_frontend is not None:
+            internal["vehicle_make"] = vehicle_make_frontend
+        if year_frontend is not None:
+            internal["year_of_manufacture"] = year_frontend
+        if cover_start_frontend is not None:
+            internal["cover_start_date"] = cover_start_frontend
+        if rare_model_frontend is not None:
+            internal["rare_model"] = rare_model_frontend
+        if valuation_frontend is not None:
+            internal["valuation_done"] = valuation_frontend
+        if vehicle_value_frontend is not None:
+            internal["vehicle_value"] = vehicle_value_frontend
+
         data.setdefault("user_id", user_id)
         data.setdefault("product_id", "motor_private")
 
@@ -162,15 +306,12 @@ class MotorPrivateFlow:
                 payload,
                 "year_of_manufacture",
                 errors,
-                min_value=1900,
-                max_value=date.today().year,
+                min_value=1980,
+                max_value=date.today().year + 1,
                 required=True,
             )
-            cover_start_date = validate_date_iso(
-                payload.get("cover_start_date", ""),
-                errors,
-                "cover_start_date",
-                required=True,
+            cover_start_date = validate_cover_start_date_range(
+                payload.get("cover_start_date", ""), errors, field="cover_start_date"
             )
             rare_model = validate_in(
                 payload.get("rare_model", ""),
@@ -326,9 +467,37 @@ class MotorPrivateFlow:
     async def _step_about_you(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
             errors: Dict[str, str] = {}
-            first_name = require_str(payload, "first_name", errors, label="First Name")
-            middle_name = optional_str(payload, "middle_name")
-            surname = require_str(payload, "surname", errors, label="Surname")
+            first_name = validate_length_range(
+                payload.get("first_name", ""),
+                field="first_name",
+                errors=errors,
+                label="First name",
+                min_len=2,
+                max_len=50,
+                required=True,
+                message="First name must be 2–50 characters.",
+            )
+            middle_name = validate_length_range(
+                payload.get("middle_name", ""),
+                field="middle_name",
+                errors=errors,
+                label="Middle name",
+                min_len=0,
+                max_len=50,
+                required=False,
+                message="Middle name must be up to 50 characters.",
+            )
+            surname = validate_length_range(
+                payload.get("surname", ""),
+                field="surname",
+                errors=errors,
+                label="Surname",
+                min_len=2,
+                max_len=50,
+                required=True,
+                message="Surname must be 2–50 characters.",
+            )
+            # Keep existing guided-flow phone/email validators for compatibility
             phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
             email = validate_email(payload.get("email", ""), errors, field="email")
             raise_if_errors(errors)

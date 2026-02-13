@@ -3,6 +3,7 @@ Guided mode - Structured conversation flows
 """
 
 from typing import Dict
+from datetime import datetime
 from ..flows.product_discovery import ProductDiscoveryFlow
 from ..flows.underwriting import UnderwritingFlow
 from ..flows.quotation import QuotationFlow
@@ -57,16 +58,31 @@ class GuidedMode:
         if result.get("complete"):
             # Flow is complete, transition or end
             if result.get("next_flow"):
+                self.state_manager.clear_form_draft(session_id, session["current_flow"])
                 self.state_manager.set_flow(session_id, result["next_flow"])
                 # Pass data needed by next flow (e.g. quote_id for payment)
                 if result.get("collected_data"):
                     self.state_manager.update_session(session_id, {"collected_data": result["collected_data"]})
             else:
+                self.state_manager.clear_form_draft(session_id, session["current_flow"])
                 self.state_manager.switch_mode(session_id, "conversational")
         elif result.get("next_step") is not None:
             # Advance to next step
             self.state_manager.update_session(
                 session_id, {"current_step": result["next_step"], "collected_data": result.get("collected_data", session.get("collected_data", {}))}
+            )
+            # Persist draft after each successful step to support resume.
+            self.state_manager.save_form_draft(
+                session_id,
+                session["current_flow"],
+                {
+                    "session_id": session_id,
+                    "flow": session["current_flow"],
+                    "step": result.get("next_step", session.get("current_step", 0)),
+                    "collected_data": result.get("collected_data", session.get("collected_data", {})),
+                    "status": "in_progress",
+                    "updated_at": datetime.utcnow().isoformat(),
+                },
             )
 
         return {

@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date
-from typing import Any, Dict, Iterable, Optional
+from datetime import date, timedelta
+from typing import Any, Dict, Iterable, Optional, Tuple
 
 
 @dataclass
@@ -241,3 +241,146 @@ def validate_list_ids(value: Any, allowed_ids: Iterable[str], errors: Dict[str, 
 def raise_if_errors(errors: Dict[str, str], message: str = "Please correct the highlighted fields") -> None:
     if errors:
         raise FormValidationError(field_errors=errors, message=message)
+
+
+# --- Motor Insurance specific helpers ---
+
+
+def validate_length_range(
+    value: str,
+    *,
+    field: str,
+    errors: Dict[str, str],
+    label: Optional[str] = None,
+    min_len: int = 0,
+    max_len: Optional[int] = None,
+    required: bool = False,
+    message: Optional[str] = None,
+) -> str:
+    """Trim a string and validate its length bounds with a custom error message.
+
+    This is used for motor insurance name fields where the frontend has specific
+    2–50 character requirements.
+    """
+
+    trimmed = _strip(value)
+    if not trimmed:
+        if required:
+            add_error(errors, field, message or f"{label or field} is required")
+        return trimmed
+
+    length = len(trimmed)
+    if length < min_len or (max_len is not None and length > max_len):
+        add_error(errors, field, message or f"{label or field} must be between {min_len} and {max_len} characters.")
+    return trimmed
+
+
+def validate_enum(
+    value: str,
+    *,
+    field: str,
+    errors: Dict[str, str],
+    allowed: Iterable[str],
+    required: bool,
+    message: str,
+) -> str:
+    raw = _strip(value).lower()
+    if not raw:
+        if required:
+            add_error(errors, field, message)
+        return raw
+    if raw not in {v.lower() for v in allowed}:
+        add_error(errors, field, message)
+    return raw
+
+
+def validate_uganda_mobile_frontend(value: str, errors: Dict[str, str], field: str = "mobile") -> Tuple[str, str]:
+    """Validate and normalize Uganda mobile formats as per frontend spec.
+
+    Acceptable formats:
+    - +2567XXXXXXXX
+    - +256 7XXXXXXXX
+    - 07XXXXXXXX
+
+    Returns (original_trimmed, normalized_e164_without_plus).
+    """
+
+    raw = _strip(value)
+    if not raw:
+        add_error(errors, field, "Mobile number must be in +2567XXXXXXXX, +256 7XXXXXXXX, or 07XXXXXXXX format.")
+        return raw, ""
+
+    # Remove spaces for validation/normalization
+    compact = re.sub(r"\s+", "", raw)
+
+    pattern = re.compile(r"^(\+2567\d{8}|07\d{8})$")
+    if not pattern.match(compact):
+        add_error(errors, field, "Mobile number must be in +2567XXXXXXXX, +256 7XXXXXXXX, or 07XXXXXXXX format.")
+        return raw, ""
+
+    # Normalize to +2567XXXXXXXX then strip + for storage (2567XXXXXXXX)
+    if compact.startswith("07"):
+        normalized = "+2567" + compact[2:]
+    else:
+        normalized = compact
+
+    normalized_digits = normalized.lstrip("+")
+    return raw, normalized_digits
+
+
+def validate_motor_email_frontend(value: str, errors: Dict[str, str], field: str = "email") -> str:
+    """Trim, lowercase and validate email according to frontend rules."""
+
+    raw = _strip(value).lower()
+    if not raw:
+        add_error(errors, field, "Please enter a valid email address.")
+        return raw
+    if len(raw) > 100 or not re.match(r"^\S+@\S+\.\S+$", raw):
+        add_error(errors, field, "Please enter a valid email address.")
+    return raw
+
+
+def validate_cover_start_date_range(
+    value: str,
+    errors: Dict[str, str],
+    field: str = "coverStartDate",
+    *,
+    days_ahead: int = 90,
+) -> str:
+    """Validate that cover start date is within [today, today + days_ahead]."""
+
+    raw = _strip(value)
+    if not raw:
+        add_error(errors, field, "Cover start date must be within the next 90 days.")
+        return raw
+    try:
+        d = date.fromisoformat(raw)
+    except Exception:
+        add_error(errors, field, "Cover start date must be within the next 90 days.")
+        return raw
+
+    today = date.today()
+    if d < today or d > today + timedelta(days=days_ahead):
+        add_error(errors, field, "Cover start date must be within the next 90 days.")
+    return raw
+
+
+def validate_positive_number_field(
+    value: Any,
+    *,
+    field: str,
+    errors: Dict[str, str],
+    message: str,
+) -> float:
+    raw = _strip(value)
+    if not raw:
+        add_error(errors, field, message)
+        return 0.0
+    try:
+        num = float(raw)
+    except Exception:
+        add_error(errors, field, message)
+        return 0.0
+    if num <= 0:
+        add_error(errors, field, message)
+    return num

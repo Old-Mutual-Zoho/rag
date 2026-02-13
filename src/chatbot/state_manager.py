@@ -84,3 +84,17 @@ class StateManager:
 
             # Delete from Redis
             self.redis.delete_session(session_id)
+
+    # --- Form drafts ---------------------------------------------------------
+
+    def save_form_draft(self, session_id: str, flow_name: str, draft: Dict[str, Any]):
+        """Persist a multi-step form draft in Redis."""
+        self.redis.set_form_draft(session_id, flow_name, draft)
+
+    def get_form_draft(self, session_id: str, flow_name: str) -> Optional[Dict[str, Any]]:
+        """Fetch a form draft from Redis."""
+        return self.redis.get_form_draft(session_id, flow_name)
+
+    def clear_form_draft(self, session_id: str, flow_name: str) -> None:
+        """Remove a form draft from Redis."""
+        self.redis.delete_form_draft(session_id, flow_name)
