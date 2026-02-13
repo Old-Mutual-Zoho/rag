@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 from decimal import Decimal
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from datetime import datetime, date
 
@@ -166,7 +166,7 @@ class PersonalAccidentFlow:
         """
         if payload and "_raw" not in payload:
             errors: Dict[str, str] = {}
-            
+
             # Frontend-style field names
             first_name = require_str(payload, "firstName", errors, label="First Name")
             last_name = require_str(payload, "lastName", errors, label="Last Name")
@@ -176,7 +176,7 @@ class PersonalAccidentFlow:
             dob_str = payload.get("dob", "")
             policy_start_date_str = payload.get("policyStartDate", "")
             cover_limit_str = payload.get("coverLimitAmountUgx", "")
-            
+
             # Validate DOB (must be at least 18, max 65)
             dob = validate_date_iso(dob_str, errors, "dob", required=True, not_future=True)
             if dob:
@@ -186,7 +186,7 @@ class PersonalAccidentFlow:
                     errors["dob"] = "You must be at least 18 years old."
                 elif age > 65:
                     errors["dob"] = "Age cannot be more than 65 years."
-            
+
             # Validate policy start date (must be after today)
             if policy_start_date_str:
                 try:
@@ -197,19 +197,19 @@ class PersonalAccidentFlow:
                     errors["policyStartDate"] = "Invalid date format (use YYYY-MM-DD)."
             else:
                 policy_start = None
-            
+
             # Validate cover limit
             allowed_limits = ["5000000", "10000000", "20000000"]
             if cover_limit_str not in allowed_limits:
                 errors["coverLimitAmountUgx"] = f"Cover limit must be one of: {', '.join(allowed_limits)}"
-            
+
             raise_if_errors(errors)
-            
+
             # Calculate premium
             premium = self._calculate_pa_premium(
                 first_name, last_name, dob, int(cover_limit_str)
             )
-            
+
             # Create quote in Postgres (status="draft" for now)
             quote = self.db.create_quote(
                 user_id=user_id,
@@ -228,7 +228,7 @@ class PersonalAccidentFlow:
                 pricing_breakdown=premium.get("breakdown"),
                 product_name="Personal Accident",
             )
-            
+
             # Store quick quote data for later autofill
             data["quick_quote"] = {
                 "first_name": first_name,
@@ -241,9 +241,9 @@ class PersonalAccidentFlow:
                 "cover_limit_ugx": int(cover_limit_str),
                 "quote_id": str(quote.id),
             }
-            
+
             data["quote_id"] = str(quote.id)
-        
+
         return {
             "response": {
                 "type": "form",
@@ -273,7 +273,7 @@ class PersonalAccidentFlow:
         Display premium, benefits per cover level, and download/proceed options.
         """
         action = (payload.get("action") or payload.get("_raw") or "").strip().lower()
-        
+
         # If user clicks "Edit quote", go back to step 0
         if "edit" in action or "back" in action:
             return {
@@ -281,26 +281,26 @@ class PersonalAccidentFlow:
                 "next_step": 0,
                 "collected_data": data,
             }
-        
+
         # Get cover limit from collected data
         cover_limit = data.get("quick_quote", {}).get("cover_limit_ugx") or 5000000
         cover_limit_str = str(cover_limit)
-        
+
         # Get benefits for this level
         benefits = PA_BENEFITS_BY_LEVEL.get(cover_limit_str, PA_BENEFITS_BY_LEVEL["5000000"])
-        
+
         # Re-calculate premium (or fetch from data if already calculated)
         quick_quote = data.get("quick_quote", {})
         dob_str = quick_quote.get("dob")
         dob = date.fromisoformat(dob_str) if dob_str else None
-        
+
         premium = self._calculate_pa_premium(
             quick_quote.get("first_name", ""),
             quick_quote.get("last_name", ""),
             dob,
             cover_limit,
         )
-        
+
         return {
             "response": {
                 "type": "premium_summary",
@@ -330,36 +330,36 @@ class PersonalAccidentFlow:
         """
         if payload and "_raw" not in payload:
             errors: Dict[str, str] = {}
-            
+
             # Get from payload or use quick quote data
             surname = payload.get("surname") or data.get("quick_quote", {}).get("last_name", "")
             if not surname:
                 errors["surname"] = "Surname is required"
-            
+
             first_name = payload.get("first_name") or data.get("quick_quote", {}).get("first_name", "")
             if not first_name:
                 errors["first_name"] = "First name is required"
-            
+
             middle_name = optional_str(payload.get("middle_name", ""))
             email = payload.get("email") or data.get("quick_quote", {}).get("email", "")
             if email:
                 validate_email(email, errors, field="email")
-            
+
             mobile_number = payload.get("mobile_number") or data.get("quick_quote", {}).get("mobile", "")
             if mobile_number:
                 validate_phone_ug(mobile_number, errors, field="mobile_number")
-            
+
             national_id_number = require_str(payload, "national_id_number", errors, label="National ID Number")
             if national_id_number:
                 validate_nin_ug(national_id_number, errors, field="national_id_number")
-            
+
             nationality = require_str(payload, "nationality", errors, label="Nationality")
             occupation = require_str(payload, "occupation", errors, label="Occupation")
             gender = validate_in(payload.get("gender", ""), {"Male", "Female", "Other"}, errors, "gender", required=True)
             tax_identification_number = optional_str(payload.get("tax_identification_number", ""))
             country_of_residence = require_str(payload, "country_of_residence", errors, label="Country of Residence")
             physical_address = require_str(payload, "physical_address", errors, label="Physical Address")
-            
+
             raise_if_errors(errors)
 
             data["personal_details"] = {
@@ -386,18 +386,99 @@ class PersonalAccidentFlow:
                 "type": "form",
                 "message": "📋 Complete your personal details",
                 "fields": [
-                    {"name": "surname", "label": "Surname", "type": "text", "required": True, "defaultValue": prefilled_personal.get("surname", quick_quote.get("last_name", ""))},
-                    {"name": "first_name", "label": "First Name", "type": "text", "required": True, "defaultValue": prefilled_personal.get("first_name", quick_quote.get("first_name", ""))},
-                    {"name": "middle_name", "label": "Middle Name", "type": "text", "required": False, "defaultValue": prefilled_personal.get("middle_name", "")},
-                    {"name": "email", "label": "Email Address", "type": "email", "required": True, "defaultValue": prefilled_personal.get("email", quick_quote.get("email", ""))},
-                    {"name": "mobile_number", "label": "Mobile Number", "type": "tel", "required": True, "defaultValue": prefilled_personal.get("mobile_number", quick_quote.get("mobile", ""))},
-                    {"name": "national_id_number", "label": "National ID Number", "type": "text", "required": True, "defaultValue": prefilled_personal.get("national_id_number", "")},
-                    {"name": "nationality", "label": "Nationality", "type": "text", "required": True, "defaultValue": prefilled_personal.get("nationality", "")},
-                    {"name": "tax_identification_number", "label": "Tax Identification Number", "type": "text", "required": False, "defaultValue": prefilled_personal.get("tax_identification_number", "")},
-                    {"name": "occupation", "label": "Occupation", "type": "text", "required": True, "defaultValue": prefilled_personal.get("occupation", "")},
-                    {"name": "gender", "label": "Gender", "type": "select", "options": ["Male", "Female", "Other"], "required": True, "defaultValue": prefilled_personal.get("gender", "")},
-                    {"name": "country_of_residence", "label": "Country of Residence", "type": "text", "required": True, "defaultValue": prefilled_personal.get("country_of_residence", "")},
-                    {"name": "physical_address", "label": "Physical Address", "type": "text", "required": True, "defaultValue": prefilled_personal.get("physical_address", "")},
+                    {
+                        "name": "surname",
+                        "label": "Surname",
+                        "type": "text",
+                        "required": True,
+                        "defaultValue": prefilled_personal.get("surname", quick_quote.get("last_name", "")),
+                    },
+                    {
+                        "name": "first_name",
+                        "label": "First Name",
+                        "type": "text",
+                        "required": True,
+                        "defaultValue": prefilled_personal.get(
+                            "first_name", quick_quote.get("first_name", "")
+                        ),
+                    },
+                    {
+                        "name": "middle_name",
+                        "label": "Middle Name",
+                        "type": "text",
+                        "required": False,
+                        "defaultValue": prefilled_personal.get("middle_name", ""),
+                    },
+                    {
+                        "name": "email",
+                        "label": "Email Address",
+                        "type": "email",
+                        "required": True,
+                        "defaultValue": prefilled_personal.get("email", quick_quote.get("email", "")),
+                    },
+                    {
+                        "name": "mobile_number",
+                        "label": "Mobile Number",
+                        "type": "tel",
+                        "required": True,
+                        "defaultValue": prefilled_personal.get(
+                            "mobile_number", quick_quote.get("mobile", "")
+                        ),
+                    },
+                    {
+                        "name": "national_id_number",
+                        "label": "National ID Number",
+                        "type": "text",
+                        "required": True,
+                        "defaultValue": prefilled_personal.get("national_id_number", ""),
+                    },
+                    {
+                        "name": "nationality",
+                        "label": "Nationality",
+                        "type": "text",
+                        "required": True,
+                        "defaultValue": prefilled_personal.get("nationality", ""),
+                    },
+                    {
+                        "name": "tax_identification_number",
+                        "label": "Tax Identification Number",
+                        "type": "text",
+                        "required": False,
+                        "defaultValue": prefilled_personal.get(
+                            "tax_identification_number", ""
+                        ),
+                    },
+                    {
+                        "name": "occupation",
+                        "label": "Occupation",
+                        "type": "text",
+                        "required": True,
+                        "defaultValue": prefilled_personal.get("occupation", ""),
+                    },
+                    {
+                        "name": "gender",
+                        "label": "Gender",
+                        "type": "select",
+                        "options": ["Male", "Female", "Other"],
+                        "required": True,
+                        "defaultValue": prefilled_personal.get("gender", ""),
+                    },
+                    {
+                        "name": "country_of_residence",
+                        "label": "Country of Residence",
+                        "type": "text",
+                        "required": True,
+                        "defaultValue": prefilled_personal.get(
+                            "country_of_residence", ""
+                        ),
+                    },
+                    {
+                        "name": "physical_address",
+                        "label": "Physical Address",
+                        "type": "text",
+                        "required": True,
+                        "defaultValue": prefilled_personal.get("physical_address", ""),
+                    },
                 ],
             },
             "next_step": 3,
@@ -563,14 +644,14 @@ class PersonalAccidentFlow:
         cover_limit = quick_quote.get("cover_limit_ugx", 5000000)
         dob_str = quick_quote.get("dob")
         dob = date.fromisoformat(dob_str) if dob_str else None
-        
+
         premium = self._calculate_pa_premium(
             quick_quote.get("first_name", ""),
             quick_quote.get("last_name", ""),
             dob,
             cover_limit,
         )
-        
+
         # Summarize collected data
         summary = {
             "Applicant": {
@@ -591,7 +672,7 @@ class PersonalAccidentFlow:
                 "Annual Premium": f"UGX {premium['annual']:,.2f}",
             },
         }
-        
+
         return {
             "response": {
                 "type": "confirmation",
@@ -623,8 +704,6 @@ class PersonalAccidentFlow:
         Step 8: Final Submission & Payment
         Create/update quote and proceed to payment flow.
         """
-        action = (payload.get("action") or payload.get("_raw") or "").strip().lower()
-
         # Get quote ID from earlier quick quote step
         quote_id = data.get("quote_id")
         if not quote_id:
@@ -633,14 +712,14 @@ class PersonalAccidentFlow:
             dob_str = quick_quote.get("dob")
             dob = date.fromisoformat(dob_str) if dob_str else None
             cover_limit = quick_quote.get("cover_limit_ugx", 5000000)
-            
+
             premium = self._calculate_pa_premium(
                 quick_quote.get("first_name", ""),
                 quick_quote.get("last_name", ""),
                 dob,
                 cover_limit,
             )
-            
+
             quote = self.db.create_quote(
                 user_id=user_id,
                 product_id="personal_accident",
@@ -665,7 +744,13 @@ class PersonalAccidentFlow:
             "data": {"quote_id": quote_id},
         }
 
-    def _calculate_pa_premium(self, first_name: str, last_name: str, dob: Optional[date], sum_assured: int) -> Dict:
+    def _calculate_pa_premium(
+        self,
+        first_name: str,
+        last_name: str,
+        dob: Optional[date],
+        sum_assured: int,
+    ) -> Dict:
         """
         Calculate premium for Personal Accident.
         Base rate: 0.15% of sum assured per year (illustrative).
@@ -673,14 +758,16 @@ class PersonalAccidentFlow:
         """
         base_rate = Decimal("0.0015")  # 0.15% of sum assured per year
         annual = Decimal(sum_assured) * base_rate
-        
+
         breakdown = {"base_annual": float(annual)}
-        
+
         # Apply age modifier
         if dob:
             today = date.today()
-            age = today.year - dob.year - (1 if (today.month, today.day) < (dob.month, dob.day) else 0)
-            
+            age = today.year - dob.year - (
+                1 if (today.month, today.day) < (dob.month, dob.day) else 0
+            )
+
             if age < 25:
                 modifier = Decimal("1.25")  # 25% loading for young drivers
                 loading = annual * (modifier - 1)
@@ -691,9 +778,9 @@ class PersonalAccidentFlow:
                 loading = annual * (modifier - 1)
                 annual += loading
                 breakdown["age_loading"] = float(loading)
-        
+
         monthly = annual / 12
-        
+
         return {
             "annual": float(annual.quantize(Decimal("0.01"))),
             "monthly": float(monthly.quantize(Decimal("0.01"))),
