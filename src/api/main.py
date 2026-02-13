@@ -529,7 +529,7 @@ def _build_flow_schema(flow_id: str) -> Dict:
     """Build step and form schema for a guided flow. Raises KeyError for unknown flow_id."""
     if flow_id == "personal_accident":
         from src.chatbot.flows.personal_accident import (
-            PERSONAL_ACCIDENT_COVERAGE_PLANS,
+            PA_BENEFITS_BY_LEVEL,
             PERSONAL_ACCIDENT_RISKY_ACTIVITIES,
             PersonalAccidentFlow,
         )
@@ -537,21 +537,51 @@ def _build_flow_schema(flow_id: str) -> Dict:
         steps = []
         for i, name in enumerate(PersonalAccidentFlow.STEPS):
             entry = {"index": i, "name": name}
-            if name == "personal_details":
+            if name == "quick_quote":
                 entry["form"] = {
                     "type": "form",
+                    "message": "Get your Personal Accident quote in seconds",
+                    "fields": [
+                        {"name": "firstName", "label": "First Name", "type": "text", "required": True, "minLength": 2, "maxLength": 50},
+                        {"name": "lastName", "label": "Last Name", "type": "text", "required": True, "minLength": 2, "maxLength": 50},
+                        {"name": "middleName", "label": "Middle Name", "type": "text", "required": False, "maxLength": 50},
+                        {"name": "mobile", "label": "Mobile Number", "type": "tel", "required": True, "placeholder": "07XX XXX XXX"},
+                        {"name": "email", "label": "Email Address", "type": "email", "required": True, "maxLength": 100},
+                        {"name": "dob", "label": "Date of Birth", "type": "date", "required": True, "help": "Must be 18-65 years old"},
+                        {"name": "policyStartDate", "label": "Policy Start Date", "type": "date", "required": True, "help": "Must be after today"},
+                        {"name": "coverLimitAmountUgx", "label": "Cover Limit", "type": "select", "required": True, "options": [
+                            {"value": "5000000", "label": "UGX 5,000,000"},
+                            {"value": "10000000", "label": "UGX 10,000,000"},
+                            {"value": "20000000", "label": "UGX 20,000,000"},
+                        ]},
+                    ],
+                }
+            elif name == "premium_summary":
+                entry["form"] = {
+                    "type": "premium_summary",
+                    "message": "Your Personal Accident Premium",
+                    "benefits": PA_BENEFITS_BY_LEVEL,
+                    "actions": ["edit", "proceed_to_details"],
+                }
+            elif name == "personal_details":
+                entry["form"] = {
+                    "type": "form",
+                    "message": "👤 Personal Details",
                     "fields": [
                         {"name": "surname", "label": "Surname", "type": "text", "required": True},
                         {"name": "first_name", "label": "First Name", "type": "text", "required": True},
                         {"name": "middle_name", "label": "Middle Name", "type": "text", "required": False},
-                        {"name": "date_of_birth", "label": "Date of Birth", "type": "date", "required": True},
                         {"name": "email", "label": "Email Address", "type": "email", "required": True},
                         {"name": "mobile_number", "label": "Mobile Number", "type": "tel", "required": True},
-                        {"name": "national_id_number", "label": "National ID Number", "type": "text", "required": True},
+                        {"name": "national_id_number", "label": "National ID Number", "type": "text", "required": True, "help": "11-digit NIN"},
                         {"name": "nationality", "label": "Nationality", "type": "text", "required": True},
-                        {"name": "tax_identification_number", "label": "Tax ID", "type": "text", "required": False},
+                        {"name": "tax_identification_number", "label": "TIN (Optional)", "type": "text", "required": False},
                         {"name": "occupation", "label": "Occupation", "type": "text", "required": True},
-                        {"name": "gender", "label": "Gender", "type": "select", "options": ["Male", "Female", "Other"], "required": True},
+                        {"name": "gender", "label": "Gender", "type": "select", "required": True, "options": [
+                            {"value": "Male", "label": "Male"},
+                            {"value": "Female", "label": "Female"},
+                            {"value": "Other", "label": "Other"},
+                        ]},
                         {"name": "country_of_residence", "label": "Country of Residence", "type": "text", "required": True},
                         {"name": "physical_address", "label": "Physical Address", "type": "text", "required": True},
                     ],
@@ -559,6 +589,7 @@ def _build_flow_schema(flow_id: str) -> Dict:
             elif name == "next_of_kin":
                 entry["form"] = {
                     "type": "form",
+                    "message": "👥 Next of Kin",
                     "fields": [
                         {"name": "nok_first_name", "label": "First Name", "type": "text", "required": True},
                         {"name": "nok_last_name", "label": "Last Name", "type": "text", "required": True},
@@ -587,15 +618,16 @@ def _build_flow_schema(flow_id: str) -> Dict:
                     "options": PERSONAL_ACCIDENT_RISKY_ACTIVITIES,
                     "other_field": {"name": "risky_activity_other"},
                 }
-            elif name == "coverage_selection":
-                entry["form"] = {
-                    "type": "options",
-                    "options": [{"id": p["id"], "label": p["label"], "sum_assured": p["sum_assured"]} for p in PERSONAL_ACCIDENT_COVERAGE_PLANS],
-                }
             elif name == "upload_national_id":
                 entry["form"] = {"type": "file_upload", "field_name": "national_id_file_ref", "accept": "application/pdf"}
-            elif name in ("premium_and_download", "choose_plan_and_pay"):
-                entry["form"] = {"type": "premium_summary", "actions": ["view_all_plans", "proceed_to_pay"]}
+            elif name == "final_confirmation":
+                entry["form"] = {
+                    "type": "confirmation",
+                    "message": "Please review your details",
+                    "actions": ["edit", "confirm"],
+                }
+            elif name == "choose_plan_and_pay":
+                entry["form"] = {"type": "proceed_to_payment", "actions": ["confirm"]}
             steps.append(entry)
         return {"flow_id": "personal_accident", "steps": steps}
 
