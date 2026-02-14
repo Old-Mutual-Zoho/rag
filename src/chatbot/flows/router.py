@@ -2,7 +2,10 @@
 Chat router - Determines mode and routes messages
 """
 
+import logging
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class ChatRouter:
@@ -64,6 +67,11 @@ class ChatRouter:
             if flow_type in ("personal_accident", "travel_insurance", "motor_private", "serenicare"):
                 initial_data = {"product_flow": flow_type}
 
+            logger.info(
+                "[Router] Guided trigger detected: message='%s' flow_type=%s initial_data=%s",
+                message[:100], flow_type, initial_data
+            )
+
             # Always start the journey engine for guided triggers.
             return await self.guided.start_flow("journey", session_id, user_id, initial_data=initial_data)
 
@@ -72,8 +80,36 @@ class ChatRouter:
 
     def _is_guided_trigger(self, message: str) -> bool:
         """Check if message should trigger guided flow"""
-        triggers = [
+        message_lower = message.lower()
+
+        # Explicit quotation/application requests
+        explicit_triggers = [
+            "get a quote",
+            "get a quotation",
+            "get quotation",
+            "want a quote",
+            "want a quotation",
+            "want quotation",
+            "need a quote",
+            "need a quotation",
+            "i want to apply",
+            "i want to buy",
+            "i want to purchase",
+            "can i get a quote",
+            "can i get a quotation",
+            "can i get quotation",
+            "give me a quote",
+            "provide a quote",
+        ]
+
+        if any(trigger in message_lower for trigger in explicit_triggers):
+            logger.info("[Router] Explicit guided trigger matched: %s", message[:100])
+            return True
+
+        # General keywords that might indicate quotation intent
+        general_triggers = [
             "quote",
+            "quotation",
             "buy",
             "apply",
             "purchase",
@@ -82,8 +118,10 @@ class ChatRouter:
             "cost",
             "premium",
         ]
-        message_lower = message.lower()
-        return any(trigger in message_lower for trigger in triggers)
+        matched = any(trigger in message_lower for trigger in general_triggers)
+        if matched:
+            logger.info("[Router] General guided trigger matched: %s", message[:100])
+        return matched
 
     def _detect_flow_type(self, message: str) -> str:
         """Detect which guided flow to start"""
