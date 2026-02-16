@@ -1226,32 +1226,17 @@ async def submit_motor_private_full_form(
     This reuses MotorPrivateFlow.complete_flow so all motor-specific validations run
     server-side and a quote is persisted once.
     """
-    from src.chatbot.flows.motor_private import MotorPrivateFlow
+    from src.chatbot.controllers.motor_private_controller import MotorPrivateController
 
     try:
-        # Resolve external identifier (e.g. phone) to internal user UUID
-        user = db.get_or_create_user(phone_number=body.user_id)
-        internal_user_id = str(user.id)
+        controller = MotorPrivateController(db, product_matcher)
+        result = await controller.submit_full_form(body.user_id, body.data or {})
 
-        flow = MotorPrivateFlow(product_matcher, db)
-
-        # Run the consolidated motor validations + quote creation.
-        result = await flow.complete_flow(dict(body.data or {}), internal_user_id)
-
-        quote_id = (result.get("data") or {}).get("quote_id")
-        if not quote_id:
-            raise HTTPException(status_code=500, detail="Failed to create Motor Private quote")
-
-        quote = db.get_quote(quote_id)
-        if not quote:
-            raise HTTPException(status_code=500, detail="Motor Private quote not found after creation")
-
-        breakdown = quote.pricing_breakdown or {}
         return MotorPrivateFullFormResponse(
-            quote_id=str(quote.id),
-            product_name="Motor Private",
-            total_premium=float(quote.premium_amount),
-            breakdown=breakdown,
+            quote_id=result["quote_id"],
+            product_name=result["product_name"],
+            total_premium=result["total_premium"],
+            breakdown=result["breakdown"],
         )
     except FormValidationError as e:
         raise HTTPException(
@@ -1262,6 +1247,8 @@ async def submit_motor_private_full_form(
                 "field_errors": e.field_errors,
             },
         )
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         logger.error(f"Error submitting Motor Private full form: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
