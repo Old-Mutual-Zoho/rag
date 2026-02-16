@@ -801,6 +801,16 @@ class PersonalAccidentFlow:
         Base rate: 0.15% of sum assured per year (illustrative).
         Age-based modifiers: lower risk for 25-45, higher for <25 or >60.
         """
+        # Defensive: ensure dob is a date object if it's a string
+        if isinstance(dob, str):
+            try:
+                if "T" in dob:
+                    dob = datetime.fromisoformat(dob).date()
+                else:
+                    dob = date.fromisoformat(dob)
+            except (ValueError, TypeError):
+                dob = None
+        
         base_rate = Decimal("0.0015")  # 0.15% of sum assured per year
         annual = Decimal(sum_assured) * base_rate
 
