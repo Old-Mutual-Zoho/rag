@@ -1,15 +1,14 @@
 from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Body
-
 from src.api.main import get_db
 from src.chatbot.controllers.personal_accident_controller import PersonalAccidentController
 from src.chatbot.controllers.serenicare_controller import SerenicareController
 from src.chatbot.controllers.travel_insurance_controller import TravelInsuranceController
 
 api = APIRouter()
-
 # POST endpoint to create Serenicare application with full form data and return app ID
+
+
 @api.post("/applications/serenicare/full", tags=["Applications"])
 async def create_serenicare_full_application(payload: dict = Body(...), db=Depends(get_db)):
     user_id = payload.get("user_id") or payload.get("mobile") or "testuser"
@@ -21,6 +20,8 @@ async def create_serenicare_full_application(payload: dict = Body(...), db=Depen
     return {"id": app_id, **app}
 
 # Update Serenicare application with full form data
+
+
 @api.put("/applications/serenicare/{app_id}", tags=["Applications"])
 async def update_serenicare_application(app_id: str, payload: dict = Body(...), db=Depends(get_db)):
     controller = SerenicareController(db)

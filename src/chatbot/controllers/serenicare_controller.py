@@ -15,108 +15,133 @@ logger = logging.getLogger(__name__)
 
 
 class SerenicareController:
-        def update_serenicare_form(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-            """
-            Update Serenicare application with full form payload and validate all fields.
-            """
-            from src.chatbot.validation import (
-                validate_length_range,
-                validate_motor_email_frontend,
-                validate_uganda_mobile_frontend,
-                validate_enum,
-                validate_list_ids,
-                raise_if_errors,
-            )
-            errors: Dict[str, str] = {}
+    def update_serenicare_form(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Update Serenicare application with full form payload and validate all fields.
+        """
+        from src.chatbot.validation import (
+            validate_length_range,
+            validate_motor_email_frontend,
+            validate_uganda_mobile_frontend,
+            validate_enum,
+            validate_list_ids,
+            raise_if_errors,
+        )
+        errors: Dict[str, str] = {}
 
-            # Validate names
-            first_name = validate_length_range(payload.get("firstName", ""), field="firstName", errors=errors, label="First Name", min_len=2, max_len=50, required=True)
-            last_name = validate_length_range(payload.get("lastName", ""), field="lastName", errors=errors, label="Last Name", min_len=2, max_len=50, required=True)
-            middle_name = validate_length_range(payload.get("middleName", ""), field="middleName", errors=errors, label="Middle Name", min_len=0, max_len=50, required=False)
+        # Validate names
+        first_name = validate_length_range(
+            payload.get("firstName", ""),
+            field="firstName",
+            errors=errors,
+            label="First Name",
+            min_len=2,
+            max_len=50,
+            required=True
+        )
+        last_name = validate_length_range(
+            payload.get("lastName", ""),
+            field="lastName",
+            errors=errors,
+            label="Last Name",
+            min_len=2,
+            max_len=50,
+            required=True
+        )
+        middle_name = validate_length_range(
+            payload.get("middleName", ""),
+            field="middleName",
+            errors=errors,
+            label="Middle Name",
+            min_len=0,
+            max_len=50,
+            required=False
+        )
 
-            # Validate mobile
-            _, mobile = validate_uganda_mobile_frontend(payload.get("mobile", ""), errors, field="mobile")
+        # Validate mobile
+        _, mobile = validate_uganda_mobile_frontend(payload.get("mobile", ""), errors, field="mobile")
 
-            # Validate email
-            email = validate_motor_email_frontend(payload.get("email", ""), errors, field="email")
+        # Validate email
+        email = validate_motor_email_frontend(payload.get("email", ""), errors, field="email")
 
-            # Validate planType
-            plan_type = validate_enum(
-                payload.get("planType", ""),
-                field="planType",
-                errors=errors,
-                allowed=["essential", "classic", "comprehensive", "premium"],
-                required=True,
-                message="Plan type is required and must be one of: essential, classic, comprehensive, premium."
-            )
+        # Validate planType
+        plan_type = validate_enum(
+            payload.get("planType", ""),
+            field="planType",
+            errors=errors,
+            allowed=["essential", "classic", "comprehensive", "premium"],
+            required=True,
+            message="Plan type is required and must be one of: essential, classic, comprehensive, premium."
+        )
 
-            # Validate optionalBenefits
-            optional_benefits = validate_list_ids(
-                payload.get("optionalBenefits", []),
-                allowed_ids=["outpatient", "maternity", "dental", "optical", "covid"],
-                errors=errors,
-                field="optionalBenefits"
-            )
+        # Validate optionalBenefits
+        optional_benefits = validate_list_ids(
+            payload.get("optionalBenefits", []),
+            allowed_ids=["outpatient", "maternity", "dental", "optical", "covid"],
+            errors=errors,
+            field="optionalBenefits"
+        )
 
-            # Validate seriousConditions
-            serious_conditions = validate_enum(
-                payload.get("seriousConditions", ""),
-                field="seriousConditions",
-                errors=errors,
-                allowed=["yes", "no"],
-                required=True,
-                message="Serious conditions must be 'yes' or 'no'."
-            )
+        # Validate seriousConditions
+        serious_conditions = validate_enum(
+            payload.get("seriousConditions", ""),
+            field="seriousConditions",
+            errors=errors,
+            allowed=["yes", "no"],
+            required=True,
+            message="Serious conditions must be 'yes' or 'no'."
+        )
 
-            # Validate mainMembers
-            main_members = payload.get("mainMembers", [])
-            if not isinstance(main_members, list) or not main_members:
-                errors["mainMembers"] = "At least one main member is required."
-            else:
-                from datetime import date, datetime as dt
-                for idx, member in enumerate(main_members):
-                    m_err = {}
-                    # Mutual exclusion
-                    if member.get("includeSpouse") and member.get("includeChildren"):
-                        m_err["includeSpouse"] = "Cannot select both spouse and children for the same member."
-                    # D.O.B
-                    dob_str = member.get("dob", "")
-                    try:
-                        dob = dt.fromisoformat(dob_str).date()
-                    except Exception:
-                        m_err["dob"] = "D.O.B must be a valid date (YYYY-MM-DD)."
-                        dob = None
-                    if dob:
-                        if dob >= date.today():
-                            m_err["dob"] = "D.O.B must be in the past."
-                        if member.get("includeSpouse") and (date.today().year - dob.year < 19 or (date.today() - dob).days < 19*365):
-                            m_err["dob"] = "Spouse must be at least 19 years old."
-                    # Age
-                    age = member.get("age")
-                    if dob and age is not None:
-                        # Calculate age from dob
-                        today = date.today()
-                        calc_age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-                        if int(age) != calc_age:
-                            m_err["age"] = f"Age must match D.O.B (expected {calc_age})."
-                    if m_err:
-                        errors[f"mainMembers[{idx}]"] = ", ".join([f"{k}: {v}" for k, v in m_err.items()])
+        # Validate mainMembers
+        main_members = payload.get("mainMembers", [])
+        if not isinstance(main_members, list) or not main_members:
+            errors["mainMembers"] = "At least one main member is required."
+        else:
+            from datetime import date, datetime as dt
+            for idx, member in enumerate(main_members):
+                m_err = {}
+                # Mutual exclusion
+                if member.get("includeSpouse") and member.get("includeChildren"):
+                    m_err["includeSpouse"] = "Cannot select both spouse and children for the same member."
+                # D.O.B
+                dob_str = member.get("dob", "")
+                try:
+                    dob = dt.fromisoformat(dob_str).date()
+                except Exception:
+                    m_err["dob"] = "D.O.B must be a valid date (YYYY-MM-DD)."
+                    dob = None
+                if dob:
+                    if dob >= date.today():
+                        m_err["dob"] = "D.O.B must be in the past."
+                    if member.get("includeSpouse") and (date.today().year - dob.year < 19 or (date.today() - dob).days < 19*365):
+                        m_err["dob"] = "Spouse must be at least 19 years old."
+                # Age
+                age = member.get("age")
+                if dob and age is not None:
+                    # Calculate age from dob
+                    today = date.today()
+                    calc_age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+                    if int(age) != calc_age:
+                        m_err["age"] = f"Age must match D.O.B (expected {calc_age})."
+                if m_err:
+                    errors[f"mainMembers[{idx}]"] = ", ".join([f"{k}: {v}" for k, v in m_err.items()])
 
-            raise_if_errors(errors)
+        raise_if_errors(errors)
 
-            updates = {
-                "first_name": first_name,
-                "last_name": last_name,
-                "middle_name": middle_name,
-                "mobile": mobile,
-                "email": email,
-                "plan_type": plan_type,
-                "optional_benefits": optional_benefits,
-                "serious_conditions": serious_conditions,
-                "main_members": main_members,
-            }
-            app = self.db.update_serenicare_application(app_id, updates)
-            return self._to_dict(app) if app else None
+        updates = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "middle_name": middle_name,
+            "mobile": mobile,
+            "email": email,
+            "plan_type": plan_type,
+            "optional_benefits": optional_benefits,
+            "serious_conditions": serious_conditions,
+            "main_members": main_members,
+        }
+        app = self.db.update_serenicare_application(app_id, updates)
+        return self._to_dict(app) if app else None
+
     def __init__(self, db):
         self.db = db
 
