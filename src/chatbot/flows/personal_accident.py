@@ -22,6 +22,70 @@ from src.chatbot.validation import (
     validate_phone_ug,
 )
 
+
+def parse_date_flexible(date_str: Any) -> Optional[date]:
+    """
+    Parse date from multiple formats: YYYY-MM-DD, MM/DD/YYYY, DD/MM/YYYY, ISO datetime.
+    Returns a date object or None if parsing fails.
+    """
+    if isinstance(date_str, date):
+        return date_str
+    
+    if not isinstance(date_str, str):
+        return None
+    
+    date_str = date_str.strip()
+    if not date_str:
+        return None
+    
+    # Try ISO datetime format (YYYY-MM-DDTHH:MM:SS)
+    if "T" in date_str:
+        try:
+            return datetime.fromisoformat(date_str).date()
+        except (ValueError, TypeError):
+            pass
+    
+    # Try ISO date format (YYYY-MM-DD)
+    try:
+        return date.fromisoformat(date_str)
+    except (ValueError, TypeError):
+        pass
+    
+    # Try MM/DD/YYYY or DD/MM/YYYY format
+    if "/" in date_str:
+        parts = date_str.split("/")
+        if len(parts) == 3:
+            try:
+                # Try MM/DD/YYYY first
+                month, day, year = int(parts[0]), int(parts[1]), int(parts[2])
+                return date(year, month, day)
+            except (ValueError, TypeError):
+                try:
+                    # Try DD/MM/YYYY as fallback
+                    day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+                    return date(year, month, day)
+                except (ValueError, TypeError):
+                    pass
+    
+    # Try DD-MM-YYYY or MM-DD-YYYY format
+    if "-" in date_str and "T" not in date_str:
+        parts = date_str.split("-")
+        if len(parts) == 3:
+            try:
+                # For non-ISO format with dashes
+                part1, part2, part3 = int(parts[0]), int(parts[1]), int(parts[2])
+                # Assume format is MM-DD-YYYY if parts[2] looks like a year
+                if part3 > 31:  # Likely a year
+                    return date(part3, part1, part2)
+                else:
+                    # Could be DD-MM-YY or similar, try to determine
+                    if part1 > 12:  # First part must be day
+                        return date(part3 if part3 > 999 else 2000 + part3, part2, part1)
+            except (ValueError, TypeError):
+                pass
+    
+    return None
+
 # Benefits per coverage level (from config as requested)
 PA_BENEFITS_BY_LEVEL = {
     "5000000": [
@@ -179,7 +243,7 @@ class PersonalAccidentFlow:
 
             # Validate DOB (must be at least 18, max 65)
             dob_str_validated = validate_date_iso(dob_str, errors, "dob", required=True, not_future=True)
-            dob = date.fromisoformat(dob_str_validated) if dob_str_validated else None
+            dob = parse_date_flexible(dob_str_validated) if dob_str_validated else None
             if dob:
                 today = date.today()
                 age = today.year - dob.year - (1 if (today.month, today.day) < (dob.month, dob.day) else 0)
@@ -191,16 +255,13 @@ class PersonalAccidentFlow:
             # Validate policy start date (must be after today)
             if policy_start_date_str:
                 try:
-                    # Handle both ISO date (YYYY-MM-DD) and datetime formats
-                    if "T" in str(policy_start_date_str):
-                        from datetime import datetime as dt
-                        policy_start = dt.fromisoformat(policy_start_date_str).date()
-                    else:
-                        policy_start = date.fromisoformat(policy_start_date_str)
-                    if policy_start <= date.today():
+                    policy_start = parse_date_flexible(policy_start_date_str)
+                    if not policy_start:
+                        errors["policyStartDate"] = "Invalid date format (use YYYY-MM-DD or MM/DD/YYYY)."
+                    elif policy_start <= date.today():
                         errors["policyStartDate"] = f"Cover start date must be after {date.today()}."
-                except (ValueError, TypeError) as e:
-                    errors["policyStartDate"] = "Invalid date format (use YYYY-MM-DD)."
+                except (ValueError, TypeError):
+                    errors["policyStartDate"] = "Invalid date format (use YYYY-MM-DD or MM/DD/YYYY)."
             else:
                 policy_start = None
 
@@ -298,20 +359,7 @@ class PersonalAccidentFlow:
         # Re-calculate premium (or fetch from data if already calculated)
         quick_quote = data.get("quick_quote", {})
         dob_str = quick_quote.get("dob")
-        # Ensure dob is a date object (handle both ISO date and datetime formats)
-        if isinstance(dob_str, str) and dob_str:
-            try:
-                if "T" in dob_str:
-                    from datetime import datetime as dt
-                    dob = dt.fromisoformat(dob_str).date()
-                else:
-                    dob = date.fromisoformat(dob_str)
-            except (ValueError, TypeError):
-                dob = None
-        elif isinstance(dob_str, date):
-            dob = dob_str
-        else:
-            dob = None
+        dob = parse_date_flexible(dob_str)
 
         premium = self._calculate_pa_premium(
             quick_quote.get("first_name", ""),
@@ -662,20 +710,7 @@ class PersonalAccidentFlow:
         quick_quote = data.get("quick_quote", {})
         cover_limit = quick_quote.get("cover_limit_ugx", 5000000)
         dob_str = quick_quote.get("dob")
-        # Ensure dob is a date object (handle both ISO date and datetime formats)
-        if isinstance(dob_str, str) and dob_str:
-            try:
-                if "T" in dob_str:
-                    from datetime import datetime as dt
-                    dob = dt.fromisoformat(dob_str).date()
-                else:
-                    dob = date.fromisoformat(dob_str)
-            except (ValueError, TypeError):
-                dob = None
-        elif isinstance(dob_str, date):
-            dob = dob_str
-        else:
-            dob = None
+        dob = parse_date_flexible(dob_str)
 
         premium = self._calculate_pa_premium(
             quick_quote.get("first_name", ""),
@@ -742,20 +777,7 @@ class PersonalAccidentFlow:
             # Fallback: create a new quote if not already created
             quick_quote = data.get("quick_quote", {})
             dob_str = quick_quote.get("dob")
-            # Ensure dob is a date object (handle both ISO date and datetime formats)
-            if isinstance(dob_str, str) and dob_str:
-                try:
-                    if "T" in dob_str:
-                        from datetime import datetime as dt
-                        dob = dt.fromisoformat(dob_str).date()
-                    else:
-                        dob = date.fromisoformat(dob_str)
-                except (ValueError, TypeError):
-                    dob = None
-            elif isinstance(dob_str, date):
-                dob = dob_str
-            else:
-                dob = None
+            dob = parse_date_flexible(dob_str)
             cover_limit = quick_quote.get("cover_limit_ugx", 5000000)
 
             premium = self._calculate_pa_premium(
@@ -802,14 +824,7 @@ class PersonalAccidentFlow:
         Age-based modifiers: lower risk for 25-45, higher for <25 or >60.
         """
         # Defensive: ensure dob is a date object if it's a string
-        if isinstance(dob, str):
-            try:
-                if "T" in dob:
-                    dob = datetime.fromisoformat(dob).date()
-                else:
-                    dob = date.fromisoformat(dob)
-            except (ValueError, TypeError):
-                dob = None
+        dob = parse_date_flexible(dob)
         
         base_rate = Decimal("0.0015")  # 0.15% of sum assured per year
         annual = Decimal(sum_assured) * base_rate
