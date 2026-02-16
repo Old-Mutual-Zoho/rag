@@ -38,6 +38,65 @@ def test_travel_application_lifecycle(db):
 
 
 def test_serenicare_application_lifecycle(db):
+
+    def test_serenicare_full_form_validation(db):
+        from src.chatbot.flows.serenicare import SerenicareFlow
+        ctrl = SerenicareController(db)
+        flow = SerenicareFlow(None, db)
+        app = ctrl.create_application("user3", {})
+        app_id = app["id"]
+
+        # Valid payload
+        payload = {
+            "firstName": "John",
+            "lastName": "Doe",
+            "middleName": "Middle",
+            "mobile": "+256712345678",
+            "email": "john.doe@example.com",
+            "planType": "classic",
+            "optionalBenefits": ["outpatient", "dental"],
+            "seriousConditions": "no",
+            "mainMembers": [
+                {
+                    "includeSpouse": False,
+                    "includeChildren": False,
+                    "dob": "1990-01-01",
+                    "age": 36
+                },
+                {
+                    "includeSpouse": True,
+                    "includeChildren": False,
+                    "dob": "1990-01-01",
+                    "age": 36
+                },
+            ]
+        }
+        result = flow.process_serenicare_form(app_id, payload)
+        assert result["first_name"] == "John"
+        assert result["plan_type"] == "classic"
+        assert result["main_members"][0]["dob"] == "1990-01-01"
+
+        # Invalid payload (missing required, bad values)
+        bad_payload = {
+            "firstName": "J",
+            "lastName": "",
+            "mobile": "123",
+            "email": "bademail",
+            "planType": "invalid",
+            "optionalBenefits": ["invalid"],
+            "seriousConditions": "maybe",
+            "mainMembers": [
+                {
+                    "includeSpouse": True,
+                    "includeChildren": True,
+                    "dob": "2027-01-01",
+                    "age": 5
+                }
+            ]
+        }
+        import pytest
+        with pytest.raises(Exception):
+            flow.process_serenicare_form(app_id, bad_payload)
     ctrl = SerenicareController(db)
     app = ctrl.create_application("user2", {})
     app_id = app["id"]
