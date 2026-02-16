@@ -170,7 +170,7 @@ class PersonalAccidentFlow:
             # Frontend-style field names
             first_name = require_str(payload, "firstName", errors, label="First Name")
             last_name = require_str(payload, "lastName", errors, label="Last Name")
-            middle_name = optional_str(payload.get("middleName", ""))
+            middle_name = optional_str(payload, "middleName")
             mobile = validate_phone_ug(payload.get("mobile", ""), errors, field="mobile")
             email = validate_email(payload.get("email", ""), errors, field="email")
             dob_str = payload.get("dob", "")
@@ -340,7 +340,7 @@ class PersonalAccidentFlow:
             if not first_name:
                 errors["first_name"] = "First name is required"
 
-            middle_name = optional_str(payload.get("middle_name", ""))
+            middle_name = optional_str(payload, "middle_name")
             email = payload.get("email") or data.get("quick_quote", {}).get("email", "")
             if email:
                 validate_email(email, errors, field="email")
@@ -356,7 +356,7 @@ class PersonalAccidentFlow:
             nationality = require_str(payload, "nationality", errors, label="Nationality")
             occupation = require_str(payload, "occupation", errors, label="Occupation")
             gender = validate_in(payload.get("gender", ""), {"Male", "Female", "Other"}, errors, "gender", required=True)
-            tax_identification_number = optional_str(payload.get("tax_identification_number", ""))
+            tax_identification_number = optional_str(payload, "tax_identification_number")
             country_of_residence = require_str(payload, "country_of_residence", errors, label="Country of Residence")
             physical_address = require_str(payload, "physical_address", errors, label="Physical Address")
 
@@ -494,11 +494,11 @@ class PersonalAccidentFlow:
             errors: Dict[str, str] = {}
             first_name = require_str(payload, "nok_first_name", errors, label="First Name")
             last_name = require_str(payload, "nok_last_name", errors, label="Last Name")
-            middle_name = optional_str(payload.get("nok_middle_name", ""))
+            middle_name = optional_str(payload, "nok_middle_name")
             phone_number = validate_phone_ug(payload.get("nok_phone_number", ""), errors, field="nok_phone_number")
             relationship = require_str(payload, "nok_relationship", errors, label="Relationship")
             address = require_str(payload, "nok_address", errors, label="Address")
-            id_number = optional_str(payload.get("nok_id_number", ""))
+            id_number = optional_str(payload, "nok_id_number")
             if id_number:
                 validate_nin_ug(id_number, errors, field="nok_id_number")
             raise_if_errors(errors)
