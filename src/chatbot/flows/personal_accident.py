@@ -292,7 +292,13 @@ class PersonalAccidentFlow:
         # Re-calculate premium (or fetch from data if already calculated)
         quick_quote = data.get("quick_quote", {})
         dob_str = quick_quote.get("dob")
-        dob = date.fromisoformat(dob_str) if dob_str else None
+        # Ensure dob is a date object
+        if isinstance(dob_str, str):
+            dob = date.fromisoformat(dob_str) if dob_str else None
+        elif isinstance(dob_str, date):
+            dob = dob_str
+        else:
+            dob = None
 
         premium = self._calculate_pa_premium(
             quick_quote.get("first_name", ""),
