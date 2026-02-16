@@ -135,6 +135,14 @@ class SerenicareFlow:
         except Exception:
             self.controller = None
 
+    def process_serenicare_form(self, app_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Process and validate the full Serenicare form using the controller's validation logic.
+        """
+        if not self.controller:
+            raise Exception("Serenicare controller not initialized")
+        return self.controller.update_serenicare_form(app_id, payload)
+
     # -------------------------------------------------------------------------
     # PREMIUM CALCULATION (Added to fix failing tests)
     # -------------------------------------------------------------------------

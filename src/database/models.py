@@ -127,8 +127,22 @@ class SerenicareApplication(Base):
 
     status: Mapped[str] = mapped_column(String(32), default="in_progress", nullable=False)
 
-    cover_personalization: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    # Main applicant and dependents (mainMembers)
+    main_members: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # list[dict]
+
+    # Form fields
+    first_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    last_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    middle_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    mobile: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    plan_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     optional_benefits: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # list[str]
+    serious_conditions: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+
+    # Legacy/compatibility fields
+    cover_personalization: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     medical_conditions: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     plan_option: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     about_you: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)

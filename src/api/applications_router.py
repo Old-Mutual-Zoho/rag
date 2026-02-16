@@ -1,11 +1,6 @@
-"""
-API endpoints to manage persisted guided-flow applications
-(Personal Accident, Travel Insurance, Serenicare).
-"""
-
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Body
 
 from src.api.main import get_db
 from src.chatbot.controllers.personal_accident_controller import PersonalAccidentController
@@ -13,6 +8,30 @@ from src.chatbot.controllers.serenicare_controller import SerenicareController
 from src.chatbot.controllers.travel_insurance_controller import TravelInsuranceController
 
 api = APIRouter()
+
+# POST endpoint to create Serenicare application with full form data and return app ID
+@api.post("/applications/serenicare/full", tags=["Applications"])
+async def create_serenicare_full_application(payload: dict = Body(...), db=Depends(get_db)):
+    user_id = payload.get("user_id") or payload.get("mobile") or "testuser"
+    controller = SerenicareController(db)
+    app = controller.create_application(user_id, {})
+    app_id = app["id"]
+    # Now update with the full form data
+    app = controller.update_serenicare_form(app_id, payload)
+    return {"id": app_id, **app}
+
+# Update Serenicare application with full form data
+@api.put("/applications/serenicare/{app_id}", tags=["Applications"])
+async def update_serenicare_application(app_id: str, payload: dict = Body(...), db=Depends(get_db)):
+    controller = SerenicareController(db)
+    app = controller.update_serenicare_form(app_id, payload)
+    if not app:
+        raise HTTPException(status_code=404, detail="Application not found")
+    return app
+"""
+API endpoints to manage persisted guided-flow applications
+(Personal Accident, Travel Insurance, Serenicare).
+"""
 
 
 def _parse_sort(sort: str, direction: str) -> tuple[str, bool]:
