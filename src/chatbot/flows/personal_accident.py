@@ -190,10 +190,15 @@ class PersonalAccidentFlow:
             # Validate policy start date (must be after today)
             if policy_start_date_str:
                 try:
-                    policy_start = date.fromisoformat(policy_start_date_str)
+                    # Handle both ISO date (YYYY-MM-DD) and datetime formats
+                    if "T" in str(policy_start_date_str):
+                        from datetime import datetime as dt
+                        policy_start = dt.fromisoformat(policy_start_date_str).date()
+                    else:
+                        policy_start = date.fromisoformat(policy_start_date_str)
                     if policy_start <= date.today():
                         errors["policyStartDate"] = f"Cover start date must be after {date.today()}."
-                except (ValueError, TypeError):
+                except (ValueError, TypeError) as e:
                     errors["policyStartDate"] = "Invalid date format (use YYYY-MM-DD)."
             else:
                 policy_start = None
@@ -292,9 +297,16 @@ class PersonalAccidentFlow:
         # Re-calculate premium (or fetch from data if already calculated)
         quick_quote = data.get("quick_quote", {})
         dob_str = quick_quote.get("dob")
-        # Ensure dob is a date object
-        if isinstance(dob_str, str):
-            dob = date.fromisoformat(dob_str) if dob_str else None
+        # Ensure dob is a date object (handle both ISO date and datetime formats)
+        if isinstance(dob_str, str) and dob_str:
+            try:
+                if "T" in dob_str:
+                    from datetime import datetime as dt
+                    dob = dt.fromisoformat(dob_str).date()
+                else:
+                    dob = date.fromisoformat(dob_str)
+            except (ValueError, TypeError):
+                dob = None
         elif isinstance(dob_str, date):
             dob = dob_str
         else:
@@ -649,7 +661,20 @@ class PersonalAccidentFlow:
         quick_quote = data.get("quick_quote", {})
         cover_limit = quick_quote.get("cover_limit_ugx", 5000000)
         dob_str = quick_quote.get("dob")
-        dob = date.fromisoformat(dob_str) if dob_str else None
+        # Ensure dob is a date object (handle both ISO date and datetime formats)
+        if isinstance(dob_str, str) and dob_str:
+            try:
+                if "T" in dob_str:
+                    from datetime import datetime as dt
+                    dob = dt.fromisoformat(dob_str).date()
+                else:
+                    dob = date.fromisoformat(dob_str)
+            except (ValueError, TypeError):
+                dob = None
+        elif isinstance(dob_str, date):
+            dob = dob_str
+        else:
+            dob = None
 
         premium = self._calculate_pa_premium(
             quick_quote.get("first_name", ""),
@@ -716,7 +741,20 @@ class PersonalAccidentFlow:
             # Fallback: create a new quote if not already created
             quick_quote = data.get("quick_quote", {})
             dob_str = quick_quote.get("dob")
-            dob = date.fromisoformat(dob_str) if dob_str else None
+            # Ensure dob is a date object (handle both ISO date and datetime formats)
+            if isinstance(dob_str, str) and dob_str:
+                try:
+                    if "T" in dob_str:
+                        from datetime import datetime as dt
+                        dob = dt.fromisoformat(dob_str).date()
+                    else:
+                        dob = date.fromisoformat(dob_str)
+                except (ValueError, TypeError):
+                    dob = None
+            elif isinstance(dob_str, date):
+                dob = dob_str
+            else:
+                dob = None
             cover_limit = quick_quote.get("cover_limit_ugx", 5000000)
 
             premium = self._calculate_pa_premium(
