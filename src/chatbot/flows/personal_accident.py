@@ -30,27 +30,27 @@ def parse_date_flexible(date_str: Any) -> Optional[date]:
     """
     if isinstance(date_str, date):
         return date_str
-    
+
     if not isinstance(date_str, str):
         return None
-    
+
     date_str = date_str.strip()
     if not date_str:
         return None
-    
+
     # Try ISO datetime format (YYYY-MM-DDTHH:MM:SS)
     if "T" in date_str:
         try:
             return datetime.fromisoformat(date_str).date()
         except (ValueError, TypeError):
             pass
-    
+
     # Try ISO date format (YYYY-MM-DD)
     try:
         return date.fromisoformat(date_str)
     except (ValueError, TypeError):
         pass
-    
+
     # Try MM/DD/YYYY or DD/MM/YYYY format
     if "/" in date_str:
         parts = date_str.split("/")
@@ -66,7 +66,7 @@ def parse_date_flexible(date_str: Any) -> Optional[date]:
                     return date(year, month, day)
                 except (ValueError, TypeError):
                     pass
-    
+
     # Try DD-MM-YYYY or MM-DD-YYYY format
     if "-" in date_str and "T" not in date_str:
         parts = date_str.split("-")
@@ -83,8 +83,9 @@ def parse_date_flexible(date_str: Any) -> Optional[date]:
                         return date(part3 if part3 > 999 else 2000 + part3, part2, part1)
             except (ValueError, TypeError):
                 pass
-    
+
     return None
+
 
 # Benefits per coverage level (from config as requested)
 PA_BENEFITS_BY_LEVEL = {
@@ -382,7 +383,7 @@ class PersonalAccidentFlow:
                 "download_label": "Download Quote (PDF)",
                 "actions": [
                     {"type": "edit", "label": "Edit Quote"},
-                    {"type": "proceed_to_details", "label": "Proceed with this quote"},
+                    {"type": "proceed_to_details", "label": "Proceed with this quote to buy"},
                 ],
             },
             "next_step": 2,
@@ -825,7 +826,7 @@ class PersonalAccidentFlow:
         """
         # Defensive: ensure dob is a date object if it's a string
         dob = parse_date_flexible(dob)
-        
+
         base_rate = Decimal("0.0015")  # 0.15% of sum assured per year
         annual = Decimal(sum_assured) * base_rate
 
