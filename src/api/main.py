@@ -211,7 +211,7 @@ class APIRAGAdapter:
             # context-only extractive answer instead of surfacing the error text.
             mia = MiaGenerator()
             try:
-                answer = await mia.generate(query, context_docs)
+                answer = await mia.generate(query, context_docs, conversation_history)
             except Exception as e:  # pragma: no cover - defensive; MiaGenerator already logs
                 logger.error("MiaGenerator.generate raised unexpectedly: %s", e, exc_info=True)
                 return _extractive_answer()
