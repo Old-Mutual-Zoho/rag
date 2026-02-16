@@ -178,7 +178,8 @@ class PersonalAccidentFlow:
             cover_limit_str = payload.get("coverLimitAmountUgx", "")
 
             # Validate DOB (must be at least 18, max 65)
-            dob = validate_date_iso(dob_str, errors, "dob", required=True, not_future=True)
+            dob_str_validated = validate_date_iso(dob_str, errors, "dob", required=True, not_future=True)
+            dob = date.fromisoformat(dob_str_validated) if dob_str_validated else None
             if dob:
                 today = date.today()
                 age = today.year - dob.year - (1 if (today.month, today.day) < (dob.month, dob.day) else 0)
