@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, Iterable, Optional, Tuple
 
 
@@ -198,11 +198,30 @@ def validate_date_iso(value: str, errors: Dict[str, str], field: str, *, require
         if required:
             add_error(errors, field, f"{field} is required")
         return raw
+
+    d: Optional[date] = None
     try:
-        d = date.fromisoformat(raw)
+        if "T" in raw:
+            d = datetime.fromisoformat(raw).date()
+        else:
+            d = date.fromisoformat(raw)
     except Exception:
-        add_error(errors, field, f"{field} must be a valid date (YYYY-MM-DD)")
+        d = None
+
+    if d is None and "/" in raw:
+        parts = raw.split("/")
+        if len(parts) == 3:
+            try:
+                # MM/DD/YYYY
+                month, day, year = int(parts[0]), int(parts[1]), int(parts[2])
+                d = date(year, month, day)
+            except Exception:
+                d = None
+
+    if d is None:
+        add_error(errors, field, f"{field} must be a valid date (YYYY-MM-DD or MM/DD/YYYY)")
         return raw
+
     if not_future and d > date.today():
         add_error(errors, field, f"{field} cannot be in the future")
     return raw

@@ -266,3 +266,31 @@ class MiaGenerator:
                 await asyncio.sleep(backoff)
             return text
         return "I'm having trouble retrieving those details right now. Please try again in a moment."
+
+
+def generate_with_gemini(
+    *,
+    question: str,
+    hits: List[Dict[str, Any]],
+    model: str | None = None,
+    api_key_env: str = "GEMINI_API_KEY",
+) -> str:
+    """Sync helper used by scripts/run_rag.py."""
+    import asyncio
+
+    # Allow alternate env var names while keeping GEMINI_API_KEY as the canonical key.
+    if api_key_env and api_key_env != "GEMINI_API_KEY" and not os.environ.get("GEMINI_API_KEY"):
+        alt_value = os.environ.get(api_key_env)
+        if alt_value:
+            os.environ["GEMINI_API_KEY"] = alt_value
+
+    global MODEL_NAME
+    previous_model = MODEL_NAME
+    if model:
+        MODEL_NAME = model
+
+    try:
+        generator = MiaGenerator()
+        return asyncio.run(generator.generate(question, hits, conversation_history=None))
+    finally:
+        MODEL_NAME = previous_model

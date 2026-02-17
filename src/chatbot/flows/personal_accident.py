@@ -22,6 +22,71 @@ from src.chatbot.validation import (
     validate_phone_ug,
 )
 
+
+def parse_date_flexible(date_str: Any) -> Optional[date]:
+    """
+    Parse date from multiple formats: YYYY-MM-DD, MM/DD/YYYY, DD/MM/YYYY, ISO datetime.
+    Returns a date object or None if parsing fails.
+    """
+    if isinstance(date_str, date):
+        return date_str
+
+    if not isinstance(date_str, str):
+        return None
+
+    date_str = date_str.strip()
+    if not date_str:
+        return None
+
+    # Try ISO datetime format (YYYY-MM-DDTHH:MM:SS)
+    if "T" in date_str:
+        try:
+            return datetime.fromisoformat(date_str).date()
+        except (ValueError, TypeError):
+            pass
+
+    # Try ISO date format (YYYY-MM-DD)
+    try:
+        return date.fromisoformat(date_str)
+    except (ValueError, TypeError):
+        pass
+
+    # Try MM/DD/YYYY or DD/MM/YYYY format
+    if "/" in date_str:
+        parts = date_str.split("/")
+        if len(parts) == 3:
+            try:
+                # Try MM/DD/YYYY first
+                month, day, year = int(parts[0]), int(parts[1]), int(parts[2])
+                return date(year, month, day)
+            except (ValueError, TypeError):
+                try:
+                    # Try DD/MM/YYYY as fallback
+                    day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+                    return date(year, month, day)
+                except (ValueError, TypeError):
+                    pass
+
+    # Try DD-MM-YYYY or MM-DD-YYYY format
+    if "-" in date_str and "T" not in date_str:
+        parts = date_str.split("-")
+        if len(parts) == 3:
+            try:
+                # For non-ISO format with dashes
+                part1, part2, part3 = int(parts[0]), int(parts[1]), int(parts[2])
+                # Assume format is MM-DD-YYYY if parts[2] looks like a year
+                if part3 > 31:  # Likely a year
+                    return date(part3, part1, part2)
+                else:
+                    # Could be DD-MM-YY or similar, try to determine
+                    if part1 > 12:  # First part must be day
+                        return date(part3 if part3 > 999 else 2000 + part3, part2, part1)
+            except (ValueError, TypeError):
+                pass
+
+    return None
+
+
 # Benefits per coverage level (from config as requested)
 PA_BENEFITS_BY_LEVEL = {
     "5000000": [
@@ -171,6 +236,7 @@ class PersonalAccidentFlow:
             first_name = require_str(payload, "firstName", errors, label="First Name")
             last_name = require_str(payload, "lastName", errors, label="Last Name")
             middle_name = optional_str(payload, "middleName")
+            middle_name = optional_str(payload, "middleName")
             mobile = validate_phone_ug(payload.get("mobile", ""), errors, field="mobile")
             email = validate_email(payload.get("email", ""), errors, field="email")
             dob_str = payload.get("dob", "")
@@ -178,7 +244,8 @@ class PersonalAccidentFlow:
             cover_limit_str = payload.get("coverLimitAmountUgx", "")
 
             # Validate DOB (must be at least 18, max 65)
-            dob = validate_date_iso(dob_str, errors, "dob", required=True, not_future=True)
+            dob_str_validated = validate_date_iso(dob_str, errors, "dob", required=True, not_future=True)
+            dob = parse_date_flexible(dob_str_validated) if dob_str_validated else None
             if dob:
                 today = date.today()
                 age = today.year - dob.year - (1 if (today.month, today.day) < (dob.month, dob.day) else 0)
@@ -190,11 +257,13 @@ class PersonalAccidentFlow:
             # Validate policy start date (must be after today)
             if policy_start_date_str:
                 try:
-                    policy_start = date.fromisoformat(policy_start_date_str)
-                    if policy_start <= date.today():
+                    policy_start = parse_date_flexible(policy_start_date_str)
+                    if not policy_start:
+                        errors["policyStartDate"] = "Invalid date format (use YYYY-MM-DD or MM/DD/YYYY)."
+                    elif policy_start <= date.today():
                         errors["policyStartDate"] = f"Cover start date must be after {date.today()}."
                 except (ValueError, TypeError):
-                    errors["policyStartDate"] = "Invalid date format (use YYYY-MM-DD)."
+                    errors["policyStartDate"] = "Invalid date format (use YYYY-MM-DD or MM/DD/YYYY)."
             else:
                 policy_start = None
 
@@ -306,7 +375,7 @@ class PersonalAccidentFlow:
                 "download_label": "Download Quote (PDF)",
                 "actions": [
                     {"type": "edit", "label": "Edit Quote"},
-                    {"type": "proceed_to_details", "label": "Proceed with this quote"},
+                    {"type": "proceed_to_details", "label": "Proceed with this quote to buy"},
                 ],
             },
             "next_step": 2,
@@ -332,6 +401,7 @@ class PersonalAccidentFlow:
                 errors["first_name"] = "First name is required"
 
             middle_name = optional_str(payload, "middle_name")
+            middle_name = optional_str(payload, "middle_name")
             email = payload.get("email") or data.get("quick_quote", {}).get("email", "")
             if email:
                 validate_email(email, errors, field="email")
@@ -347,6 +417,7 @@ class PersonalAccidentFlow:
             nationality = require_str(payload, "nationality", errors, label="Nationality")
             occupation = require_str(payload, "occupation", errors, label="Occupation")
             gender = validate_in(payload.get("gender", ""), {"Male", "Female", "Other"}, errors, "gender", required=True)
+            tax_identification_number = optional_str(payload, "tax_identification_number")
             tax_identification_number = optional_str(payload, "tax_identification_number")
             country_of_residence = require_str(payload, "country_of_residence", errors, label="Country of Residence")
             physical_address = require_str(payload, "physical_address", errors, label="Physical Address")
@@ -486,9 +557,11 @@ class PersonalAccidentFlow:
             first_name = require_str(payload, "nok_first_name", errors, label="First Name")
             last_name = require_str(payload, "nok_last_name", errors, label="Last Name")
             middle_name = optional_str(payload, "nok_middle_name")
+            middle_name = optional_str(payload, "nok_middle_name")
             phone_number = validate_phone_ug(payload.get("nok_phone_number", ""), errors, field="nok_phone_number")
             relationship = require_str(payload, "nok_relationship", errors, label="Relationship")
             address = require_str(payload, "nok_address", errors, label="Address")
+            id_number = optional_str(payload, "nok_id_number")
             id_number = optional_str(payload, "nok_id_number")
             if id_number:
                 validate_nin_ug(id_number, errors, field="nok_id_number")
@@ -733,6 +806,9 @@ class PersonalAccidentFlow:
         - Age-based modifiers: lower risk for 25-45, higher for <25 or >60 (if DOB provided).
         - Risky activities: add loading when any risky activities are selected.
         """
+        # Defensive: ensure dob is a date object if it's a string
+        dob = parse_date_flexible(dob)
+
         base_rate = Decimal("0.0015")  # 0.15% of sum assured per year
         annual = Decimal(sum_assured) * base_rate
 

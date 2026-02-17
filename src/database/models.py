@@ -2,13 +2,10 @@
 SQLAlchemy models for users, conversations, messages, quotes.
 Used by postgres_real when USE_POSTGRES_CONVERSATIONS and DATABASE_URL are set.
 """
-
 from __future__ import annotations
-
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 from uuid import uuid4
-
 from sqlalchemy import JSON, Boolean, DateTime, Float, String, Text, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -127,13 +124,52 @@ class SerenicareApplication(Base):
 
     status: Mapped[str] = mapped_column(String(32), default="in_progress", nullable=False)
 
-    cover_personalization: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    # Main applicant and dependents (mainMembers)
+    main_members: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # list[dict]
+
+    # Form fields
+    first_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    last_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    middle_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    mobile: Mapped[str] = mapped_column(String(20), nullable=False)
+    email: Mapped[str] = mapped_column(String(100), nullable=False)
+    plan_type: Mapped[str] = mapped_column(String(32), nullable=False)
     optional_benefits: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # list[str]
-    medical_conditions: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
-    plan_option: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
-    about_you: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    serious_conditions: Mapped[str] = mapped_column(String(8), nullable=False)
 
     quote_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
+# MotorCare (Motor Private) Application schema matching frontend validations
+
+class MotorPrivateApplication(Base):
+    __tablename__ = "motor_private_applications"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    user_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), default="in_progress", nullable=False)
+
+    # Step 1: Get A Quote
+    cover_type: Mapped[str] = mapped_column(String(32), nullable=False)  # "comprehensive" or "third_party"
+
+    # Step 2: Personal Details
+    first_name: Mapped[str] = mapped_column(String(50), nullable=False)
+    middle_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    surname: Mapped[str] = mapped_column(String(50), nullable=False)
+    mobile: Mapped[str] = mapped_column(String(20), nullable=False)
+    email: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    # Step 3: Premium Calculation
+    vehicle_make: Mapped[str] = mapped_column(String(50), nullable=False)
+    year_of_manufacture: Mapped[int] = mapped_column(String(4), nullable=False)
+    cover_start_date: Mapped[str] = mapped_column(String(20), nullable=False)  # ISO date string
+    is_rare_model: Mapped[str] = mapped_column(String(8), nullable=False)  # "yes" or "no"
+    has_undergone_valuation: Mapped[str] = mapped_column(String(8), nullable=False)  # "yes" or "no"
+    vehicle_value_ugx: Mapped[float] = mapped_column(Float, nullable=False)
+
+    quote_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
