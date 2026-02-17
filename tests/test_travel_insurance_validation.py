@@ -19,8 +19,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.chatbot.validation import FormValidationError
-from src.chatbot.flows.travel_insurance import TravelInsuranceFlow
+from src.chatbot.validation import FormValidationError  # noqa: E402
+from src.chatbot.flows.travel_insurance import TravelInsuranceFlow  # noqa: E402
 
 
 def _make_mock_db():
