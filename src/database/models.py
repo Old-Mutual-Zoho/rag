@@ -116,10 +116,6 @@ class TravelInsuranceApplication(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
-# ----------------------------------------------------------------------
-# Motor Private Application model for CRUD
-# ----------------------------------------------------------------------
-
 class SerenicareApplication(Base):
     __tablename__ = "serenicare_applications"
 
