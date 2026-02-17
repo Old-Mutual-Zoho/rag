@@ -289,8 +289,6 @@ class PersonalAccidentFlow:
 
         # Re-calculate premium (or fetch from data if already calculated)
         quick_quote = data.get("quick_quote", {})
-        dob_str = quick_quote.get("dob")
-        dob = date.fromisoformat(dob_str) if dob_str else None
 
         premium = self._calculate_pa_premium({"quick_quote": quick_quote}, cover_limit)
 
@@ -635,8 +633,6 @@ class PersonalAccidentFlow:
         """
         quick_quote = data.get("quick_quote", {})
         cover_limit = quick_quote.get("cover_limit_ugx", 5000000)
-        dob_str = quick_quote.get("dob")
-        dob = date.fromisoformat(dob_str) if dob_str else None
 
         premium = self._calculate_pa_premium({"quick_quote": quick_quote}, cover_limit)
 
@@ -697,8 +693,6 @@ class PersonalAccidentFlow:
         if not quote_id:
             # Fallback: create a new quote if not already created
             quick_quote = data.get("quick_quote", {})
-            dob_str = quick_quote.get("dob")
-            dob = date.fromisoformat(dob_str) if dob_str else None
             cover_limit = quick_quote.get("cover_limit_ugx", 5000000)
 
             premium = self._calculate_pa_premium({"quick_quote": quick_quote}, cover_limit)
