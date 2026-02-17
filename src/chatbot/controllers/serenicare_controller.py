@@ -1,7 +1,5 @@
 """Controller for Serenicare flow persistence."""
 from typing import Any, Dict, Optional
-import logging
-
 from src.chatbot.validation import (
     raise_if_errors,
     require_str,
@@ -11,20 +9,21 @@ from src.chatbot.validation import (
     validate_phone_ug,
 )
 
-logger = logging.getLogger(__name__)
-
 
 class SerenicareController:
+
+    # ...existing code...
+
     def update_serenicare_form(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Update Serenicare application with full form payload and validate all fields.
         """
         from src.chatbot.validation import (
             validate_length_range,
-            validate_motor_email_frontend,
-            validate_uganda_mobile_frontend,
             validate_enum,
             validate_list_ids,
+            validate_motor_email_frontend,
+            validate_uganda_mobile_frontend,
             raise_if_errors,
         )
         errors: Dict[str, str] = {}
@@ -139,9 +138,11 @@ class SerenicareController:
             "serious_conditions": serious_conditions,
             "main_members": main_members,
         }
+
         app = self.db.update_serenicare_application(app_id, updates)
         return self._to_dict(app) if app else None
 
+    # ...existing code...
     def __init__(self, db):
         self.db = db
 
@@ -166,6 +167,7 @@ class SerenicareController:
         return self.db.delete_serenicare_application(app_id)
 
     # Step helpers
+
     def update_cover_personalization(self, app_id: str, payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         errors: Dict[str, str] = {}
         dob = validate_date_iso(payload.get("date_of_birth", ""), errors, "date_of_birth", required=True, not_future=True)
