@@ -170,7 +170,7 @@ class PersonalAccidentFlow:
             # Frontend-style field names
             first_name = require_str(payload, "firstName", errors, label="First Name")
             last_name = require_str(payload, "lastName", errors, label="Last Name")
-            middle_name = optional_str(payload.get("middleName", ""))
+            middle_name = optional_str(payload, "middleName")
             mobile = validate_phone_ug(payload.get("mobile", ""), errors, field="mobile")
             email = validate_email(payload.get("email", ""), errors, field="email")
             dob_str = payload.get("dob", "")
@@ -206,9 +206,7 @@ class PersonalAccidentFlow:
             raise_if_errors(errors)
 
             # Calculate premium
-            premium = self._calculate_pa_premium(
-                first_name, last_name, dob, int(cover_limit_str)
-            )
+            premium = self._calculate_pa_premium({"dob": dob}, int(cover_limit_str))
 
             # Create quote in Postgres (status="draft" for now)
             quote = self.db.create_quote(
@@ -222,7 +220,7 @@ class PersonalAccidentFlow:
                     "middle_name": middle_name,
                     "email": email,
                     "mobile": mobile,
-                    "dob": dob.isoformat() if dob else None,
+                    "dob": dob.isoformat() if hasattr(dob, "isoformat") else None,
                     "policy_start_date": policy_start.isoformat() if policy_start else None,
                 },
                 pricing_breakdown=premium.get("breakdown"),
@@ -294,12 +292,7 @@ class PersonalAccidentFlow:
         dob_str = quick_quote.get("dob")
         dob = date.fromisoformat(dob_str) if dob_str else None
 
-        premium = self._calculate_pa_premium(
-            quick_quote.get("first_name", ""),
-            quick_quote.get("last_name", ""),
-            dob,
-            cover_limit,
-        )
+        premium = self._calculate_pa_premium({"quick_quote": quick_quote}, cover_limit)
 
         return {
             "response": {
@@ -340,7 +333,7 @@ class PersonalAccidentFlow:
             if not first_name:
                 errors["first_name"] = "First name is required"
 
-            middle_name = optional_str(payload.get("middle_name", ""))
+            middle_name = optional_str(payload, "middle_name")
             email = payload.get("email") or data.get("quick_quote", {}).get("email", "")
             if email:
                 validate_email(email, errors, field="email")
@@ -356,7 +349,7 @@ class PersonalAccidentFlow:
             nationality = require_str(payload, "nationality", errors, label="Nationality")
             occupation = require_str(payload, "occupation", errors, label="Occupation")
             gender = validate_in(payload.get("gender", ""), {"Male", "Female", "Other"}, errors, "gender", required=True)
-            tax_identification_number = optional_str(payload.get("tax_identification_number", ""))
+            tax_identification_number = optional_str(payload, "tax_identification_number")
             country_of_residence = require_str(payload, "country_of_residence", errors, label="Country of Residence")
             physical_address = require_str(payload, "physical_address", errors, label="Physical Address")
 
@@ -494,11 +487,11 @@ class PersonalAccidentFlow:
             errors: Dict[str, str] = {}
             first_name = require_str(payload, "nok_first_name", errors, label="First Name")
             last_name = require_str(payload, "nok_last_name", errors, label="Last Name")
-            middle_name = optional_str(payload.get("nok_middle_name", ""))
+            middle_name = optional_str(payload, "nok_middle_name")
             phone_number = validate_phone_ug(payload.get("nok_phone_number", ""), errors, field="nok_phone_number")
             relationship = require_str(payload, "nok_relationship", errors, label="Relationship")
             address = require_str(payload, "nok_address", errors, label="Address")
-            id_number = optional_str(payload.get("nok_id_number", ""))
+            id_number = optional_str(payload, "nok_id_number")
             if id_number:
                 validate_nin_ug(id_number, errors, field="nok_id_number")
             raise_if_errors(errors)
@@ -645,12 +638,7 @@ class PersonalAccidentFlow:
         dob_str = quick_quote.get("dob")
         dob = date.fromisoformat(dob_str) if dob_str else None
 
-        premium = self._calculate_pa_premium(
-            quick_quote.get("first_name", ""),
-            quick_quote.get("last_name", ""),
-            dob,
-            cover_limit,
-        )
+        premium = self._calculate_pa_premium({"quick_quote": quick_quote}, cover_limit)
 
         # Summarize collected data
         summary = {
@@ -713,12 +701,7 @@ class PersonalAccidentFlow:
             dob = date.fromisoformat(dob_str) if dob_str else None
             cover_limit = quick_quote.get("cover_limit_ugx", 5000000)
 
-            premium = self._calculate_pa_premium(
-                quick_quote.get("first_name", ""),
-                quick_quote.get("last_name", ""),
-                dob,
-                cover_limit,
-            )
+            premium = self._calculate_pa_premium({"quick_quote": quick_quote}, cover_limit)
 
             quote = self.db.create_quote(
                 user_id=user_id,
@@ -746,38 +729,59 @@ class PersonalAccidentFlow:
 
     def _calculate_pa_premium(
         self,
-        first_name: str,
-        last_name: str,
-        dob: Optional[date],
+        data: Dict[str, Any],
         sum_assured: int,
     ) -> Dict:
         """
         Calculate premium for Personal Accident.
-        Base rate: 0.15% of sum assured per year (illustrative).
-        Age-based modifiers: lower risk for 25-45, higher for <25 or >60.
+
+        - Base rate: 0.15% of sum assured per year (illustrative).
+        - Age-based modifiers: lower risk for 25-45, higher for <25 or >60 (if DOB provided).
+        - Risky activities: add loading when any risky activities are selected.
         """
         base_rate = Decimal("0.0015")  # 0.15% of sum assured per year
         annual = Decimal(sum_assured) * base_rate
 
-        breakdown = {"base_annual": float(annual)}
+        breakdown: Dict[str, Any] = {"base_annual": float(annual)}
 
-        # Apply age modifier
+        # Optional age modifier if DOB is available
+        dob: Optional[date] = None
+        try:
+            dob_str = ""
+            if isinstance(data, dict):
+                dob_str = str(data.get("dob") or "")
+                if not dob_str:
+                    q = data.get("quick_quote") or {}
+                    dob_str = str((q or {}).get("dob") or "")
+            if dob_str:
+                dob = date.fromisoformat(dob_str)
+        except Exception:
+            dob = None
+
         if dob:
             today = date.today()
-            age = today.year - dob.year - (
-                1 if (today.month, today.day) < (dob.month, dob.day) else 0
-            )
+            age = today.year - dob.year - (1 if (today.month, today.day) < (dob.month, dob.day) else 0)
 
             if age < 25:
-                modifier = Decimal("1.25")  # 25% loading for young drivers
+                modifier = Decimal("1.25")  # 25% loading for younger applicants
                 loading = annual * (modifier - 1)
                 annual += loading
                 breakdown["age_loading"] = float(loading)
             elif age > 60:
-                modifier = Decimal("1.20")  # 20% loading for older drivers
+                modifier = Decimal("1.20")  # 20% loading for older applicants
                 loading = annual * (modifier - 1)
                 annual += loading
                 breakdown["age_loading"] = float(loading)
+
+        # Risky activities loading (simple 10% if any risky activities selected)
+        risky_selected = []
+        if isinstance(data, dict):
+            risky = data.get("risky_activities") or {}
+            risky_selected = risky.get("selected") or []
+        if isinstance(risky_selected, list) and len(risky_selected) > 0:
+            loading = annual * Decimal("0.10")
+            annual += loading
+            breakdown["risky_activities_loading"] = float(loading)
 
         monthly = annual / 12
 
