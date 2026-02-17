@@ -806,8 +806,7 @@ class PersonalAccidentFlow:
         - Age-based modifiers: lower risk for 25-45, higher for <25 or >60 (if DOB provided).
         - Risky activities: add loading when any risky activities are selected.
         """
-        # Defensive: ensure dob is a date object if it's a string
-        dob = parse_date_flexible(dob)
+        # Defensive: parse DOB from provided data when available
 
         base_rate = Decimal("0.0015")  # 0.15% of sum assured per year
         annual = Decimal(sum_assured) * base_rate
