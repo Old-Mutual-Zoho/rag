@@ -51,10 +51,10 @@ class FollowUpManager:
         cleaned = (user_input or "").strip().strip("\"'")
         if cleaned:
             return (
-                f"When you say '{cleaned}', which cover did you have in mind? "
+                f"Could you clarify or provide more details? When you say '{cleaned}', which cover did you have in mind? "
                 "For example Personal Accident, Serenicare, Motor Private, or Travel Sure Plus."
             )
-        return "Which cover did you have in mind? For example Personal Accident, Serenicare, Motor Private, or Travel Sure Plus."
+        return "Could you clarify or provide more details on which cover you have in mind? For example Personal Accident, Serenicare, Motor Private, or Travel Sure Plus."
 
     def extract_followup_from_text(self, text: str) -> str:
         # Naive extraction: return the first sentence that ends with a question mark
