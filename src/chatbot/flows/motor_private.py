@@ -117,8 +117,6 @@ class MotorPrivateFlow:
         payload = data.copy()
         errors: Dict[str, str] = {}
 
-        
-
         # Step 2: Personal Details
         first_name = None
         surname = None
@@ -136,9 +134,6 @@ class MotorPrivateFlow:
                 max_len=50,
                 required=True,
                 message="First name must be 2–50 characters.",
-            )
-            middle_name = validate_length_range(
-                payload.get("middleName", ""),
                 field="middleName",
                 errors=errors,
                 label="Middle name",
@@ -161,7 +156,6 @@ class MotorPrivateFlow:
                 payload.get("mobile", ""), errors, field="mobile"
             )
             email = validate_motor_email_frontend(payload.get("email", ""), errors, field="email")
-
 
         # Step 1: coverType
         cover_type = None

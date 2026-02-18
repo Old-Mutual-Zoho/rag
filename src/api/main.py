@@ -1,6 +1,4 @@
-"""
-FastAPI application - Main entry point
-"""
+
 
 from dotenv import load_dotenv
 
@@ -525,8 +523,23 @@ async def start_guided_body(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# Endpoint for fetching vehicles
+from src.chatbot.controllers.motor_private_controller import MOTOR_PRIVATE_VEHICLE_MAKE_OPTIONS
+# Endpoint to fetch motor private vehicle make options
+from fastapi import APIRouter
+
+
+@app.get("/api/v1/motor-private/vehicle-makes", tags=["Motor Private"])
+async def get_motor_private_vehicle_makes():
+    """
+    Get the list of vehicle make options for Motor Private.
+    """
+    return {"options": MOTOR_PRIVATE_VEHICLE_MAKE_OPTIONS}
+
+
 def _build_flow_schema(flow_id: str) -> Dict:
     """Build step and form schema for a guided flow. Raises KeyError for unknown flow_id."""
+
     if flow_id == "personal_accident":
         from src.chatbot.flows.personal_accident import (
             PA_BENEFITS_BY_LEVEL,
@@ -736,7 +749,7 @@ def _build_flow_schema(flow_id: str) -> Dict:
             steps.append(entry)
         return {"flow_id": "serenicare", "steps": steps}
 
-    raise KeyError(flow_id)
+    raise KeyError(f"Unknown flow_id: {flow_id}")
 
 
 @api_router.post("/chat/message", response_model=ChatResponse)

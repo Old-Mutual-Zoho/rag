@@ -14,8 +14,34 @@ from src.chatbot.validation import (
     raise_if_errors,
 )
 
+MOTOR_PRIVATE_VEHICLE_MAKE_OPTIONS = [
+    "Toyota",
+    "Nissan",
+    "Honda",
+    "Subaru",
+    "Suzuki",
+    "Mazda",
+    "Mitsubishi",
+    "Isuzu",
+    "Ford",
+    "Hyundai",
+    "Kia",
+    "Volkswagen",
+    "Mercedes-Benz",
+    "BMW",
+    "Peugeot",
+    "Renault",
+    "Other",
+]
+
 
 class MotorPrivateController:
+
+    def get_vehicle_make_options(self):
+        """
+        Return the hard-coded list of vehicle make options for Motor Private.
+        """
+        return MOTOR_PRIVATE_VEHICLE_MAKE_OPTIONS
 
     def __init__(self, db):
         self.db = db
