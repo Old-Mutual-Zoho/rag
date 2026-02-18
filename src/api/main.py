@@ -1,4 +1,9 @@
+from fastapi import Request
+from fastapi.responses import JSONResponse
 
+"""
+FastAPI application - Main entry point
+"""
 
 from dotenv import load_dotenv
 
@@ -248,9 +253,22 @@ def get_router():
     return chat_router
 
 
+
 # ============================================================================
 # REQUEST/RESPONSE MODELS
 # ============================================================================
+
+from src.chatbot.controllers.motor_private_controller import MOTOR_PRIVATE_VEHICLE_MAKE_OPTIONS
+
+# ---------- API router (prefix /api) ----------
+api_router = APIRouter()  # app-level dependency covers these too now
+
+@app.get("/api/v1/motor-private/vehicle-makes", tags=["Motor Private"])
+async def get_motor_private_vehicle_makes():
+    """
+    Get the list of vehicle make options for Motor Private.
+    """
+    return {"options": MOTOR_PRIVATE_VEHICLE_MAKE_OPTIONS}
 
 
 class ChatMessage(BaseModel):
@@ -395,6 +413,29 @@ async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: Pos
     return ChatResponse(response=response, session_id=session_id, mode=response.get("mode", "conversational"), timestamp=datetime.now().isoformat())
 
 
+# General Information Endpoint
+@api_router.get("/general-information", tags=["General Information"])
+async def get_general_information(request: Request, session_id: str, product: str, redis=Depends(get_redis)):
+    """
+    Serve general information for a product based on session (from Redis).
+    - session_id: user's session id (from frontend or cookie)
+    - product: product key (e.g. serenicare, motor_private, personal_accident, travel)
+    Returns: definition, benefits, eligibility for the product.
+    """
+    # Optionally: validate session exists
+    session = redis.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Map product to file name
+    product_file = f"d:/ZOHO/rag/general_information/product_json/{product}.json"
+    if not os.path.exists(product_file):
+        raise HTTPException(status_code=404, detail="Product information not found")
+    with open(product_file, "r", encoding="utf-8") as f:
+        info = json.load(f)
+    return JSONResponse(content=info)
+
+
 # ---------- API router (prefix /api) ----------
 api_router = APIRouter()  # app-level dependency covers these too now
 
@@ -523,23 +564,8 @@ async def start_guided_body(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Endpoint for fetching vehicles
-from src.chatbot.controllers.motor_private_controller import MOTOR_PRIVATE_VEHICLE_MAKE_OPTIONS
-# Endpoint to fetch motor private vehicle make options
-from fastapi import APIRouter
-
-
-@app.get("/api/v1/motor-private/vehicle-makes", tags=["Motor Private"])
-async def get_motor_private_vehicle_makes():
-    """
-    Get the list of vehicle make options for Motor Private.
-    """
-    return {"options": MOTOR_PRIVATE_VEHICLE_MAKE_OPTIONS}
-
-
 def _build_flow_schema(flow_id: str) -> Dict:
     """Build step and form schema for a guided flow. Raises KeyError for unknown flow_id."""
-
     if flow_id == "personal_accident":
         from src.chatbot.flows.personal_accident import (
             PA_BENEFITS_BY_LEVEL,
@@ -749,7 +775,7 @@ def _build_flow_schema(flow_id: str) -> Dict:
             steps.append(entry)
         return {"flow_id": "serenicare", "steps": steps}
 
-    raise KeyError(f"Unknown flow_id: {flow_id}")
+    raise KeyError(flow_id)
 
 
 @api_router.post("/chat/message", response_model=ChatResponse)
