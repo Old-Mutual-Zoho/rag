@@ -117,18 +117,6 @@ class MotorPrivateFlow:
         payload = data.copy()
         errors: Dict[str, str] = {}
 
-        # Step 1: coverType
-        cover_type = None
-        if "coverType" in payload:
-            cover_type = validate_enum(
-                payload.get("coverType", ""),
-                field="coverType",
-                errors=errors,
-                allowed=["comprehensive", "third_party"],
-                required=True,
-                message="Please select a cover type.",
-            )
-
         # Step 2: Personal Details
         first_name = None
         surname = None
@@ -146,9 +134,6 @@ class MotorPrivateFlow:
                 max_len=50,
                 required=True,
                 message="First name must be 2–50 characters.",
-            )
-            middle_name = validate_length_range(
-                payload.get("middleName", ""),
                 field="middleName",
                 errors=errors,
                 label="Middle name",
@@ -172,6 +157,17 @@ class MotorPrivateFlow:
             )
             email = validate_motor_email_frontend(payload.get("email", ""), errors, field="email")
 
+        # Step 1: coverType
+        cover_type = None
+        if "coverType" in payload:
+            cover_type = validate_enum(
+                payload.get("coverType", ""),
+                field="coverType",
+                errors=errors,
+                allowed=["comprehensive", "third_party"],
+                required=True,
+                message="Please select a cover type.",
+            )
         # Step 3: Premium Calculation
         vehicle_make_frontend = None
         year_frontend = None

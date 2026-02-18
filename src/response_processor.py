@@ -165,7 +165,7 @@ class ResponseProcessor:
         - 'Personal accident' matches ['Personal Accident Insurance']
         - 'motor' matches ['Motor Private Insurance']
         """
-        if not user_input or products_matched:
+        if not user_input or not products_matched:
             return False
         q = user_input.strip().lower()
         if not q:

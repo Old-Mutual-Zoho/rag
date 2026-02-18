@@ -1,4 +1,5 @@
 import pytest
+from datetime import date, timedelta
 
 from src.chatbot.flows.dynamic_question_engine import DynamicQuestionEngineFlow
 
@@ -47,12 +48,77 @@ async def test_dynamic_engine_personal_accident_buy_cta():
     started = await flow.start("user-1", {"product_flow": "personal_accident"})
     collected = started["collected_data"]
 
-    # Step 0: personal_details
+    start_date = (date.today() + timedelta(days=5)).isoformat()
+
+    # Step 0: quick_quote (frontend field names)
+    out = await flow.process_step(
+        {
+            "firstName": "John",
+            "lastName": "Doe",
+            "email": "john@example.com",
+            "mobile": "0700000000",
+            "dob": "1980-01-01",
+            "policyStartDate": start_date,
+            "coverLimitAmountUgx": "5000000",
+        },
+        0,
+        collected,
+        "user-1",
+    )
+    collected = out["collected_data"]
+
+    # Step 1: premium_summary -> engine should add buy actions
+    out = await flow.process_step({"action": "proceed_to_details"}, 0, collected, "user-1")
+    resp = out.get("response") or {}
+    assert resp.get("type") == "premium_summary"
+    action_types = {a.get("type") for a in resp.get("actions", []) if isinstance(a, dict)}
+    assert "buy_now" in action_types
+    assert "not_now" in action_types
+
+    # Buy -> engine returns buy_cta with quote_id
+    out = await flow.process_step({"action": "buy_now"}, 0, out["collected_data"], "user-1")
+    assert out.get("complete") is True
+    resp = out.get("response") or {}
+    assert resp.get("type") == "buy_cta"
+    assert resp.get("quote_id")
+
+
+@pytest.mark.asyncio
+async def test_dynamic_engine_personal_accident_canonical_steps_progression():
+    flow = DynamicQuestionEngineFlow(product_catalog={}, db=DummyDB())
+
+    started = await flow.start("user-1", {"product_flow": "personal_accident"})
+    collected = started["collected_data"]
+
+    start_date = (date.today() + timedelta(days=5)).isoformat()
+
+    # quick_quote
+    out = await flow.process_step(
+        {
+            "firstName": "John",
+            "lastName": "Doe",
+            "email": "john@example.com",
+            "mobile": "0700000000",
+            "dob": "1980-01-01",
+            "policyStartDate": start_date,
+            "coverLimitAmountUgx": "5000000",
+        },
+        0,
+        collected,
+        "user-1",
+    )
+    collected = out["collected_data"]
+
+    # premium_summary
+    out = await flow.process_step({"action": "proceed_to_details"}, 0, collected, "user-1")
+    assert (out.get("response") or {}).get("type") == "premium_summary"
+    collected = out["collected_data"]
+
+    # personal_details
     out = await flow.process_step(
         {
             "surname": "Doe",
             "first_name": "John",
-            "date_of_birth": "1980-01-01",
             "email": "john@example.com",
             "mobile_number": "0700000000",
             "national_id_number": "CF123456789012",
@@ -66,51 +132,59 @@ async def test_dynamic_engine_personal_accident_buy_cta():
         collected,
         "user-1",
     )
+    assert (out.get("response") or {}).get("type") == "form"
     collected = out["collected_data"]
 
-    # Step 1: next_of_kin
+    # next_of_kin
     out = await flow.process_step(
-        {"nok_first_name": "Jane", "nok_last_name": "Doe", "nok_phone_number": "0700000001", "nok_relationship": "Spouse", "nok_address": "Kampala"},
+        {
+            "nok_first_name": "Jane",
+            "nok_last_name": "Doe",
+            "nok_phone_number": "0700000001",
+            "nok_relationship": "Spouse",
+            "nok_address": "Kampala",
+        },
         0,
         collected,
         "user-1",
     )
+    assert (out.get("response") or {}).get("type") == "form"
     collected = out["collected_data"]
 
-    # Step 2: previous_pa_policy
+    # previous_pa_policy
     out = await flow.process_step({"had_previous_pa_policy": "no"}, 0, collected, "user-1")
+    assert (out.get("response") or {}).get("type") == "yes_no_details"
     collected = out["collected_data"]
 
-    # Step 3: physical_disability
+    # physical_disability
     out = await flow.process_step({"free_from_disability": "yes"}, 0, collected, "user-1")
+    assert (out.get("response") or {}).get("type") == "yes_no_details"
     collected = out["collected_data"]
 
-    # Step 4: risky_activities
+    # risky_activities
     out = await flow.process_step({"risky_activities": []}, 0, collected, "user-1")
+    assert (out.get("response") or {}).get("type") == "checkbox"
     collected = out["collected_data"]
 
-    # Step 5: coverage_selection
-    out = await flow.process_step({"coverage_plan": "basic"}, 0, collected, "user-1")
-    collected = out["collected_data"]
-
-    # Step 6: upload_national_id
+    # upload_national_id
     out = await flow.process_step({"national_id_file_ref": "file-1"}, 0, collected, "user-1")
+    assert (out.get("response") or {}).get("type") == "file_upload"
     collected = out["collected_data"]
 
-    # Step 7: premium_and_download -> engine should add buy actions
+    # final_confirmation
     out = await flow.process_step({}, 0, collected, "user-1")
-    resp = out.get("response") or {}
-    assert resp.get("type") == "premium_summary"
-    action_types = {a.get("type") for a in resp.get("actions", []) if isinstance(a, dict)}
-    assert "buy_now" in action_types
-    assert "not_now" in action_types
+    assert (out.get("response") or {}).get("type") == "confirmation"
+    collected = out["collected_data"]
 
-    # Buy -> engine returns buy_cta with quote_id
-    out = await flow.process_step({"action": "buy_now"}, 0, out["collected_data"], "user-1")
+    # final_confirmation -> step complete gets intercepted into buy_cta
+    out = await flow.process_step({"action": "confirm"}, 0, collected, "user-1")
+    assert (out.get("response") or {}).get("type") == "buy_cta"
+    collected = out["collected_data"]
+
+    # buy decision
+    out = await flow.process_step({"action": "buy_now"}, 0, collected, "user-1")
     assert out.get("complete") is True
-    resp = out.get("response") or {}
-    assert resp.get("type") == "buy_cta"
-    assert resp.get("quote_id")
+    assert (out.get("response") or {}).get("type") == "buy_cta"
 
 
 @pytest.mark.asyncio

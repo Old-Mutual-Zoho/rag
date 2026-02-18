@@ -14,8 +14,34 @@ from src.chatbot.validation import (
     raise_if_errors,
 )
 
+MOTOR_PRIVATE_VEHICLE_MAKE_OPTIONS = [
+    "Toyota",
+    "Nissan",
+    "Honda",
+    "Subaru",
+    "Suzuki",
+    "Mazda",
+    "Mitsubishi",
+    "Isuzu",
+    "Ford",
+    "Hyundai",
+    "Kia",
+    "Volkswagen",
+    "Mercedes-Benz",
+    "BMW",
+    "Peugeot",
+    "Renault",
+    "Other",
+]
+
 
 class MotorPrivateController:
+
+    def get_vehicle_make_options(self):
+        """
+        Return the hard-coded list of vehicle make options for Motor Private.
+        """
+        return MOTOR_PRIVATE_VEHICLE_MAKE_OPTIONS
 
     def __init__(self, db):
         self.db = db
@@ -40,15 +66,7 @@ class MotorPrivateController:
         Update Motor Private application with full form payload and validate all fields.
         """
         errors: Dict[str, str] = {}
-        # Step 1: Get A Quote
-        cover_type = validate_enum(
-            payload.get("coverType", ""),
-            field="coverType",
-            errors=errors,
-            allowed=["comprehensive", "third_party"],
-            required=True,
-            message="Please select a cover type."
-        )
+
         # Step 2: Personal Details
         first_name = validate_length_range(
             payload.get("firstName", ""),
@@ -79,6 +97,16 @@ class MotorPrivateController:
         )
         _, mobile = validate_uganda_mobile_frontend(payload.get("mobile", ""), errors, field="mobile")
         email = validate_motor_email_frontend(payload.get("email", ""), errors, field="email")
+
+        # Step 1: Get A Quote
+        cover_type = validate_enum(
+            payload.get("coverType", ""),
+            field="coverType",
+            errors=errors,
+            allowed=["comprehensive", "third_party"],
+            required=True,
+            message="Please select a cover type."
+        )
         # Step 3: Premium Calculation
         vehicle_make = validate_enum(
             payload.get("vehicleMake", ""),
