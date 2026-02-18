@@ -66,7 +66,7 @@ class MotorPrivateController:
         Update Motor Private application with full form payload and validate all fields.
         """
         errors: Dict[str, str] = {}
-        
+
         # Step 2: Personal Details
         first_name = validate_length_range(
             payload.get("firstName", ""),

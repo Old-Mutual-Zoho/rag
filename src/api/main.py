@@ -253,7 +253,6 @@ def get_router():
     return chat_router
 
 
-
 # ============================================================================
 # REQUEST/RESPONSE MODELS
 # ============================================================================
@@ -262,6 +261,7 @@ from src.chatbot.controllers.motor_private_controller import MOTOR_PRIVATE_VEHIC
 
 # ---------- API router (prefix /api) ----------
 api_router = APIRouter()  # app-level dependency covers these too now
+
 
 @app.get("/api/v1/motor-private/vehicle-makes", tags=["Motor Private"])
 async def get_motor_private_vehicle_makes():
