@@ -117,17 +117,7 @@ class MotorPrivateFlow:
         payload = data.copy()
         errors: Dict[str, str] = {}
 
-        # Step 1: coverType
-        cover_type = None
-        if "coverType" in payload:
-            cover_type = validate_enum(
-                payload.get("coverType", ""),
-                field="coverType",
-                errors=errors,
-                allowed=["comprehensive", "third_party"],
-                required=True,
-                message="Please select a cover type.",
-            )
+        
 
         # Step 2: Personal Details
         first_name = None
@@ -172,6 +162,18 @@ class MotorPrivateFlow:
             )
             email = validate_motor_email_frontend(payload.get("email", ""), errors, field="email")
 
+
+        # Step 1: coverType
+        cover_type = None
+        if "coverType" in payload:
+            cover_type = validate_enum(
+                payload.get("coverType", ""),
+                field="coverType",
+                errors=errors,
+                allowed=["comprehensive", "third_party"],
+                required=True,
+                message="Please select a cover type.",
+            )
         # Step 3: Premium Calculation
         vehicle_make_frontend = None
         year_frontend = None
