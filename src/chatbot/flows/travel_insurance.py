@@ -4,17 +4,16 @@ Travel Insurance flow - Customer buying journey for Old Mutual Travel products.
 Flow: About you → Product selection → Travel party & trip details → Data consent →
 Traveller details → Emergency contact → Bank details (optional) → Passport upload →
 Premium calculation → Payment.
-
-Based on the Travel Sure Plus / Travel Insurance customer journey screens.
 """
 
 from __future__ import annotations
 
 import json
 from decimal import Decimal
-from typing import Any, Dict
-from datetime import datetime
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional, Tuple
 
+from src.chatbot.travel_insurance_countries import DEPARTURE_COUNTRY, DESTINATION_COUNTRIES
 from src.chatbot.validation import (
     add_error,
     parse_int,
@@ -27,22 +26,55 @@ from src.chatbot.validation import (
     validate_phone_ug,
 )
 
-
 # Travel insurance product cards (from product selection screen)
-TRAVEL_INSURANCE_PRODUCTS = [
-    {"id": "worldwide_essential", "label": "Worldwide Essential", "description": "Simple insurance for worry-free international travel"},
-    {"id": "worldwide_elite", "label": "Worldwide Elite", "description": "Comprehensive cover for confident world travel"},
-    {"id": "schengen_essential", "label": "Schengen Essential", "description": "Core cover for travel to the Schengen-area"},
-    {"id": "schengen_elite", "label": "Schengen Elite", "description": "Enhanced benefits for travel to the Schengen-area"},
-    {"id": "student_cover", "label": "Student Cover", "description": "Flexible travel cover designed for students abroad"},
-    {"id": "africa_asia", "label": "Africa & Asia", "description": "Tailored protection for trips across Africa and Asia"},
-    {"id": "inbound_karibu", "label": "Inbound Karibu", "description": "Travel insurance for visitors coming to Uganda"},
+TRAVEL_INSURANCE_PRODUCTS: List[Dict[str, str]] = [
+    {
+        "id": "worldwide_essential",
+        "label": "Worldwide Essential",
+        "description": "Simple insurance for worry-free international travel",
+    },
+    {
+        "id": "worldwide_elite",
+        "label": "Worldwide Elite",
+        "description": "Comprehensive cover for confident world travel",
+    },
+    {
+        "id": "schengen_essential",
+        "label": "Schengen Essential",
+        "description": "Core cover for travel to the Schengen-area",
+    },
+    {
+        "id": "schengen_elite",
+        "label": "Schengen Elite",
+        "description": "Enhanced benefits for travel to the Schengen-area",
+    },
+    {
+        "id": "student_cover",
+        "label": "Student Cover",
+        "description": "Flexible travel cover designed for students abroad",
+    },
+    {
+        "id": "africa_asia",
+        "label": "Africa & Asia",
+        "description": "Tailored protection for trips across Africa and Asia",
+    },
+    {
+        "id": "inbound_karibu",
+        "label": "Inbound Karibu",
+        "description": "Travel insurance for visitors coming to Uganda",
+    },
 ]
 
 # Sample benefits for premium summary (Worldwide Essential tier)
-TRAVEL_INSURANCE_BENEFITS = [
-    {"benefit": "Emergency medical expenses (Including epidemics and pandemics)", "amount": "Up to $40,000"},
-    {"benefit": "Compulsory quarantine expenses (epidemics/pandemics)", "amount": "$85 per night up to 14 nights"},
+TRAVEL_INSURANCE_BENEFITS: List[Dict[str, str]] = [
+    {
+        "benefit": "Emergency medical expenses (Including epidemics and pandemics)",
+        "amount": "Up to $40,000",
+    },
+    {
+        "benefit": "Compulsory quarantine expenses (epidemics/pandemics)",
+        "amount": "$85 per night up to 14 nights",
+    },
     {"benefit": "Emergency medical evacuation and repatriation", "amount": "Actual Expenses"},
     {"benefit": "Emergency dental care", "amount": "Up to $250"},
     {"benefit": "Optical expenses", "amount": "Up to $100"},
@@ -52,10 +84,16 @@ TRAVEL_INSURANCE_BENEFITS = [
 ]
 
 # Relationship options for emergency contact
-EMERGENCY_CONTACT_RELATIONSHIPS = [
-    "Spouse", "Parent", "Child", "Sibling", "Sister-in-law", "Brother-in-law",
-    "Friend", "Other",
-]
+EMERGENCY_CONTACT_RELATIONSHIPS: Tuple[str, ...] = (
+    "Spouse",
+    "Parent",
+    "Child",
+    "Sibling",
+    "Sister-in-law",
+    "Brother-in-law",
+    "Friend",
+    "Other",
+)
 
 
 class TravelInsuranceFlow:
@@ -78,48 +116,46 @@ class TravelInsuranceFlow:
         "choose_plan_and_pay",
     ]
 
-    def __init__(self, product_catalog, db):
+    def __init__(self, product_catalog: Any, db: Any) -> None:
         self.catalog = product_catalog
         self.db = db
-        # Controller for persistence
+        self.controller = None
+
+        # Controller for persistence (optional)
         try:
-            from src.chatbot.controllers.travel_insurance_controller import TravelInsuranceController
+            from src.chatbot.controllers.travel_insurance_controller import (  # noqa: WPS433
+                TravelInsuranceController,
+            )
 
             self.controller = TravelInsuranceController(db)
-        except Exception:
+        except (ImportError, ModuleNotFoundError):
             self.controller = None
 
-    async def start(self, user_id: str, initial_data: Dict) -> Dict:
-        """Start Travel Insurance flow"""
-        data = dict(initial_data or {})
+    async def start(self, user_id: str, initial_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Start Travel Insurance flow."""
+        data: Dict[str, Any] = dict(initial_data or {})
         data.setdefault("user_id", user_id)
         data.setdefault("product_id", "travel_insurance")
+
         # Create persistent application record if controller available
         if self.controller:
             app = self.controller.create_application(user_id, data)
-            data["application_id"] = app.get("id")
+            data["application_id"] = (app or {}).get("id")
+
         return await self.process_step("", 0, data, user_id)
 
     async def process_step(
         self,
-        user_input,
+        user_input: Any,
         current_step: int,
         collected_data: Dict[str, Any],
         user_id: str,
-    ) -> Dict:
+    ) -> Dict[str, Any]:
         """Process one step of the flow."""
-        try:
-            if user_input and isinstance(user_input, str) and user_input.strip().startswith("{"):
-                payload = json.loads(user_input)
-            elif user_input and isinstance(user_input, dict):
-                payload = user_input
-            else:
-                payload = {"_raw": user_input} if user_input else {}
-        except (json.JSONDecodeError, TypeError):
-            payload = {"_raw": user_input} if user_input else {}
+        payload = self._normalize_payload(user_input)
 
         step_handlers = [
-            self._step_about_you,
+             self._step_about_you,
             self._step_product_selection,
             self._step_travel_party_and_trip,
             self._step_data_consent,
@@ -130,8 +166,10 @@ class TravelInsuranceFlow:
             self._step_premium_summary,
             self._step_choose_plan_and_pay,
         ]
+
         if 0 <= current_step < len(step_handlers):
             return await step_handlers[current_step](payload, collected_data, user_id)
+
         return {"error": "Invalid step"}
 
     async def _step_product_selection(self, payload: Dict, data: Dict, user_id: str) -> Dict:
@@ -143,14 +181,18 @@ class TravelInsuranceFlow:
 
         if payload and "_raw" not in payload:
             errors: Dict[str, str] = {}
-            product_id = payload.get("product_id") or payload.get("coverage_product", "").strip()
+            product_id = (payload.get("product_id") or payload.get("coverage_product") or "").strip()
+
             if product_id:
-                product = next((p for p in TRAVEL_INSURANCE_PRODUCTS if p["id"] == product_id), None)
+                product = next(
+                    (p for p in TRAVEL_INSURANCE_PRODUCTS if p["id"] == product_id),
+                    None,
+                )
                 if not product:
                     add_error(errors, "product_id", "Invalid product selection")
                 else:
                     data["selected_product"] = product
-                    # Persist
+
                     app_id = data.get("application_id")
                     if self.controller and app_id:
                         self.controller.update_product_selection(app_id, {"product_id": product_id})
@@ -176,7 +218,12 @@ class TravelInsuranceFlow:
             "collected_data": data,
         }
 
-    async def _step_about_you(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+    async def _step_about_you(
+        self,
+        payload: Dict[str, Any],
+        data: Dict[str, Any],
+        user_id: str,
+    ) -> Dict[str, Any]:
         if payload and "_raw" not in payload:
             errors: Dict[str, str] = {}
             require_str(payload, "first_name", errors, label="First Name")
@@ -192,6 +239,7 @@ class TravelInsuranceFlow:
                 "phone_number": payload.get("phone_number", ""),
                 "email": payload.get("email", ""),
             }
+
             app_id = data.get("application_id")
             if self.controller and app_id:
                 self.controller.update_about_you(app_id, payload)
@@ -202,9 +250,20 @@ class TravelInsuranceFlow:
                 "message": "👤 About you – Get your travel insurance quote in minutes",
                 "fields": [
                     {"name": "first_name", "label": "First Name", "type": "text", "required": True},
-                    {"name": "middle_name", "label": "Middle Name (Optional)", "type": "text", "required": False},
+                    {
+                        "name": "middle_name",
+                        "label": "Middle Name (Optional)",
+                        "type": "text",
+                        "required": False,
+                    },
                     {"name": "surname", "label": "Surname", "type": "text", "required": True},
-                    {"name": "phone_number", "label": "Phone Number", "type": "tel", "required": True, "placeholder": "07XX XXX XXX"},
+                    {
+                        "name": "phone_number",
+                        "label": "Phone Number",
+                        "type": "tel",
+                        "required": True,
+                        "placeholder": "07XX XXX XXX",
+                    },
                     {"name": "email", "label": "Email", "type": "email", "required": True},
                 ],
             },
@@ -212,7 +271,12 @@ class TravelInsuranceFlow:
             "collected_data": data,
         }
 
-    async def _step_travel_party_and_trip(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+    async def _step_travel_party_and_trip(
+        self,
+        payload: Dict[str, Any],
+        data: Dict[str, Any],
+        user_id: str,
+    ) -> Dict[str, Any]:
         if payload and "_raw" not in payload:
             errors: Dict[str, str] = {}
 
@@ -230,10 +294,33 @@ class TravelInsuranceFlow:
             n76_80 = parse_int(payload, "num_travellers_76_80", errors, min_value=0, required=False)
             n81_85 = parse_int(payload, "num_travellers_81_85", errors, min_value=0, required=False)
 
-            departure_country = require_str(payload, "departure_country", errors, label="Departure Country")
-            destination_country = require_str(payload, "destination_country", errors, label="Destination Country")
-            departure_date = validate_date_iso(payload.get("departure_date", ""), errors, "departure_date", required=True)
-            return_date = validate_date_iso(payload.get("return_date", ""), errors, "return_date", required=True)
+            departure_country = validate_in(
+                payload.get("departure_country", DEPARTURE_COUNTRY),
+                (DEPARTURE_COUNTRY,),
+                errors,
+                "departure_country",
+                required=True,
+            )
+            destination_country = validate_in(
+                payload.get("destination_country", ""),
+                DESTINATION_COUNTRIES,
+                errors,
+                "destination_country",
+                required=True,
+            )
+
+            departure_date = validate_date_iso(
+                payload.get("departure_date", ""),
+                errors,
+                "departure_date",
+                required=True,
+            )
+            return_date = validate_date_iso(
+                payload.get("return_date", ""),
+                errors,
+                "return_date",
+                required=True,
+            )
 
             dd = parse_iso_date(departure_date)
             rd = parse_iso_date(return_date)
@@ -254,6 +341,7 @@ class TravelInsuranceFlow:
                 "departure_date": departure_date,
                 "return_date": return_date,
             }
+
             app_id = data.get("application_id")
             if self.controller and app_id:
                 self.controller.update_travel_party_and_trip(app_id, payload)
@@ -269,18 +357,63 @@ class TravelInsuranceFlow:
                         "type": "radio",
                         "options": [
                             {"id": "myself_only", "label": "Myself only"},
-                            {"id": "myself_and_someone_else", "label": "Myself and someone else"},
+                            {
+                                "id": "myself_and_someone_else",
+                                "label": "Myself and someone else",
+                            },
                             {"id": "group", "label": "Group"},
                         ],
                         "required": True,
                     },
-                    {"name": "num_travellers_18_69", "label": "Number of travellers (18–69 years)", "type": "number", "min": 0, "required": True},
-                    {"name": "num_travellers_0_17", "label": "Number of travellers (0–17 years)", "type": "number", "min": 0, "required": False},
-                    {"name": "num_travellers_70_75", "label": "Number of travellers (70–75 years)", "type": "number", "min": 0, "required": False},
-                    {"name": "num_travellers_76_80", "label": "Number of travellers (76–80 years)", "type": "number", "min": 0, "required": False},
-                    {"name": "num_travellers_81_85", "label": "Number of travellers (81–85 years)", "type": "number", "min": 0, "required": False},
-                    {"name": "departure_country", "label": "Departure Country", "type": "text", "required": True, "placeholder": "e.g. Uganda"},
-                    {"name": "destination_country", "label": "Destination Country", "type": "text", "required": True, "placeholder": "e.g. Portugal"},
+                    {
+                        "name": "num_travellers_18_69",
+                        "label": "Number of travellers (18–69 years)",
+                        "type": "number",
+                        "min": 0,
+                        "required": True,
+                    },
+                    {
+                        "name": "num_travellers_0_17",
+                        "label": "Number of travellers (0–17 years)",
+                        "type": "number",
+                        "min": 0,
+                        "required": False,
+                    },
+                    {
+                        "name": "num_travellers_70_75",
+                        "label": "Number of travellers (70–75 years)",
+                        "type": "number",
+                        "min": 0,
+                        "required": False,
+                    },
+                    {
+                        "name": "num_travellers_76_80",
+                        "label": "Number of travellers (76–80 years)",
+                        "type": "number",
+                        "min": 0,
+                        "required": False,
+                    },
+                    {
+                        "name": "num_travellers_81_85",
+                        "label": "Number of travellers (81–85 years)",
+                        "type": "number",
+                        "min": 0,
+                        "required": False,
+                    },
+                    {
+                        "name": "departure_country",
+                        "label": "Departure Country",
+                        "type": "select",
+                        "options": [DEPARTURE_COUNTRY],
+                        "required": True,
+                    },
+                    {
+                        "name": "destination_country",
+                        "label": "Destination Country",
+                        "type": "select",
+                        "options": DESTINATION_COUNTRIES,
+                        "required": True,
+                    },
                     {"name": "departure_date", "label": "Departure Date", "type": "date", "required": True},
                     {"name": "return_date", "label": "Return Date", "type": "date", "required": True},
                 ],
@@ -290,12 +423,20 @@ class TravelInsuranceFlow:
             "collected_data": data,
         }
 
-    async def _step_data_consent(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+    async def _step_data_consent(
+        self,
+        payload: Dict[str, Any],
+        data: Dict[str, Any],
+        user_id: str,
+    ) -> Dict[str, Any]:
         if payload and "_raw" not in payload:
             errors: Dict[str, str] = {}
+
             data["data_consent"] = {
-                "terms_and_conditions_agreed": payload.get("terms_and_conditions_agreed") in (True, "yes", "true", "1"),
-                "consent_data_outside_uganda": payload.get("consent_data_outside_uganda") in (True, "yes", "true", "1"),
+                "terms_and_conditions_agreed": payload.get("terms_and_conditions_agreed")
+                in (True, "yes", "true", "1"),
+                "consent_data_outside_uganda": payload.get("consent_data_outside_uganda")
+                in (True, "yes", "true", "1"),
                 "consent_child_data": payload.get("consent_child_data") in (True, "yes", "true", "1"),
                 "consent_marketing": payload.get("consent_marketing") in (True, "yes", "true", "1"),
             }
@@ -322,17 +463,26 @@ class TravelInsuranceFlow:
                     },
                     {
                         "id": "consent_data_outside_uganda",
-                        "label": "I consent to processing of my personal data outside Uganda (as per Privacy Notice and Privacy Policy).",
+                        "label": (
+                            "I consent to processing of my personal data outside Uganda "
+                            "(as per Privacy Notice and Privacy Policy)."
+                        ),
                         "required": True,
                     },
                     {
                         "id": "consent_child_data",
-                        "label": "I am the parent/legal guardian and consent to processing of my child's personal data (if children are travelling).",
+                        "label": (
+                            "I am the parent/legal guardian and consent to processing of my child's "
+                            "personal data (if children are travelling)."
+                        ),
                         "required": False,
                     },
                     {
                         "id": "consent_marketing",
-                        "label": "I consent to receive information about insurance/financial products and special offers. (You can opt-out anytime.)",
+                        "label": (
+                            "I consent to receive information about insurance/financial products and "
+                            "special offers. (You can opt-out anytime.)"
+                        ),
                         "required": False,
                     },
                 ],
@@ -341,15 +491,32 @@ class TravelInsuranceFlow:
             "collected_data": data,
         }
 
-    async def _step_traveller_details(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+    async def _step_traveller_details(
+        self,
+        payload: Dict[str, Any],
+        data: Dict[str, Any],
+        user_id: str,
+    ) -> Dict[str, Any]:
         if payload and "_raw" not in payload:
             errors: Dict[str, str] = {}
 
             require_str(payload, "first_name", errors, label="First Name")
             require_str(payload, "surname", errors, label="Surname")
-            validate_in(payload.get("nationality_type", ""), ("ugandan", "non_ugandan"), errors, "nationality_type", required=True)
+            validate_in(
+                payload.get("nationality_type", ""),
+                ("ugandan", "non_ugandan"),
+                errors,
+                "nationality_type",
+                required=True,
+            )
             require_str(payload, "passport_number", errors, label="Passport Number")
-            validate_date_iso(payload.get("date_of_birth", ""), errors, "date_of_birth", required=True, not_future=True)
+            validate_date_iso(
+                payload.get("date_of_birth", ""),
+                errors,
+                "date_of_birth",
+                required=True,
+                not_future=True,
+            )
             require_str(payload, "occupation", errors, label="Profession/Occupation")
             validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
             validate_email(payload.get("email", ""), errors, field="email")
@@ -373,11 +540,14 @@ class TravelInsuranceFlow:
                 "postal_address": payload.get("postal_address", ""),
                 "town_city": payload.get("town_city", ""),
             }
+
             if not travellers:
                 travellers.append(primary)
             else:
                 travellers[0] = primary
+
             data["travellers"] = travellers
+
             app_id = data.get("application_id")
             if self.controller and app_id:
                 self.controller.update_traveller_details(app_id, payload)
@@ -385,25 +555,51 @@ class TravelInsuranceFlow:
         return {
             "response": {
                 "type": "form",
-                "message": "👤 Traveller details – Please provide your details and those of any accompanying travelers",
+                "message": (
+                    "👤 Traveller details – Please provide your details and those of any "
+                    "accompanying travelers"
+                ),
                 "fields": [
                     {"name": "first_name", "label": "First Name", "type": "text", "required": True},
-                    {"name": "middle_name", "label": "Middle Name (Optional)", "type": "text", "required": False},
+                    {
+                        "name": "middle_name",
+                        "label": "Middle Name (Optional)",
+                        "type": "text",
+                        "required": False,
+                    },
                     {"name": "surname", "label": "Surname", "type": "text", "required": True},
                     {
                         "name": "nationality_type",
                         "label": "Nationality Type",
                         "type": "radio",
-                        "options": [{"id": "ugandan", "label": "Ugandan"}, {"id": "non_ugandan", "label": "Non-Ugandan"}],
+                        "options": [
+                            {"id": "ugandan", "label": "Ugandan"},
+                            {"id": "non_ugandan", "label": "Non-Ugandan"},
+                        ],
                         "required": True,
                     },
                     {"name": "passport_number", "label": "Passport Number", "type": "text", "required": True},
                     {"name": "date_of_birth", "label": "Date of Birth", "type": "date", "required": True},
-                    {"name": "occupation", "label": "Profession/Occupation", "type": "text", "required": True},
+                    {
+                        "name": "occupation",
+                        "label": "Profession/Occupation",
+                        "type": "text",
+                        "required": True,
+                    },
                     {"name": "phone_number", "label": "Phone Number", "type": "tel", "required": True},
-                    {"name": "office_number", "label": "Office Number (Optional)", "type": "tel", "required": False},
+                    {
+                        "name": "office_number",
+                        "label": "Office Number (Optional)",
+                        "type": "tel",
+                        "required": False,
+                    },
                     {"name": "email", "label": "Email Address", "type": "email", "required": True},
-                    {"name": "postal_address", "label": "Postal/Home Address", "type": "text", "required": True},
+                    {
+                        "name": "postal_address",
+                        "label": "Postal/Home Address",
+                        "type": "text",
+                        "required": True,
+                    },
                     {"name": "town_city", "label": "Town/City", "type": "text", "required": True},
                 ],
                 "add_another": {"label": "Add another traveller", "action": "add_traveller"},
@@ -412,11 +608,22 @@ class TravelInsuranceFlow:
             "collected_data": data,
         }
 
-    async def _step_emergency_contact(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+    async def _step_emergency_contact(
+        self,
+        payload: Dict[str, Any],
+        data: Dict[str, Any],
+        user_id: str,
+    ) -> Dict[str, Any]:
         if payload and "_raw" not in payload:
             errors: Dict[str, str] = {}
             require_str(payload, "ec_surname", errors, label="Surname")
-            validate_in(payload.get("ec_relationship", ""), EMERGENCY_CONTACT_RELATIONSHIPS, errors, "ec_relationship", required=True)
+            validate_in(
+                payload.get("ec_relationship", ""),
+                EMERGENCY_CONTACT_RELATIONSHIPS,
+                errors,
+                "ec_relationship",
+                required=True,
+            )
             validate_phone_ug(payload.get("ec_phone_number", ""), errors, field="ec_phone_number")
             validate_email(payload.get("ec_email", ""), errors, field="ec_email")
             raise_if_errors(errors)
@@ -428,6 +635,7 @@ class TravelInsuranceFlow:
                 "email": payload.get("ec_email", ""),
                 "home_address": payload.get("ec_home_address", ""),
             }
+
             app_id = data.get("application_id")
             if self.controller and app_id:
                 self.controller.update_emergency_contact(app_id, payload)
@@ -442,19 +650,29 @@ class TravelInsuranceFlow:
                         "name": "ec_relationship",
                         "label": "Relationship",
                         "type": "select",
-                        "options": EMERGENCY_CONTACT_RELATIONSHIPS,
+                        "options": list(EMERGENCY_CONTACT_RELATIONSHIPS),
                         "required": True,
                     },
                     {"name": "ec_phone_number", "label": "Phone Number", "type": "tel", "required": True},
                     {"name": "ec_email", "label": "Email Address", "type": "email", "required": True},
-                    {"name": "ec_home_address", "label": "Home/Postal Address", "type": "text", "required": False},
+                    {
+                        "name": "ec_home_address",
+                        "label": "Home/Postal Address",
+                        "type": "text",
+                        "required": False,
+                    },
                 ],
             },
             "next_step": 6,
             "collected_data": data,
         }
 
-    async def _step_bank_details_optional(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+    async def _step_bank_details_optional(
+        self,
+        payload: Dict[str, Any],
+        data: Dict[str, Any],
+        user_id: str,
+    ) -> Dict[str, Any]:
         if payload and "_raw" not in payload:
             errors: Dict[str, str] = {}
 
@@ -464,7 +682,10 @@ class TravelInsuranceFlow:
             bank_branch = str(payload.get("bank_branch") or "").strip()
             account_currency = str(payload.get("account_currency") or "").strip()
 
-            any_bank_field = any([bank_name, account_holder_name, account_number, bank_branch, account_currency])
+            any_bank_field = any(
+                [bank_name, account_holder_name, account_number, bank_branch, account_currency]
+            )
+
             if any_bank_field:
                 if not bank_name:
                     add_error(errors, "bank_name", "Bank Name is required")
@@ -476,7 +697,14 @@ class TravelInsuranceFlow:
                     add_error(errors, "account_number", "Bank Account Number must be numeric")
                 if not bank_branch:
                     add_error(errors, "bank_branch", "Bank Branch is required")
-                validate_in(account_currency, ("UGX", "USD", "EUR"), errors, "account_currency", required=True)
+
+                validate_in(
+                    account_currency,
+                    ("UGX", "USD", "EUR"),
+                    errors,
+                    "account_currency",
+                    required=True,
+                )
 
             raise_if_errors(errors)
 
@@ -487,6 +715,7 @@ class TravelInsuranceFlow:
                 "bank_branch": payload.get("bank_branch", ""),
                 "account_currency": payload.get("account_currency", ""),
             }
+
             app_id = data.get("application_id")
             if self.controller and app_id:
                 self.controller.update_bank_details(app_id, payload)
@@ -498,25 +727,45 @@ class TravelInsuranceFlow:
                 "optional": True,
                 "fields": [
                     {"name": "bank_name", "label": "Bank Name", "type": "text", "required": False},
-                    {"name": "account_holder_name", "label": "Bank Account Holder Name", "type": "text", "required": False},
-                    {"name": "account_number", "label": "Bank Account Number", "type": "text", "required": False},
+                    {
+                        "name": "account_holder_name",
+                        "label": "Bank Account Holder Name",
+                        "type": "text",
+                        "required": False,
+                    },
+                    {
+                        "name": "account_number",
+                        "label": "Bank Account Number",
+                        "type": "text",
+                        "required": False,
+                    },
                     {"name": "bank_branch", "label": "Bank Branch", "type": "text", "required": False},
-                    {"name": "account_currency", "label": "Bank Account Currency", "type": "select", "options": ["UGX", "USD", "EUR"], "required": False},
+                    {
+                        "name": "account_currency",
+                        "label": "Bank Account Currency",
+                        "type": "select",
+                        "options": ["UGX", "USD", "EUR"],
+                        "required": False,
+                    },
                 ],
             },
             "next_step": 7,
             "collected_data": data,
         }
 
-    async def _step_upload_passport(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+    async def _step_upload_passport(
+        self,
+        payload: Dict[str, Any],
+        data: Dict[str, Any],
+        user_id: str,
+    ) -> Dict[str, Any]:
         if payload and "_raw" not in payload:
             errors: Dict[str, str] = {}
             file_ref = require_str(payload, "passport_file_ref", errors, label="Passport file")
             raise_if_errors(errors)
-            data["passport_upload"] = {
-                "file_ref": file_ref,
-                "uploaded_at": datetime.utcnow().isoformat(),
-            }
+
+            data["passport_upload"] = {"file_ref": file_ref, "uploaded_at": datetime.utcnow().isoformat()}
+
             app_id = data.get("application_id")
             if self.controller and app_id:
                 self.controller.update_passport_upload(app_id, payload)
@@ -534,8 +783,14 @@ class TravelInsuranceFlow:
             "collected_data": data,
         }
 
-    async def _step_premium_summary(self, payload: Dict, data: Dict, user_id: str) -> Dict:
-        if payload and payload.get("passport_file_ref") and not data.get("passport_upload"):
+    async def _step_premium_summary(
+        self,
+        payload: Dict[str, Any],
+        data: Dict[str, Any],
+        user_id: str,
+    ) -> Dict[str, Any]:
+        # Allow the UI to pass the upload ref again on this step without failing
+        if payload.get("passport_file_ref") and not data.get("passport_upload"):
             data["passport_upload"] = {
                 "file_ref": payload.get("passport_file_ref", ""),
                 "uploaded_at": datetime.utcnow().isoformat(),
@@ -546,17 +801,17 @@ class TravelInsuranceFlow:
 
         trip = data.get("travel_party_and_trip") or {}
         total_premium = self._calculate_travel_premium(data)
-        # Persist pricing summary into application
+
+        # Persist pricing summary into application (keep it simple: store updated trip)
         app_id = data.get("application_id")
         if self.controller and app_id:
-            # store pricing breakdown as part of the travel application
             self.controller.update_travel_party_and_trip(app_id, data.get("travel_party_and_trip", {}))
 
         return {
             "response": {
                 "type": "premium_summary",
                 "message": "💰 Premium calculation",
-                "product_name": data.get("selected_product", {}).get("label", "Travel Insurance"),
+                "product_name": (data.get("selected_product") or {}).get("label", "Travel Insurance"),
                 "total_premium_usd": total_premium["total_usd"],
                 "total_premium_ugx": total_premium["total_ugx"],
                 "covering": trip.get("travel_party", "Myself"),
@@ -579,13 +834,19 @@ class TravelInsuranceFlow:
             "collected_data": data,
         }
 
-    async def _step_choose_plan_and_pay(self, payload: Dict, data: Dict, user_id: str) -> Dict:
-        action = (payload.get("action") or payload.get("_raw") or "").strip().lower()
+    async def _step_choose_plan_and_pay(
+        self,
+        payload: Dict[str, Any],
+        data: Dict[str, Any],
+        user_id: str,
+    ) -> Dict[str, Any]:
+        action = str(payload.get("action") or payload.get("_raw") or "").strip().lower()
 
         if "edit" in action:
             out = await self._step_travel_party_and_trip(payload, data, user_id)
             out["next_step"] = 2
             return out
+
         if "call" in action or "back" in action:
             return {
                 "response": {
@@ -596,14 +857,13 @@ class TravelInsuranceFlow:
                 "collected_data": data,
             }
 
-        # Proceed to pay
         total_premium = self._calculate_travel_premium(data)
         product = data.get("selected_product") or TRAVEL_INSURANCE_PRODUCTS[0]
-        # Persist quote through controller so the application is updated
+
         app_id = data.get("application_id")
         if self.controller and app_id:
             app = self.controller.finalize_and_create_quote(app_id, user_id, total_premium)
-            data["quote_id"] = app.get("quote_id") if app else None
+            data["quote_id"] = (app or {}).get("quote_id")
         else:
             quote = self.db.create_quote(
                 user_id=user_id,
@@ -633,7 +893,18 @@ class TravelInsuranceFlow:
             "data": {"quote_id": str(data["quote_id"])},
         }
 
-    def _calculate_travel_premium(self, data: Dict) -> Dict:
+    @staticmethod
+    def _get_period_text(trip: Dict[str, Any]) -> str:
+        """Human-readable coverage period."""
+        dd = trip.get("departure_date")
+        rd = trip.get("return_date")
+        if dd and rd:
+            return f"{dd} to {rd}"
+        if dd:
+            return f"From {dd}"
+        return "Not provided"
+
+    def _calculate_travel_premium(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Calculate travel insurance premium.
 
@@ -643,31 +914,17 @@ class TravelInsuranceFlow:
         - for 2026-03-03 to 2026-03-08 => days == 6
         """
         trip = data.get("travel_party_and_trip") or {}
+        days = self._calculate_trip_days(trip.get("departure_date"), trip.get("return_date"))
 
-        departure_date = trip.get("departure_date")
-        return_date = trip.get("return_date")
-
-        # Default to 1 day if missing/invalid
-        days = 1
-        try:
-            if departure_date and return_date:
-                d1 = datetime.fromisoformat(departure_date).date()
-                d2 = datetime.fromisoformat(return_date).date()
-                # Inclusive days (03 to 08 => 6 days)
-                days = max(1, (d2 - d1).days + 1)
-        except Exception:
-            days = 1
-
-        # Number of travellers by age band
         travellers_18_69 = int(trip.get("num_travellers_18_69") or 0)
         travellers_0_17 = int(trip.get("num_travellers_0_17") or 0)
         travellers_70_75 = int(trip.get("num_travellers_70_75") or 0)
         travellers_76_80 = int(trip.get("num_travellers_76_80") or 0)
         travellers_81_85 = int(trip.get("num_travellers_81_85") or 0)
 
-        # Product multiplier (simple tier pricing)
         product = data.get("selected_product") or {}
         product_id = product.get("id", "worldwide_essential")
+
         product_multiplier = {
             "worldwide_essential": Decimal("1.0"),
             "worldwide_elite": Decimal("1.5"),
@@ -685,19 +942,16 @@ class TravelInsuranceFlow:
         rate_76_80 = Decimal("4.0")
         rate_81_85 = Decimal("5.0")
 
-        base_usd = (
-            Decimal(days) * (
-                Decimal(travellers_18_69) * rate_18_69
-                + Decimal(travellers_0_17) * rate_0_17
-                + Decimal(travellers_70_75) * rate_70_75
-                + Decimal(travellers_76_80) * rate_76_80
-                + Decimal(travellers_81_85) * rate_81_85
-            )
+        base_usd = Decimal(days) * (
+            Decimal(travellers_18_69) * rate_18_69
+            + Decimal(travellers_0_17) * rate_0_17
+            + Decimal(travellers_70_75) * rate_70_75
+            + Decimal(travellers_76_80) * rate_76_80
+            + Decimal(travellers_81_85) * rate_81_85
         )
 
         total_usd = (base_usd * product_multiplier).quantize(Decimal("0.01"))
 
-        # Simple FX rate (can be replaced later with live rates)
         usd_to_ugx = Decimal("3900")
         total_ugx = (total_usd * usd_to_ugx).quantize(Decimal("1."))
 
@@ -719,3 +973,22 @@ class TravelInsuranceFlow:
                 "usd_to_ugx": float(usd_to_ugx),
             },
         }
+
+    @staticmethod
+    def _calculate_trip_days(departure_date: Any, return_date: Any) -> int:
+        """Inclusive trip days; defaults to 1 if invalid/missing."""
+        d1 = TravelInsuranceFlow._safe_iso_date(departure_date)
+        d2 = TravelInsuranceFlow._safe_iso_date(return_date)
+        if not d1 or not d2:
+            return 1
+        return max(1, (d2 - d1).days + 1)
+
+    @staticmethod
+    def _safe_iso_date(value: Any) -> Optional[date]:
+        """Parse YYYY-MM-DD safely into date."""
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value)).date()
+        except (TypeError, ValueError):
+            return None

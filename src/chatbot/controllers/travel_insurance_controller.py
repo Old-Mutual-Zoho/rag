@@ -14,6 +14,7 @@ from src.chatbot.validation import (
     validate_phone_ug,
     parse_iso_date,
 )
+from src.chatbot.travel_insurance_countries import DESTINATION_COUNTRIES, DEPARTURE_COUNTRY
 
 logger = logging.getLogger(__name__)
 
@@ -88,8 +89,8 @@ class TravelInsuranceController:
         num_70_75 = parse_int(payload, "num_travellers_70_75", errors, min_value=0)
         num_76_80 = parse_int(payload, "num_travellers_76_80", errors, min_value=0)
         num_81_85 = parse_int(payload, "num_travellers_81_85", errors, min_value=0)
-        departure_country = require_str(payload, "departure_country", errors, label="Departure Country")
-        destination_country = require_str(payload, "destination_country", errors, label="Destination Country")
+        departure_country = validate_in(payload.get("departure_country", ""), (DEPARTURE_COUNTRY,), errors, "departure_country", required=True)
+        destination_country = validate_in(payload.get("destination_country", ""), DESTINATION_COUNTRIES, errors, "destination_country", required=True)
         departure_date = validate_date_iso(payload.get("departure_date", ""), errors, "departure_date", required=True)
         return_date = validate_date_iso(payload.get("return_date", ""), errors, "return_date", required=True)
         # Date ordering check (only if both parsed)

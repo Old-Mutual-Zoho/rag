@@ -859,3 +859,15 @@ class PersonalAccidentFlow:
             "monthly": float(monthly.quantize(Decimal("0.01"))),
             "breakdown": breakdown,
         }
+
+
+"""
+Personal Accident schema =
+personal_accident_applications:
+JSON columns for each step
+(personal_details, next_of_kin, previous_pa_policy,
+physical_disability, risky_activities, coverage_plan, national_id_upload),
+plus status, user_id, and quote_id.
+quotes table storing computed premiums and breakdowns,
+linked back to the application via quote_id.
+"""
