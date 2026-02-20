@@ -134,6 +134,9 @@ class MotorPrivateFlow:
                 max_len=50,
                 required=True,
                 message="First name must be 2–50 characters.",
+            )
+            middle_name = validate_length_range(
+                payload.get("middleName", ""),
                 field="middleName",
                 errors=errors,
                 label="Middle name",
