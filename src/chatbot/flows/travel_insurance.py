@@ -1,7 +1,7 @@
 """
 Travel Insurance flow - Customer buying journey for Old Mutual Travel products.
 
-Flow: Product selection → About you → Travel party & trip details → Data consent →
+Flow: About you → Product selection → Travel party & trip details → Data consent →
 Traveller details → Emergency contact → Bank details (optional) → Passport upload →
 Premium calculation → Payment.
 
@@ -60,14 +60,14 @@ EMERGENCY_CONTACT_RELATIONSHIPS = [
 
 class TravelInsuranceFlow:
     """
-    Guided flow for Travel Insurance: product selection, about you, travel details,
+    Guided flow for Travel Insurance: about you, product selection, travel details,
     data consent, traveller details, emergency contact, bank (optional), passport upload,
     premium calculation, then payment.
     """
 
     STEPS = [
-        "product_selection",
         "about_you",
+        "product_selection",
         "travel_party_and_trip",
         "data_consent",
         "traveller_details",
@@ -119,8 +119,8 @@ class TravelInsuranceFlow:
             payload = {"_raw": user_input} if user_input else {}
 
         step_handlers = [
-            self._step_product_selection,
             self._step_about_you,
+            self._step_product_selection,
             self._step_travel_party_and_trip,
             self._step_data_consent,
             self._step_traveller_details,
@@ -135,6 +135,12 @@ class TravelInsuranceFlow:
         return {"error": "Invalid step"}
 
     async def _step_product_selection(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+        if not data.get("selected_product"):
+            data["selected_product"] = TRAVEL_INSURANCE_PRODUCTS[0]
+            app_id = data.get("application_id")
+            if self.controller and app_id:
+                self.controller.update_product_selection(app_id, {"product_id": TRAVEL_INSURANCE_PRODUCTS[0]["id"]})
+
         if payload and "_raw" not in payload:
             errors: Dict[str, str] = {}
             product_id = payload.get("product_id") or payload.get("coverage_product", "").strip()
@@ -161,11 +167,12 @@ class TravelInsuranceFlow:
                         "label": p["label"],
                         "description": p["description"],
                         "action": "select_cover",
+                        "selected": p["id"] == data.get("selected_product", {}).get("id"),
                     }
                     for p in TRAVEL_INSURANCE_PRODUCTS
                 ],
             },
-            "next_step": 1,
+            "next_step": 2,
             "collected_data": data,
         }
 
@@ -201,7 +208,7 @@ class TravelInsuranceFlow:
                     {"name": "email", "label": "Email", "type": "email", "required": True},
                 ],
             },
-            "next_step": 2,
+            "next_step": 1,
             "collected_data": data,
         }
 

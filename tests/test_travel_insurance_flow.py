@@ -52,7 +52,8 @@ def flow():
 async def test_flow_steps_defined(flow):
     """Travel insurance flow has expected step names."""
     assert len(TravelInsuranceFlow.STEPS) == 10
-    assert TravelInsuranceFlow.STEPS[0] == "product_selection"
+    assert TravelInsuranceFlow.STEPS[0] == "about_you"
+    assert TravelInsuranceFlow.STEPS[1] == "product_selection"
     assert "about_you" in TravelInsuranceFlow.STEPS
     assert "travel_party_and_trip" in TravelInsuranceFlow.STEPS
     assert "data_consent" in TravelInsuranceFlow.STEPS
@@ -63,30 +64,34 @@ async def test_flow_steps_defined(flow):
 
 
 @pytest.mark.asyncio
-async def test_start_returns_product_selection(flow):
-    """Starting the flow returns product selection step."""
+async def test_start_returns_about_you(flow):
+    """Starting the flow returns about you step."""
     result = await flow.start("user-1", {})
     assert "response" in result
     resp = result["response"]
-    assert resp.get("type") == "product_cards"
-    assert "products" in resp
-    assert len(resp["products"]) == len(TRAVEL_INSURANCE_PRODUCTS)
+    assert resp.get("type") == "form"
+    fields = resp.get("fields", [])
+    names = [f["name"] for f in fields]
+    assert "first_name" in names
+    assert "surname" in names
 
 
 @pytest.mark.asyncio
 async def test_product_selection_step(flow):
-    """Step 0: Product selection returns product cards."""
-    result = await flow.process_step({}, 0, {}, "user-1")
-    assert result.get("next_step") == 1
+    """Step 1: Product selection returns product cards with a default selection."""
+    result = await flow.process_step({}, 1, {}, "user-1")
+    assert result.get("next_step") == 2
     assert result["response"]["type"] == "product_cards"
     assert len(result["response"]["products"]) == 7
+    assert any(p.get("selected") for p in result["response"]["products"])
+    assert result["collected_data"]["selected_product"]["id"] == TRAVEL_INSURANCE_PRODUCTS[0]["id"]
 
 
 @pytest.mark.asyncio
 async def test_about_you_step(flow):
-    """Step 1: About you form has required fields."""
-    result = await flow.process_step({}, 1, {}, "user-1")
-    assert result.get("next_step") == 2
+    """Step 0: About you form has required fields."""
+    result = await flow.process_step({}, 0, {}, "user-1")
+    assert result.get("next_step") == 1
     assert result["response"]["type"] == "form"
     fields = result["response"]["fields"]
     names = [f["name"] for f in fields]
@@ -98,7 +103,7 @@ async def test_about_you_step(flow):
 
 @pytest.mark.asyncio
 async def test_about_you_stores_data(flow):
-    """Step 1: About you stores submitted data."""
+    """Step 0: About you stores submitted data."""
     form_data = {
         "first_name": "Jane",
         "surname": "Doe",

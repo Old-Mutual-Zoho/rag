@@ -16,6 +16,8 @@ from ..flows.dynamic_question_engine import DynamicQuestionEngineFlow
 
 
 class GuidedMode:
+    TRAVEL_INSURANCE_FLOW_VERSION = 2
+
     def __init__(self, state_manager, product_catalog, db):
         self.state_manager = state_manager
         self.catalog = product_catalog
@@ -45,6 +47,16 @@ class GuidedMode:
 
         # Get the active flow
         flow = self.flows[session["current_flow"]]
+
+        if session["current_flow"] == "travel_insurance":
+            collected_data = session.get("collected_data", {}) or {}
+            flow_version = collected_data.get("travel_flow_version")
+            if flow_version != self.TRAVEL_INSURANCE_FLOW_VERSION:
+                reset_data = {"travel_flow_version": self.TRAVEL_INSURANCE_FLOW_VERSION}
+                self.state_manager.clear_form_draft(session_id, session["current_flow"])
+                self.state_manager.update_session(session_id, {"current_step": 0, "collected_data": reset_data})
+                session["current_step"] = 0
+                session["collected_data"] = reset_data
 
         # Process current step
         result = await flow.process_step(
@@ -105,6 +117,9 @@ class GuidedMode:
 
         # Initialize flow
         flow = self.flows[flow_name]
-        result = await flow.start(user_id, initial_data or {})
+        payload = dict(initial_data or {})
+        if flow_name == "travel_insurance":
+            payload["travel_flow_version"] = self.TRAVEL_INSURANCE_FLOW_VERSION
+        result = await flow.start(user_id, payload)
 
         return {"mode": "guided", "flow": flow_name, "step": 0, "response": result.get("response"), "data": result.get("data")}
