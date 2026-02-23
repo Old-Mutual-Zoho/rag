@@ -7,7 +7,6 @@ Premium calculation → Payment.
 """
 
 
-
 from __future__ import annotations
 
 import json
@@ -219,6 +218,7 @@ class TravelInsuranceFlow:
             "next_step": 2,
             "collected_data": data,
         }
+
     @staticmethod
     def _normalize_payload(user_input: Any) -> Dict[str, Any]:
         """
