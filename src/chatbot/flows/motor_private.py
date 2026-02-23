@@ -252,7 +252,24 @@ class MotorPrivateFlow:
         data.setdefault("user_id", user_id)
         data.setdefault("product_id", "motor_private")
 
-        result = await self._step_choose_plan_and_pay({"action": "proceed_to_pay"}, data, user_id)
+        # After your existing validation and mapping logic, process all steps in order
+        # This ensures all steps are handled, not just the last one
+        step_handlers = [
+            self._step_about_you,
+            self._step_vehicle_details,
+            self._step_excess_parameters,
+            self._step_additional_benefits,
+            self._step_benefits_summary,
+            self._step_premium_calculation,
+            self._step_premium_and_download,
+            self._step_choose_plan_and_pay,
+        ]
+        payload = None
+        for i, handler in enumerate(step_handlers):
+            payload = {} if i != len(step_handlers) - 1 else {"action": "proceed_to_pay"}
+            result = await handler(payload, data, user_id)
+            if "collected_data" in result:
+                data = result["collected_data"]
         result.setdefault("status", "success")
         return result
 
@@ -548,7 +565,7 @@ class MotorPrivateFlow:
                     {"name": "first_name", "label": "First Name", "type": "text", "required": True},
                     {"name": "middle_name", "label": "Middle Name (Optional)", "type": "text", "required": False},
                     {"name": "surname", "label": "Surname", "type": "text", "required": True},
-                    {"name": "phone_number", "label": "Phone Number", "type": "text", "required": True},
+                    {"name": "phone_number", "label": "Phone Number", "type": "text", "required": True, "maxLength": 12},
                     {"name": "email", "label": "Email", "type": "email", "required": True},
                 ],
             },
