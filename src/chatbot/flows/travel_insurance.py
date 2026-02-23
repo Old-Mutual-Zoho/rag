@@ -219,6 +219,39 @@ class TravelInsuranceFlow:
             "next_step": 2,
             "collected_data": data,
         }
+    @staticmethod
+    def _normalize_payload(user_input: Any) -> Dict[str, Any]:
+        """
+        Normalize incoming step input into a dictionary payload.
+
+        - None/empty -> {}
+        - dict -> shallow copy
+        - JSON string -> parsed dict (if valid JSON object)
+        - other string -> {"_raw": "..."}
+        - anything else -> {"_raw": str(...)}
+        """
+        if user_input is None:
+            return {}
+
+        if isinstance(user_input, dict):
+            return dict(user_input)
+
+        if isinstance(user_input, str):
+            cleaned = user_input.strip()
+            if not cleaned:
+                return {}
+
+            if cleaned.startswith("{") and cleaned.endswith("}"):
+                try:
+                    parsed = json.loads(cleaned)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except json.JSONDecodeError:
+                    pass
+
+            return {"_raw": cleaned}
+
+        return {"_raw": str(user_input)}
 
     async def _step_about_you(
         self,
