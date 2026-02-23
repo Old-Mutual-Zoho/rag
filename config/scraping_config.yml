@@ -52,6 +52,7 @@ scrapers:
       - "/investment/unit-trusts/umbrella-trust-fund"
       - "/investment/unit-trusts/balanced-fund"
       - "/investment/unit-trusts/dollar-unit-trust-fund"
+      - "/app/public/motor-insurance"
     
     article_urls:
       - "/personal/safety-and-security"
