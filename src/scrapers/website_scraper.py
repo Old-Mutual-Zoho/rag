@@ -93,6 +93,8 @@ class OldMutualWebsiteScraper:
 
         # Initialize content validator
         self.validator = ContentValidator(min_content_length=100, max_content_length=1000000, expected_language="en", check_language=True)
+        self.enable_js_fallback = kwargs.get("enable_js_fallback", True)
+        self.playwright_timeout_ms = int(kwargs.get("playwright_timeout_ms", 45000))
 
         # Statistics tracking
         self.stats = {"total_scraped": 0, "valid_content": 0, "invalid_content": 0, "duplicates_skipped": 0, "errors": 0}
@@ -1522,7 +1524,15 @@ class OldMutualWebsiteScraper:
                 logger.warning(f"Large response from {url}: {content_length} bytes " f"(limit: {max_size})")
 
             logger.info(f"Successfully fetched: {url} ({content_length} bytes)")
-            return response.text
+            html_text = response.text
+
+            if self._should_try_js_fallback(url, html_text):
+                rendered_html = self._fetch_page_with_playwright(url)
+                if rendered_html:
+                    logger.info(f"Using JS-rendered HTML for: {url}")
+                    return rendered_html
+
+            return html_text
 
         except requests.exceptions.Timeout as e:
             logger.error(f"Timeout fetching {url}: {str(e)}")
@@ -1536,6 +1546,76 @@ class OldMutualWebsiteScraper:
         except Exception as e:
             logger.error(f"Unexpected error fetching {url}: {type(e).__name__} - {str(e)}")
             return None
+
+    def _should_try_js_fallback(self, url: str, html_text: str) -> bool:
+        """
+        Determine whether to attempt JS-rendered fetch fallback.
+
+        We only use this for app/public routes and when static HTML appears to be
+        a shell with very little meaningful body text.
+        """
+        if not self.enable_js_fallback:
+            return False
+
+        if "/app/public/" not in url:
+            return False
+
+        if not html_text:
+            return True
+
+        soup = self.parse_html(html_text)
+        if not soup:
+            return True
+
+        for script in soup(["script", "style", "noscript"]):
+            script.decompose()
+
+        body = soup.find("body")
+        visible_text = body.get_text(separator=" ", strip=True) if body else soup.get_text(separator=" ", strip=True)
+        visible_text = re.sub(r"\s+", " ", visible_text).strip()
+
+        # If content is very short, it is likely a JS shell page.
+        return len(visible_text) < 120
+
+    def _fetch_page_with_playwright(self, url: str) -> Optional[str]:
+        """
+        Fetch fully rendered HTML using Playwright (Chromium).
+        Falls back gracefully if Playwright is unavailable.
+        """
+        try:
+            from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+            from playwright.sync_api import sync_playwright
+        except Exception:
+            logger.warning("Playwright is not installed. Skipping JS fallback fetch.")
+            return None
+
+        browser = None
+        context = None
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=True)
+                context = browser.new_context(user_agent=self.user_agent)
+                page = context.new_page()
+                page.goto(url, wait_until="domcontentloaded", timeout=self.playwright_timeout_ms)
+                page.wait_for_timeout(2000)
+                return page.content()
+        except PlaywrightTimeoutError:
+            logger.warning(f"Playwright timeout while rendering: {url}")
+            return None
+        except Exception as e:
+            logger.warning(f"Playwright render failed for {url}: {type(e).__name__} - {str(e)}")
+            return None
+        finally:
+            try:
+                if context is not None:
+                    context.close()
+            except Exception:
+                pass
+            try:
+                if browser is not None:
+                    browser.close()
+            except Exception:
+                pass
 
     def parse_html(self, html: str, timeout: int = 30) -> Optional[BeautifulSoup]:
         """
