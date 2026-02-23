@@ -6,7 +6,7 @@ Traveller details → Emergency contact → Bank details (optional) → Passport
 Premium calculation → Payment.
 """
 
-from __future__ import annotations
+
 
 from __future__ import annotations
 from decimal import Decimal
