@@ -90,12 +90,12 @@ class MotorPrivateFlow:
     """
 
     STEPS = [
+        "about_you",
         "vehicle_details",
         "excess_parameters",
         "additional_benefits",
         "benefits_summary",
         "premium_calculation",
-        "about_you",
         "premium_and_download",
         "choose_plan_and_pay",
     ]
@@ -374,7 +374,31 @@ class MotorPrivateFlow:
                 "type": "form",
                 "message": "Premium Calculation - Vehicle Details",
                 "fields": [
-                    {"name": "vehicle_make", "label": "Choose vehicle make", "type": "select", "required": True},
+                    {
+                        "name": "vehicle_make",
+                        "label": "Choose vehicle make",
+                        "type": "select",
+                        "required": True,
+                        "options": [
+                            "Toyota",
+                            "Nissan",
+                            "Honda",
+                            "Subaru",
+                            "Suzuki",
+                            "Mazda",
+                            "Mitsubishi",
+                            "Isuzu",
+                            "Ford",
+                            "Hyundai",
+                            "Kia",
+                            "Volkswagen",
+                            "Mercedes-Benz",
+                            "BMW",
+                            "Peugeot",
+                            "Renault",
+                            "Other"
+                        ]
+                    },
                     {"name": "year_of_manufacture", "label": "Year of manufacture", "type": "text", "required": True},
                     {"name": "cover_start_date", "label": "Cover start date", "type": "date", "required": True},
                     {"name": "rare_model", "label": "Is the car a rare model?", "type": "radio", "options": ["Yes", "No"], "required": True},
@@ -386,8 +410,17 @@ class MotorPrivateFlow:
                      "options": ["Yes", "No"], "required": True},
                     {"name": "tracking_system_installed", "label": "Do you have a tracking system installed?", "type": "radio",
                      "options": ["Yes", "No"], "required": True},
-                    {"name": "car_usage_region", "label": "Car usage: within Uganda, East Africa, or outside East Africa?", "type": "radio",
-                     "options": ["Within Uganda", "Within East Africa", "Outside East Africa"], "required": True},
+                    {
+                        "name": "car_usage_region",
+                        "label": "Car usage: within Uganda, East Africa, or outside East Africa?",
+                        "type": "radio",
+                        "options": [
+                            "Within Uganda",
+                            "Within East Africa",
+                            "Outside East Africa"
+                        ],
+                        "required": True
+                    },
                 ],
             },
             "next_step": 1,

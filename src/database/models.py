@@ -127,15 +127,21 @@ class SerenicareApplication(Base):
     # Main applicant and dependents (mainMembers)
     main_members: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # list[dict]
 
-    # Form fields
-    first_name: Mapped[str] = mapped_column(String(50), nullable=False)
-    last_name: Mapped[str] = mapped_column(String(50), nullable=False)
-    middle_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
-    mobile: Mapped[str] = mapped_column(String(20), nullable=False)
-    email: Mapped[str] = mapped_column(String(100), nullable=False)
-    plan_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Serenicare flow fields
+    cover_personalization: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     optional_benefits: Mapped[list] = mapped_column(JSON, default=list, nullable=False)  # list[str]
-    serious_conditions: Mapped[str] = mapped_column(String(8), nullable=False)
+    medical_conditions: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    plan_option: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    about_you: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+
+    # Legacy/flat fields (if still needed)
+    first_name: Mapped[str] = mapped_column(String(50), nullable=True)
+    last_name: Mapped[str] = mapped_column(String(50), nullable=True)
+    middle_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    mobile: Mapped[str] = mapped_column(String(20), nullable=True)
+    email: Mapped[str] = mapped_column(String(100), nullable=True)
+    plan_type: Mapped[str] = mapped_column(String(32), nullable=True)
+    serious_conditions: Mapped[str] = mapped_column(String(8), nullable=True)
 
     quote_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
 

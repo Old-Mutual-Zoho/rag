@@ -8,7 +8,7 @@ Premium calculation → Payment.
 
 from __future__ import annotations
 
-import json
+from __future__ import annotations
 from decimal import Decimal
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -155,7 +155,7 @@ class TravelInsuranceFlow:
         payload = self._normalize_payload(user_input)
 
         step_handlers = [
-             self._step_about_you,
+            self._step_about_you,
             self._step_product_selection,
             self._step_travel_party_and_trip,
             self._step_data_consent,
