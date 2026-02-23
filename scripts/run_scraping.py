@@ -165,18 +165,52 @@ Examples:
         logger.info("=" * 80 + "\n")
         
         data = scraper.scrape()
+        flat_items = []
+
+        if isinstance(data, list):
+            flat_items = data
+        elif isinstance(data, dict):
+            products = data.get('products') or {}
+            if isinstance(products, dict):
+                for subcats in products.values():
+                    if isinstance(subcats, dict):
+                        for items in subcats.values():
+                            if isinstance(items, list):
+                                flat_items.extend([item for item in items if isinstance(item, dict)])
+
+            articles = data.get('articles') or {}
+            if isinstance(articles, dict):
+                for items in articles.values():
+                    if isinstance(items, list):
+                        flat_items.extend([item for item in items if isinstance(item, dict)])
+            elif isinstance(articles, list):
+                flat_items.extend([item for item in articles if isinstance(item, dict)])
+
+            faqs = data.get('faqs') or []
+            if isinstance(faqs, list):
+                flat_items.extend([item for item in faqs if isinstance(item, dict)])
+
+            info_pages = data.get('info_pages') or {}
+            if isinstance(info_pages, dict):
+                for items in info_pages.values():
+                    if isinstance(items, list):
+                        flat_items.extend([item for item in items if isinstance(item, dict)])
+            elif isinstance(info_pages, list):
+                flat_items.extend([item for item in info_pages if isinstance(item, dict)])
+        else:
+            logger.warning('Unexpected scrape output type: %s', type(data).__name__)
         
         # Display results
         logger.info("\n" + "=" * 80)
         logger.info("SCRAPING COMPLETE")
         logger.info("=" * 80)
-        logger.info(f"Total pages scraped: {len(data)}")
+        logger.info(f"Total pages scraped: {len(flat_items)}")
         
         # Breakdown by type
         type_counts = {}
         category_counts = {}
         
-        for item in data:
+        for item in flat_items:
             item_type = item.get('type', 'unknown')
             type_counts[item_type] = type_counts.get(item_type, 0) + 1
             
@@ -203,9 +237,9 @@ Examples:
         logger.info(f"  Errors: {scraper.stats['errors']}")
         
         # Show sample data
-        if data:
+        if flat_items:
             logger.info("\nSample scraped data (first item):")
-            sample = data[0]
+            sample = flat_items[0]
             logger.info(f"  Type: {sample.get('type')}")
             logger.info(f"  URL: {sample.get('url')}")
             logger.info(f"  Title: {sample.get('title', sample.get('product_name', 'N/A'))}")
