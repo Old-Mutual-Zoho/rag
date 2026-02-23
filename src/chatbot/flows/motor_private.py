@@ -280,17 +280,17 @@ class MotorPrivateFlow:
             payload = {"_raw": user_input} if user_input else {}
 
         if current_step == 0:
-            return await self._step_vehicle_details(payload, collected_data, user_id)
-        if current_step == 1:
-            return await self._step_excess_parameters(payload, collected_data, user_id)
-        if current_step == 2:
-            return await self._step_additional_benefits(payload, collected_data, user_id)
-        if current_step == 3:
-            return await self._step_benefits_summary(payload, collected_data, user_id)
-        if current_step == 4:
-            return await self._step_premium_calculation(payload, collected_data, user_id)
-        if current_step == 5:
             return await self._step_about_you(payload, collected_data, user_id)
+        if current_step == 1:
+            return await self._step_vehicle_details(payload, collected_data, user_id)
+        if current_step == 2:
+            return await self._step_excess_parameters(payload, collected_data, user_id)
+        if current_step == 3:
+            return await self._step_additional_benefits(payload, collected_data, user_id)
+        if current_step == 4:
+            return await self._step_benefits_summary(payload, collected_data, user_id)
+        if current_step == 5:
+            return await self._step_premium_calculation(payload, collected_data, user_id)
         if current_step == 6:
             return await self._step_premium_and_download(payload, collected_data, user_id)
         if current_step == 7:
