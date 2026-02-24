@@ -259,8 +259,12 @@ def get_router():
 
 from src.chatbot.controllers.motor_private_controller import MOTOR_PRIVATE_VEHICLE_MAKE_OPTIONS
 
+
 # ---------- API router (prefix /api) ----------
 api_router = APIRouter()  # app-level dependency covers these too now
+
+# Register all API endpoints under /api/v1
+app.include_router(api_router, prefix="/api/v1")
 
 
 @app.get("/api/v1/motor-private/vehicle-makes", tags=["Motor Private"])
