@@ -315,77 +315,80 @@ class MotorPrivateFlow:
         return {"error": "Invalid step"}
 
     async def _step_vehicle_details(self, payload: Dict, data: Dict, user_id: str) -> Dict:
-        if payload and "_raw" not in payload:
-            errors: Dict[str, str] = {}
-            vehicle_make = require_str(payload, "vehicle_make", errors, label="Vehicle make")
-            year = parse_int(
-                payload,
-                "year_of_manufacture",
-                errors,
-                min_value=1980,
-                max_value=date.today().year + 1,
-                required=True,
-            )
-            cover_start_date = validate_cover_start_date_range(
-                payload.get("cover_start_date", ""), errors, field="cover_start_date"
-            )
-            rare_model = validate_in(
-                payload.get("rare_model", ""),
-                {"Yes", "No"},
-                errors,
-                "rare_model",
-                required=True,
-            )
-            valuation_done = validate_in(
-                payload.get("valuation_done", ""),
-                {"Yes", "No"},
-                errors,
-                "valuation_done",
-                required=True,
-            )
-            vehicle_value = parse_decimal_str(payload, "vehicle_value", errors, min_value=1, required=True)
-            first_time_registration = validate_in(
-                payload.get("first_time_registration", ""),
-                {"Yes", "No"},
-                errors,
-                "first_time_registration",
-                required=True,
-            )
-            car_alarm_installed = validate_in(
-                payload.get("car_alarm_installed", ""),
-                {"Yes", "No"},
-                errors,
-                "car_alarm_installed",
-                required=True,
-            )
-            tracking_system_installed = validate_in(
-                payload.get("tracking_system_installed", ""),
-                {"Yes", "No"},
-                errors,
-                "tracking_system_installed",
-                required=True,
-            )
-            car_usage_region = validate_in(
-                payload.get("car_usage_region", ""),
-                {"Within Uganda", "Within East Africa", "Outside East Africa"},
-                errors,
-                "car_usage_region",
-                required=True,
-            )
-            raise_if_errors(errors)
-
-            data["vehicle_details"] = {
-                "vehicle_make": vehicle_make,
-                "year_of_manufacture": str(year),
-                "cover_start_date": cover_start_date,
-                "rare_model": rare_model,
-                "valuation_done": valuation_done,
-                "vehicle_value": vehicle_value,
-                "first_time_registration": first_time_registration,
-                "car_alarm_installed": car_alarm_installed,
-                "tracking_system_installed": tracking_system_installed,
-                "car_usage_region": car_usage_region,
-            }
+        errors: Dict[str, str] = {}
+        try:
+            if payload and "_raw" not in payload:
+                vehicle_make = require_str(payload, "vehicle_make", errors, label="Vehicle make")
+                year = parse_int(
+                    payload,
+                    "year_of_manufacture",
+                    errors,
+                    min_value=1980,
+                    max_value=date.today().year + 1,
+                    required=True,
+                )
+                cover_start_date = validate_cover_start_date_range(
+                    payload.get("cover_start_date", ""), errors, field="cover_start_date"
+                )
+                rare_model = validate_in(
+                    payload.get("rare_model", ""),
+                    {"Yes", "No"},
+                    errors,
+                    "rare_model",
+                    required=True,
+                )
+                valuation_done = validate_in(
+                    payload.get("valuation_done", ""),
+                    {"Yes", "No"},
+                    errors,
+                    "valuation_done",
+                    required=True,
+                )
+                vehicle_value = parse_decimal_str(payload, "vehicle_value", errors, min_value=1, required=True)
+                first_time_registration = validate_in(
+                    payload.get("first_time_registration", ""),
+                    {"Yes", "No"},
+                    errors,
+                    "first_time_registration",
+                    required=True,
+                )
+                car_alarm_installed = validate_in(
+                    payload.get("car_alarm_installed", ""),
+                    {"Yes", "No"},
+                    errors,
+                    "car_alarm_installed",
+                    required=True,
+                )
+                tracking_system_installed = validate_in(
+                    payload.get("tracking_system_installed", ""),
+                    {"Yes", "No"},
+                    errors,
+                    "tracking_system_installed",
+                    required=True,
+                )
+                car_usage_region = validate_in(
+                    payload.get("car_usage_region", ""),
+                    {"Within Uganda", "Within East Africa", "Outside East Africa"},
+                    errors,
+                    "car_usage_region",
+                    required=True,
+                )
+                if errors:
+                    return {"error": "Validation failed in vehicle_details", "details": errors, "step": "vehicle_details"}
+                data["vehicle_details"] = {
+                    "vehicle_make": vehicle_make,
+                    "year_of_manufacture": str(year),
+                    "cover_start_date": cover_start_date,
+                    "rare_model": rare_model,
+                    "valuation_done": valuation_done,
+                    "vehicle_value": vehicle_value,
+                    "first_time_registration": first_time_registration,
+                    "car_alarm_installed": car_alarm_installed,
+                    "tracking_system_installed": tracking_system_installed,
+                    "car_usage_region": car_usage_region,
+                }
+        except Exception as e:
+            return {"error": f"Exception in vehicle_details: {str(e)}", "step": "vehicle_details"}
         return {
             "response": {
                 "type": "form",
@@ -445,11 +448,16 @@ class MotorPrivateFlow:
         }
 
     async def _step_excess_parameters(self, payload: Dict, data: Dict, user_id: str) -> Dict:
-        if payload and "_raw" not in payload:
-            selected = payload.get("excess_parameters") or []
-            if isinstance(selected, str):
-                selected = [s.strip() for s in selected.split(",") if s.strip()]
-            data["excess_parameters"] = selected
+        try:
+            if payload and "_raw" not in payload:
+                selected = payload.get("excess_parameters") or []
+                if isinstance(selected, str):
+                    selected = [s.strip() for s in selected.split(",") if s.strip()]
+                if not selected:
+                    return {"error": "No excess parameters selected", "step": "excess_parameters"}
+                data["excess_parameters"] = selected
+        except Exception as e:
+            return {"error": f"Exception in excess_parameters: {str(e)}", "step": "excess_parameters"}
         return {
             "response": {
                 "type": "checkbox",
@@ -461,11 +469,16 @@ class MotorPrivateFlow:
         }
 
     async def _step_additional_benefits(self, payload: Dict, data: Dict, user_id: str) -> Dict:
-        if payload and "_raw" not in payload:
-            selected = payload.get("additional_benefits") or []
-            if isinstance(selected, str):
-                selected = [s.strip() for s in selected.split(",") if s.strip()]
-            data["additional_benefits"] = selected
+        try:
+            if payload and "_raw" not in payload:
+                selected = payload.get("additional_benefits") or []
+                if isinstance(selected, str):
+                    selected = [s.strip() for s in selected.split(",") if s.strip()]
+                if not selected:
+                    return {"error": "No additional benefits selected", "step": "additional_benefits"}
+                data["additional_benefits"] = selected
+        except Exception as e:
+            return {"error": f"Exception in additional_benefits: {str(e)}", "step": "additional_benefits"}
         return {
             "response": {
                 "type": "checkbox",
@@ -477,6 +490,11 @@ class MotorPrivateFlow:
         }
 
     async def _step_benefits_summary(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+        try:
+            # No required input, but wrap for error handling consistency
+            pass
+        except Exception as e:
+            return {"error": f"Exception in benefits_summary: {str(e)}", "step": "benefits_summary"}
         return {
             "response": {
                 "type": "benefits_summary",
@@ -514,49 +532,52 @@ class MotorPrivateFlow:
         }
 
     async def _step_about_you(self, payload: Dict, data: Dict, user_id: str) -> Dict:
-        if payload and "_raw" not in payload:
-            errors: Dict[str, str] = {}
-            first_name = validate_length_range(
-                payload.get("first_name", ""),
-                field="first_name",
-                errors=errors,
-                label="First name",
-                min_len=2,
-                max_len=50,
-                required=True,
-                message="First name must be 2–50 characters.",
-            )
-            middle_name = validate_length_range(
-                payload.get("middle_name", ""),
-                field="middle_name",
-                errors=errors,
-                label="Middle name",
-                min_len=0,
-                max_len=50,
-                required=False,
-                message="Middle name must be up to 50 characters.",
-            )
-            surname = validate_length_range(
-                payload.get("surname", ""),
-                field="surname",
-                errors=errors,
-                label="Surname",
-                min_len=2,
-                max_len=50,
-                required=True,
-                message="Surname must be 2–50 characters.",
-            )
-            # Keep existing guided-flow phone/email validators for compatibility
-            phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
-            email = validate_email(payload.get("email", ""), errors, field="email")
-            raise_if_errors(errors)
-            data["about_you"] = {
-                "first_name": first_name,
-                "middle_name": middle_name,
-                "surname": surname,
-                "phone_number": phone_number,
-                "email": email,
-            }
+        errors: Dict[str, str] = {}
+        try:
+            if payload and "_raw" not in payload:
+                first_name = validate_length_range(
+                    payload.get("first_name", ""),
+                    field="first_name",
+                    errors=errors,
+                    label="First name",
+                    min_len=2,
+                    max_len=50,
+                    required=True,
+                    message="First name must be 2–50 characters.",
+                )
+                middle_name = validate_length_range(
+                    payload.get("middle_name", ""),
+                    field="middle_name",
+                    errors=errors,
+                    label="Middle name",
+                    min_len=0,
+                    max_len=50,
+                    required=False,
+                    message="Middle name must be up to 50 characters.",
+                )
+                surname = validate_length_range(
+                    payload.get("surname", ""),
+                    field="surname",
+                    errors=errors,
+                    label="Surname",
+                    min_len=2,
+                    max_len=50,
+                    required=True,
+                    message="Surname must be 2–50 characters.",
+                )
+                phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
+                email = validate_email(payload.get("email", ""), errors, field="email")
+                if errors:
+                    return {"error": "Validation failed in about_you", "details": errors, "step": "about_you"}
+                data["about_you"] = {
+                    "first_name": first_name,
+                    "middle_name": middle_name,
+                    "surname": surname,
+                    "phone_number": phone_number,
+                    "email": email,
+                }
+        except Exception as e:
+            return {"error": f"Exception in about_you: {str(e)}", "step": "about_you"}
         return {
             "response": {
                 "type": "form",
