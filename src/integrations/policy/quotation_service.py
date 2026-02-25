@@ -7,6 +7,7 @@ This module provides functions to interact with external partner quotation APIs.
 import httpx
 from typing import Dict, Any
 
+
 class QuotationService:
     def __init__(self, base_url: str, api_key: str = None):
         self.base_url = base_url
