@@ -85,39 +85,45 @@ MOTOR_PRIVATE_BENEFITS = [
 
 class MotorPrivateFlow:
     """
-    Guided flow for Motor Private: vehicle details, excess parameters, additional benefits,
-    premium calculation, user details, then payment.
+    Guided flow for Motor Private.
+
+    Step order:
+        0 - about_you
+        1 - vehicle_details
+        2 - excess_parameters
+        3 - additional_benefits
+        4 - benefits_summary
+        5 - premium_calculation
+        6 - premium_and_download
+        7 - choose_plan_and_pay
     """
 
     STEPS = [
-        "about_you",
-        "vehicle_details",
-        "excess_parameters",
-        "additional_benefits",
-        "benefits_summary",
-        "premium_calculation",
-        "premium_and_download",
-        "choose_plan_and_pay",
+        "about_you",           # 0
+        "vehicle_details",     # 1
+        "excess_parameters",   # 2
+        "additional_benefits", # 3
+        "benefits_summary",    # 4
+        "premium_calculation", # 5
+        "premium_and_download",# 6
+        "choose_plan_and_pay", # 7
     ]
 
     def __init__(self, product_catalog, db):
         self.catalog = product_catalog
         self.db = db
 
+    # ------------------------------------------------------------------
+    # complete_flow – convenience helper (skips step-by-step UI)
+    # ------------------------------------------------------------------
+
     async def complete_flow(self, collected_data: Dict[str, Any], user_id: str) -> Dict[str, Any]:
-        """Finalize the flow from already-collected data.
-
-        Convenience helper for tests/integrations that want to skip the step-by-step UI.
-        """
+        """Finalize the flow from already-collected data."""
         data = dict(collected_data or {})
-
-        # Support frontend single-form submission using MotorPrivate.ts field names.
-        # If frontend fields are present, validate and map them into the internal
-        # guided-flow structure expected by the rest of this class.
         payload = data.copy()
         errors: Dict[str, str] = {}
 
-        # Step 2: Personal Details
+        # ── Personal Details (frontend field names) ────────────────────
         first_name = None
         surname = None
         middle_name = None
@@ -160,7 +166,7 @@ class MotorPrivateFlow:
             )
             email = validate_motor_email_frontend(payload.get("email", ""), errors, field="email")
 
-        # Step 1: coverType
+        # ── Cover type ─────────────────────────────────────────────────
         cover_type = None
         if "coverType" in payload:
             cover_type = validate_enum(
@@ -171,7 +177,8 @@ class MotorPrivateFlow:
                 required=True,
                 message="Please select a cover type.",
             )
-        # Step 3: Premium Calculation
+
+        # ── Vehicle / premium fields (frontend field names) ────────────
         vehicle_make_frontend = None
         year_frontend = None
         cover_start_frontend = None
@@ -180,7 +187,6 @@ class MotorPrivateFlow:
         vehicle_value_frontend = None
         if "vehicleMake" in payload or "yearOfManufacture" in payload or "coverStartDate" in payload:
             vehicle_make_frontend = require_str(payload, "vehicleMake", errors, label="Vehicle make")
-            # 1980 -> current year + 1
             current_year_plus_one = date.today().year + 1
             year_frontend = parse_int(
                 {"yearOfManufacture": payload.get("yearOfManufacture")},
@@ -216,11 +222,9 @@ class MotorPrivateFlow:
                 message="Vehicle value must be a positive number.",
             )
 
-        raise_if_errors(errors)  # If any of the above validations ran and failed
+        raise_if_errors(errors)
 
-        # Map validated frontend fields into the internal structure the rest of
-        # the flow expects, but only when present to avoid breaking callers
-        # that already send the internal guided-flow shape.
+        # ── Map into internal structure ────────────────────────────────
         internal = data.setdefault("motor_frontend", {})
         if cover_type is not None:
             internal["cover_type"] = cover_type
@@ -233,7 +237,7 @@ class MotorPrivateFlow:
         if mobile_original is not None:
             internal["mobile"] = mobile_original
         if mobile_normalized:
-            internal["mobile_normalized"] = mobile_normalized  # e.g. 2567XXXXXXXX
+            internal["mobile_normalized"] = mobile_normalized
         if email is not None:
             internal["email"] = email
         if vehicle_make_frontend is not None:
@@ -252,8 +256,7 @@ class MotorPrivateFlow:
         data.setdefault("user_id", user_id)
         data.setdefault("product_id", "motor_private")
 
-        # After your existing validation and mapping logic, process all steps in order
-        # This ensures all steps are handled, not just the last one
+        # ── Run all steps in order ─────────────────────────────────────
         step_handlers = [
             self._step_about_you,
             self._step_vehicle_details,
@@ -264,14 +267,19 @@ class MotorPrivateFlow:
             self._step_premium_and_download,
             self._step_choose_plan_and_pay,
         ]
-        payload = None
+        result = {}
         for i, handler in enumerate(step_handlers):
-            payload = {} if i != len(step_handlers) - 1 else {"action": "proceed_to_pay"}
-            result = await handler(payload, data, user_id)
+            step_payload = {} if i != len(step_handlers) - 1 else {"action": "proceed_to_pay"}
+            result = await handler(step_payload, data, user_id)
             if "collected_data" in result:
                 data = result["collected_data"]
+
         result.setdefault("status", "success")
         return result
+
+    # ------------------------------------------------------------------
+    # Entry points
+    # ------------------------------------------------------------------
 
     async def start(self, user_id: str, initial_data: Dict) -> Dict:
         data = dict(initial_data or {})
@@ -296,23 +304,92 @@ class MotorPrivateFlow:
         except (json.JSONDecodeError, TypeError):
             payload = {"_raw": user_input} if user_input else {}
 
-        if current_step == 0:
-            return await self._step_about_you(payload, collected_data, user_id)
-        if current_step == 1:
-            return await self._step_vehicle_details(payload, collected_data, user_id)
-        if current_step == 2:
-            return await self._step_excess_parameters(payload, collected_data, user_id)
-        if current_step == 3:
-            return await self._step_additional_benefits(payload, collected_data, user_id)
-        if current_step == 4:
-            return await self._step_benefits_summary(payload, collected_data, user_id)
-        if current_step == 5:
-            return await self._step_premium_calculation(payload, collected_data, user_id)
-        if current_step == 6:
-            return await self._step_premium_and_download(payload, collected_data, user_id)
-        if current_step == 7:
-            return await self._step_choose_plan_and_pay(payload, collected_data, user_id)
-        return {"error": "Invalid step"}
+        handlers = {
+            0: self._step_about_you,
+            1: self._step_vehicle_details,
+            2: self._step_excess_parameters,
+            3: self._step_additional_benefits,
+            4: self._step_benefits_summary,
+            5: self._step_premium_calculation,
+            6: self._step_premium_and_download,
+            7: self._step_choose_plan_and_pay,
+        }
+        handler = handlers.get(current_step)
+        if handler is None:
+            return {"error": "Invalid step"}
+        return await handler(payload, collected_data, user_id)
+
+    # ------------------------------------------------------------------
+    # Step 0 – About You
+    # ------------------------------------------------------------------
+
+    async def _step_about_you(self, payload: Dict, data: Dict, user_id: str) -> Dict:
+        errors: Dict[str, str] = {}
+        try:
+            if payload and "_raw" not in payload:
+                first_name = validate_length_range(
+                    payload.get("first_name", ""),
+                    field="first_name",
+                    errors=errors,
+                    label="First name",
+                    min_len=2,
+                    max_len=50,
+                    required=True,
+                    message="First name must be 2–50 characters.",
+                )
+                middle_name = validate_length_range(
+                    payload.get("middle_name", ""),
+                    field="middle_name",
+                    errors=errors,
+                    label="Middle name",
+                    min_len=0,
+                    max_len=50,
+                    required=False,
+                    message="Middle name must be up to 50 characters.",
+                )
+                surname = validate_length_range(
+                    payload.get("surname", ""),
+                    field="surname",
+                    errors=errors,
+                    label="Surname",
+                    min_len=2,
+                    max_len=50,
+                    required=True,
+                    message="Surname must be 2–50 characters.",
+                )
+                phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
+                email = validate_email(payload.get("email", ""), errors, field="email")
+                if errors:
+                    return {"error": "Validation failed in about_you", "details": errors, "step": "about_you"}
+                data["about_you"] = {
+                    "first_name": first_name,
+                    "middle_name": middle_name,
+                    "surname": surname,
+                    "phone_number": phone_number,
+                    "email": email,
+                }
+        except Exception as e:
+            return {"error": f"Exception in about_you: {str(e)}", "step": "about_you"}
+
+        return {
+            "response": {
+                "type": "form",
+                "message": "About You",
+                "fields": [
+                    {"name": "first_name", "label": "First Name", "type": "text", "required": True},
+                    {"name": "middle_name", "label": "Middle Name (Optional)", "type": "text", "required": False},
+                    {"name": "surname", "label": "Surname", "type": "text", "required": True},
+                    {"name": "phone_number", "label": "Phone Number", "type": "text", "required": True, "maxLength": 12},
+                    {"name": "email", "label": "Email", "type": "email", "required": True},
+                ],
+            },
+            "next_step": 1,          # ✅ Fixed: was incorrectly 6
+            "collected_data": data,
+        }
+
+    # ------------------------------------------------------------------
+    # Step 1 – Vehicle Details
+    # ------------------------------------------------------------------
 
     async def _step_vehicle_details(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         errors: Dict[str, str] = {}
@@ -389,6 +466,7 @@ class MotorPrivateFlow:
                 }
         except Exception as e:
             return {"error": f"Exception in vehicle_details: {str(e)}", "step": "vehicle_details"}
+
         return {
             "response": {
                 "type": "form",
@@ -400,52 +478,36 @@ class MotorPrivateFlow:
                         "type": "select",
                         "required": True,
                         "options": [
-                            "Toyota",
-                            "Nissan",
-                            "Honda",
-                            "Subaru",
-                            "Suzuki",
-                            "Mazda",
-                            "Mitsubishi",
-                            "Isuzu",
-                            "Ford",
-                            "Hyundai",
-                            "Kia",
-                            "Volkswagen",
-                            "Mercedes-Benz",
-                            "BMW",
-                            "Peugeot",
-                            "Renault",
-                            "Other"
-                        ]
+                            "Toyota", "Nissan", "Honda", "Subaru", "Suzuki",
+                            "Mazda", "Mitsubishi", "Isuzu", "Ford", "Hyundai",
+                            "Kia", "Volkswagen", "Mercedes-Benz", "BMW",
+                            "Peugeot", "Renault", "Other"
+                        ],
                     },
                     {"name": "year_of_manufacture", "label": "Year of manufacture", "type": "text", "required": True},
                     {"name": "cover_start_date", "label": "Cover start date", "type": "date", "required": True},
                     {"name": "rare_model", "label": "Is the car a rare model?", "type": "radio", "options": ["Yes", "No"], "required": True},
                     {"name": "valuation_done", "label": "Has the vehicle undergone valuation?", "type": "radio", "options": ["Yes", "No"], "required": True},
                     {"name": "vehicle_value", "label": "Value of Vehicle (UGX)", "type": "number", "required": True},
-                    {"name": "first_time_registration", "label": "First time this vehicle is registered for this type of insurance?", "type": "radio",
-                     "options": ["Yes", "No"], "required": True},
-                    {"name": "car_alarm_installed", "label": "Do you have a car alarm installed?", "type": "radio",
-                     "options": ["Yes", "No"], "required": True},
-                    {"name": "tracking_system_installed", "label": "Do you have a tracking system installed?", "type": "radio",
-                     "options": ["Yes", "No"], "required": True},
+                    {"name": "first_time_registration", "label": "First time this vehicle is registered for this type of insurance?", "type": "radio", "options": ["Yes", "No"], "required": True},
+                    {"name": "car_alarm_installed", "label": "Do you have a car alarm installed?", "type": "radio", "options": ["Yes", "No"], "required": True},
+                    {"name": "tracking_system_installed", "label": "Do you have a tracking system installed?", "type": "radio", "options": ["Yes", "No"], "required": True},
                     {
                         "name": "car_usage_region",
                         "label": "Car usage: within Uganda, East Africa, or outside East Africa?",
                         "type": "radio",
-                        "options": [
-                            "Within Uganda",
-                            "Within East Africa",
-                            "Outside East Africa"
-                        ],
-                        "required": True
+                        "options": ["Within Uganda", "Within East Africa", "Outside East Africa"],
+                        "required": True,
                     },
                 ],
             },
-            "next_step": 1,
+            "next_step": 2,          # ✅ Fixed: was incorrectly 1
             "collected_data": data,
         }
+
+    # ------------------------------------------------------------------
+    # Step 2 – Excess Parameters
+    # ------------------------------------------------------------------
 
     async def _step_excess_parameters(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         try:
@@ -458,15 +520,20 @@ class MotorPrivateFlow:
                 data["excess_parameters"] = selected
         except Exception as e:
             return {"error": f"Exception in excess_parameters: {str(e)}", "step": "excess_parameters"}
+
         return {
             "response": {
                 "type": "checkbox",
                 "message": "Excess Parameters",
                 "options": MOTOR_PRIVATE_EXCESS_PARAMETERS,
             },
-            "next_step": 2,
+            "next_step": 3,          # ✅ Correct
             "collected_data": data,
         }
+
+    # ------------------------------------------------------------------
+    # Step 3 – Additional Benefits
+    # ------------------------------------------------------------------
 
     async def _step_additional_benefits(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         try:
@@ -479,43 +546,54 @@ class MotorPrivateFlow:
                 data["additional_benefits"] = selected
         except Exception as e:
             return {"error": f"Exception in additional_benefits: {str(e)}", "step": "additional_benefits"}
+
         return {
             "response": {
                 "type": "checkbox",
                 "message": "Additional Benefits",
                 "options": MOTOR_PRIVATE_ADDITIONAL_BENEFITS,
             },
-            "next_step": 3,
+            "next_step": 4,          # ✅ Correct
             "collected_data": data,
         }
 
+    # ------------------------------------------------------------------
+    # Step 4 – Benefits Summary
+    # ------------------------------------------------------------------
+
     async def _step_benefits_summary(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         try:
-            # No required input, but wrap for error handling consistency
-            pass
+            pass  # No required input for this step
         except Exception as e:
             return {"error": f"Exception in benefits_summary: {str(e)}", "step": "benefits_summary"}
+
         return {
             "response": {
                 "type": "benefits_summary",
                 "message": "Benefits",
                 "benefits": MOTOR_PRIVATE_BENEFITS,
             },
-            "next_step": 4,
+            "next_step": 5,          # ✅ Correct
             "collected_data": data,
         }
 
+    # ------------------------------------------------------------------
+    # Step 5 – Premium Calculation
+    # ------------------------------------------------------------------
+
     async def _step_premium_calculation(self, payload: Dict, data: Dict, user_id: str) -> Dict:
-        # Accept vehicle details and calculate base premium
-        if payload and "_raw" not in payload:
-            data["premium_calculation"] = {
-                "base_premium": payload.get("base_premium", ""),
-                "training_levy": payload.get("training_levy", ""),
-                "sticker_fees": payload.get("sticker_fees", ""),
-                "vat": payload.get("vat", ""),
-                "stamp_duty": payload.get("stamp_duty", ""),
-            }
-        # For demo, calculate a sample premium
+        try:
+            if payload and "_raw" not in payload:
+                data["premium_calculation"] = {
+                    "base_premium": payload.get("base_premium", ""),
+                    "training_levy": payload.get("training_levy", ""),
+                    "sticker_fees": payload.get("sticker_fees", ""),
+                    "vat": payload.get("vat", ""),
+                    "stamp_duty": payload.get("stamp_duty", ""),
+                }
+        except Exception as e:
+            return {"error": f"Exception in premium_calculation: {str(e)}", "step": "premium_calculation"}
+
         premium = self._calculate_motor_private_premium(data)
         return {
             "response": {
@@ -527,75 +605,20 @@ class MotorPrivateFlow:
                     {"type": "download_quote", "label": "Download Quote"},
                 ],
             },
-            "next_step": 5,
+            "next_step": 6,          # ✅ Correct
             "collected_data": data,
         }
 
-    async def _step_about_you(self, payload: Dict, data: Dict, user_id: str) -> Dict:
-        errors: Dict[str, str] = {}
-        try:
-            if payload and "_raw" not in payload:
-                first_name = validate_length_range(
-                    payload.get("first_name", ""),
-                    field="first_name",
-                    errors=errors,
-                    label="First name",
-                    min_len=2,
-                    max_len=50,
-                    required=True,
-                    message="First name must be 2–50 characters.",
-                )
-                middle_name = validate_length_range(
-                    payload.get("middle_name", ""),
-                    field="middle_name",
-                    errors=errors,
-                    label="Middle name",
-                    min_len=0,
-                    max_len=50,
-                    required=False,
-                    message="Middle name must be up to 50 characters.",
-                )
-                surname = validate_length_range(
-                    payload.get("surname", ""),
-                    field="surname",
-                    errors=errors,
-                    label="Surname",
-                    min_len=2,
-                    max_len=50,
-                    required=True,
-                    message="Surname must be 2–50 characters.",
-                )
-                phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
-                email = validate_email(payload.get("email", ""), errors, field="email")
-                if errors:
-                    return {"error": "Validation failed in about_you", "details": errors, "step": "about_you"}
-                data["about_you"] = {
-                    "first_name": first_name,
-                    "middle_name": middle_name,
-                    "surname": surname,
-                    "phone_number": phone_number,
-                    "email": email,
-                }
-        except Exception as e:
-            return {"error": f"Exception in about_you: {str(e)}", "step": "about_you"}
-        return {
-            "response": {
-                "type": "form",
-                "message": "About You",
-                "fields": [
-                    {"name": "first_name", "label": "First Name", "type": "text", "required": True},
-                    {"name": "middle_name", "label": "Middle Name (Optional)", "type": "text", "required": False},
-                    {"name": "surname", "label": "Surname", "type": "text", "required": True},
-                    {"name": "phone_number", "label": "Phone Number", "type": "text", "required": True, "maxLength": 12},
-                    {"name": "email", "label": "Email", "type": "email", "required": True},
-                ],
-            },
-            "next_step": 6,
-            "collected_data": data,
-        }
+    # ------------------------------------------------------------------
+    # Step 6 – Premium & Download
+    # ------------------------------------------------------------------
 
     async def _step_premium_and_download(self, payload: Dict, data: Dict, user_id: str) -> Dict:
-        premium = self._calculate_motor_private_premium(data)
+        try:
+            premium = self._calculate_motor_private_premium(data)
+        except Exception as e:
+            return {"error": f"Exception in premium_and_download: {str(e)}", "step": "premium_and_download"}
+
         return {
             "response": {
                 "type": "premium_summary",
@@ -607,28 +630,36 @@ class MotorPrivateFlow:
                     {"type": "proceed_to_pay", "label": "Proceed to Pay"},
                 ],
             },
-            "next_step": 7,
+            "next_step": 7,          # ✅ Correct
             "collected_data": data,
         }
 
+    # ------------------------------------------------------------------
+    # Step 7 – Choose Plan & Pay
+    # ------------------------------------------------------------------
+
     async def _step_choose_plan_and_pay(self, payload: Dict, data: Dict, user_id: str) -> Dict:
-        action = (payload.get("action") or payload.get("_raw") or "").strip().lower()
-        if "edit" in action:
-            out = await self._step_vehicle_details(payload, data, user_id)
-            out["next_step"] = 0
-            return out
-        # Proceed to pay: create quote and hand off to payment flow
-        premium = self._calculate_motor_private_premium(data)
-        quote = self.db.create_quote(
-            user_id=user_id,
-            product_id=data.get("product_id", "motor_private"),
-            premium_amount=premium["total"],
-            sum_assured=None,
-            underwriting_data=data,
-            pricing_breakdown=premium,
-            product_name="Motor Private",
-        )
-        data["quote_id"] = str(quote.id)
+        try:
+            action = (payload.get("action") or payload.get("_raw") or "").strip().lower()
+            if "edit" in action:
+                out = await self._step_about_you({}, data, user_id)
+                out["next_step"] = 0   # ✅ Send user back to beginning of flow
+                return out
+
+            premium = self._calculate_motor_private_premium(data)
+            quote = self.db.create_quote(
+                user_id=user_id,
+                product_id=data.get("product_id", "motor_private"),
+                premium_amount=premium["total"],
+                sum_assured=None,
+                underwriting_data=data,
+                pricing_breakdown=premium,
+                product_name="Motor Private",
+            )
+            data["quote_id"] = str(quote.id)
+        except Exception as e:
+            return {"error": f"Exception in choose_plan_and_pay: {str(e)}", "step": "choose_plan_and_pay"}
+
         return {
             "response": {
                 "type": "proceed_to_payment",
@@ -641,9 +672,12 @@ class MotorPrivateFlow:
             "data": {"quote_id": str(quote.id)},
         }
 
+    # ------------------------------------------------------------------
+    # Premium calculation helper
+    # ------------------------------------------------------------------
+
     def _calculate_motor_private_premium(self, data: Dict) -> Dict:
-        """Sample premium calculation for Motor Private."""
-        # These are illustrative values, replace with actual logic as needed
+        """Calculate Motor Private premium. Replace with actual business logic as needed."""
         base_premium = Decimal("1280000")
         training_levy = Decimal("6400")
         sticker_fees = Decimal("6000")
