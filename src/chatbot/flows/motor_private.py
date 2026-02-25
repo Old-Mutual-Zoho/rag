@@ -102,11 +102,11 @@ class MotorPrivateFlow:
         "about_you",           # 0
         "vehicle_details",     # 1
         "excess_parameters",   # 2
-        "additional_benefits", # 3
+        "additional_benefits",  # 3
         "benefits_summary",    # 4
-        "premium_calculation", # 5
-        "premium_and_download",# 6
-        "choose_plan_and_pay", # 7
+        "premium_calculation",  # 5
+        "premium_and_download",  # 6
+        "choose_plan_and_pay",  # 7
     ]
 
     def __init__(self, product_catalog, db):
@@ -489,9 +489,21 @@ class MotorPrivateFlow:
                     {"name": "rare_model", "label": "Is the car a rare model?", "type": "radio", "options": ["Yes", "No"], "required": True},
                     {"name": "valuation_done", "label": "Has the vehicle undergone valuation?", "type": "radio", "options": ["Yes", "No"], "required": True},
                     {"name": "vehicle_value", "label": "Value of Vehicle (UGX)", "type": "number", "required": True},
-                    {"name": "first_time_registration", "label": "First time this vehicle is registered for this type of insurance?", "type": "radio", "options": ["Yes", "No"], "required": True},
+                    {
+                        "name": "first_time_registration",
+                        "label": "First time this vehicle is registered for this type of insurance?",
+                        "type": "radio",
+                        "options": ["Yes", "No"],
+                        "required": True,
+                    },
                     {"name": "car_alarm_installed", "label": "Do you have a car alarm installed?", "type": "radio", "options": ["Yes", "No"], "required": True},
-                    {"name": "tracking_system_installed", "label": "Do you have a tracking system installed?", "type": "radio", "options": ["Yes", "No"], "required": True},
+                    {
+                        "name": "tracking_system_installed",
+                        "label": "Do you have a tracking system installed?",
+                        "type": "radio",
+                        "options": ["Yes", "No"],
+                        "required": True,
+                    },
                     {
                         "name": "car_usage_region",
                         "label": "Car usage: within Uganda, East Africa, or outside East Africa?",
