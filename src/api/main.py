@@ -1,4 +1,5 @@
 from src.api.escalation import router as escalation_router
+from src.api.endpoints.payments import payments_api
 import src.api.escalation as escalation_module
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -80,10 +81,14 @@ else:
     redis_cache = RedisCache()
 
 state_manager = StateManager(redis_cache, postgres_db)
+
 escalation_module.state_manager = state_manager
 # Register escalation router
 app.include_router(escalation_router, prefix="/api/v1")
 app.include_router(escalation_router, prefix="/api")
+# Register payments API router
+app.include_router(payments_api, prefix="/api/v1/payments", tags=["Payments"])
+
 product_matcher = ProductMatcher()
 
 # Load RAG configuration once per process

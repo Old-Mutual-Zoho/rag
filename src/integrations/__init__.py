@@ -14,8 +14,10 @@ Switching implementations:
 - The selection of mock vs real clients should happen in ONE place (src/api/main.py).
 """
 
-from .contracts.interfaces import Address, Beneficiary, CustomerProfile
-from .contracts.underwriting import (
+from .contracts.interfaces import (
+    Address,
+    Beneficiary,
+    CustomerProfile,
     KYCStatus,
     MobileMoneyProvider,
     PaymentRequest,
@@ -25,15 +27,8 @@ from .contracts.underwriting import (
     PolicyStatus,
     Product,
     Provider,
-    ClaimRequest,
-    ClaimResponse,
-    ClaimStatus,
-    PolicyRenewal,
-    RiskAssessment,
-    RiskLevel,
-    is_policy_renewable,
-    validate_beneficiary_split,
 )
+from .contracts.underwriting import UnderwritingContract
 from .contracts.payments import (
     BulkPaymentRequest,
     BulkPaymentResponse,
@@ -53,12 +48,11 @@ __all__ = [
     "MobileMoneyProvider", "PaymentRequest", "PaymentResponse",
     "PaymentStatus", "PolicyApplication", "PolicyStatus",
     "Product", "Provider",
+    # underwriting
+    "UnderwritingContract",
     # payments
     "BulkPaymentRequest", "BulkPaymentResponse", "PaymentWebhookEvent",
     "is_terminal_status", "validate_payment_request",
     # products
     "ProductFilter", "ProductQuote", "filter_products",
-    # underwriting
-    "ClaimRequest", "ClaimResponse", "ClaimStatus", "PolicyRenewal",
-    "RiskAssessment", "RiskLevel", "is_policy_renewable", "validate_beneficiary_split",
 ]

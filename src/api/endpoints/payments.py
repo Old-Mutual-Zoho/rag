@@ -4,6 +4,7 @@ from src.integrations.clients.mocks.airtel import AirtelMockClient
 from src.integrations.contracts.payments import PaymentRequest, PaymentResponse
 
 api = APIRouter()
+payments_api = api
 
 
 @api.post("/payments/initiate", tags=["Payments"])
@@ -26,7 +27,8 @@ async def initiate_payment(
         reference=quote_id,
         phone_number=phone_number,
         amount=amount,
-        currency=currency
+        currency=currency,
+        description=f"Payment for quote {quote_id}",
     )
 
     payment_response: PaymentResponse = client.initiate_payment(payment_request)

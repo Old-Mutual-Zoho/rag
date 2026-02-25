@@ -14,3 +14,45 @@ Why:
 - Allows flows to continue development without real underwriting endpoints
 - Keeps the system loosely coupled and easier to swap to real APIs later
 """
+
+from __future__ import annotations
+
+from typing import Any, Dict, List
+
+from pydantic import BaseModel, Field
+
+from .interfaces import (
+    KYCStatus,
+    MobileMoneyProvider,
+    PaymentRequest,
+    PaymentResponse,
+    PaymentStatus,
+    PolicyApplication,
+    PolicyStatus,
+    Product,
+    Provider,
+)
+
+
+class UnderwritingContract(BaseModel):
+    """Normalized underwriting response contract used by integration services."""
+
+    quote_id: str
+    premium: float
+    currency: str = "UGX"
+    decision_status: str
+    requirements: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+__all__ = [
+    "UnderwritingContract",
+    "KYCStatus",
+    "MobileMoneyProvider",
+    "PaymentRequest",
+    "PaymentResponse",
+    "PaymentStatus",
+    "PolicyApplication",
+    "PolicyStatus",
+    "Product",
+    "Provider",
+]
