@@ -1,3 +1,5 @@
+from src.api.escalation import router as escalation_router
+import src.api.escalation as escalation_module
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from fastapi import Request
@@ -77,8 +79,11 @@ else:
 
     redis_cache = RedisCache()
 
-# Initialize components
 state_manager = StateManager(redis_cache, postgres_db)
+escalation_module.state_manager = state_manager
+# Register escalation router
+app.include_router(escalation_router, prefix="/api/v1")
+app.include_router(escalation_router, prefix="/api")
 product_matcher = ProductMatcher()
 
 # Load RAG configuration once per process

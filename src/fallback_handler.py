@@ -4,7 +4,9 @@ This module provides strategies for generating fallback responses when the model
 cannot provide a confident or useful reply.
 """
 from typing import Any, Dict, Optional
+
 import logging
+from src.integrations.policy.escalation_service import EscalationService
 
 logger = logging.getLogger(__name__)
 
@@ -17,26 +19,38 @@ class FallbackHandler:
     - Offering to connect to a human agent
     - Returning best-effort answer with a disclaimer
     - Providing help topics
+    - Escalating to a human agent queue
     """
 
-    def __init__(self, offer_human_threshold: float = 0.15):
+    def __init__(self, offer_human_threshold: float = 0.15, escalation_service=None):
         self.offer_human_threshold = offer_human_threshold
+        self.escalation_service = escalation_service or EscalationService()
 
     def generate_fallback(
         self,
         user_input: str,
         reason: str = "low_confidence",
         confidence: Optional[float] = None,
-        conversation_state: Optional[Dict[str, Any]] = None
+        conversation_state: Optional[Dict[str, Any]] = None,
+        session_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         logger.info("Generating fallback: reason=%s, confidence=%s", reason, confidence)
 
-        # Simple policy: if confidence is very low, offer human help. Otherwise ask for rephrase.
+        # Simple policy: if confidence is very low, offer human help and escalate.
         if confidence is not None and confidence < self.offer_human_threshold:
             message = (
                 "I'm not confident enough to answer that. Would you like me to connect you to a human agent or try another query?"
             )
             offer_human = True
+            # Escalate to human agent queue
+            if self.escalation_service and session_id:
+                self.escalation_service.escalate_to_human(
+                    session_id=session_id,
+                    reason=reason or "low_confidence",
+                    user_id=user_id,
+                    metadata={"confidence": confidence, "user_input": user_input}
+                )
         else:
             message = (
                 "I didn't fully understand. Could you please rephrase or provide more details?"

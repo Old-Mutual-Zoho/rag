@@ -279,9 +279,23 @@ class ConversationalMode:
 
         # Generate response
         response = await self.rag.generate(query=message, context_docs=retrieval_results, conversation_history=self._get_recent_history(session_id))
-
-        # Use ResponseProcessor if available to normalize and handle follow-ups/fallbacks
+        # --- Escalation/handover logic ---
         session = self.state_manager.get_session(session_id) or {}
+        # If session is escalated, route to human agent (in-memory flag)
+        if session.get("escalated"):
+            logger.info(f"Routing message to human agent for session {session_id}")
+            return {
+                "mode": "escalated",
+                "response": "You are now chatting with a human agent.",
+                "escalated": True,
+            }
+
+        # If confidence is low, suggest handover button
+        show_handover_button = False
+        confidence = response.get("confidence", 0.5)
+        if confidence < 0.4:
+            show_handover_button = True
+
         products_matched_names = [p[2]["name"] for p in products] if products else []
         if self.response_processor:
             processed = self.response_processor.process_response(
@@ -432,6 +446,7 @@ class ConversationalMode:
             "intent_type": "INFORMATIONAL",
             "suggested_action": suggested_action,
             "confidence": response.get("confidence", 0.5),
+            "show_handover_button": show_handover_button,
         }
 
     async def _process_product_guide_action(self, form_data: Dict[str, Any], session_id: str) -> Dict:
