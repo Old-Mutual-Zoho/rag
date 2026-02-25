@@ -3,8 +3,6 @@ import logging
 import asyncio
 import random
 from typing import Any, Dict, List, Tuple
-from google import genai
-from google.genai import types
 
 
 # Setup logging
@@ -52,6 +50,7 @@ class MiaGenerator:
         max_sources: int = 5,
         temperature: float = 0.2  # Lowered for financial accuracy
     ):
+        from google import genai
         api_key = os.environ.get("GEMINI_API_KEY")
         if not api_key:
             raise RuntimeError("CRITICAL: GEMINI_API_KEY is missing.")
@@ -228,6 +227,7 @@ class MiaGenerator:
         logger.info(f"Generating response for question: {question[:100]}... with {num_sources} sources")
 
         def _sync_generate():
+            from google.genai import types
             response = self.client.models.generate_content(
                 model=MODEL_NAME,
                 contents=full_prompt,
@@ -237,7 +237,6 @@ class MiaGenerator:
                     max_output_tokens=800,
                 ),
             )
-
             return response
 
         max_attempts = 3

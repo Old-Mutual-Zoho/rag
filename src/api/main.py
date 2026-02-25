@@ -1,6 +1,7 @@
-from fastapi import Request
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-
+from fastapi import Request
+api_router = APIRouter()
 """
 FastAPI application - Main entry point
 """
@@ -260,13 +261,6 @@ def get_router():
 from src.chatbot.controllers.motor_private_controller import MOTOR_PRIVATE_VEHICLE_MAKE_OPTIONS
 
 
-# ---------- API router (prefix /api) ----------
-api_router = APIRouter()  # app-level dependency covers these too now
-
-# Register all API endpoints under /api/v1
-app.include_router(api_router, prefix="/api/v1")
-
-
 @app.get("/api/v1/motor-private/vehicle-makes", tags=["Motor Private"])
 async def get_motor_private_vehicle_makes():
     """
@@ -359,8 +353,6 @@ class StartGuidedRequest(BaseModel):
 # ============================================================================
 # ENDPOINTS
 # ============================================================================
-
-
 @app.get("/", tags=["Health"])
 async def root():
     """Health check endpoint."""
@@ -417,31 +409,52 @@ async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: Pos
     return ChatResponse(response=response, session_id=session_id, mode=response.get("mode", "conversational"), timestamp=datetime.now().isoformat())
 
 
-# General Information Endpoint
 @api_router.get("/general-information", tags=["General Information"])
-async def get_general_information(request: Request, session_id: str, product: str, redis=Depends(get_redis)):
+async def get_general_information(
+    request: Request,
+    product: str,
+    redis=Depends(get_redis)
+):
     """
-    Serve general information for a product based on session (from Redis).
-    - session_id: user's session id (from frontend or cookie)
+    Serve general information for a product.
     - product: product key (e.g. serenicare, motor_private, personal_accident, travel)
     Returns: definition, benefits, eligibility for the product.
     """
-    # Optionally: validate session exists
-    session = redis.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
 
-    # Map product to file name
-    product_file = f"d:/ZOHO/rag/general_information/product_json/{product}.json"
-    if not os.path.exists(product_file):
-        raise HTTPException(status_code=404, detail="Product information not found")
-    with open(product_file, "r", encoding="utf-8") as f:
-        info = json.load(f)
-    return JSONResponse(content=info)
+    logger = logging.getLogger("general_information")
+    logger.info(f"General info request: product={product}")
 
+    try:
+        # --- Resolve product JSON path safely ---
+        BASE_DIR = Path(__file__).resolve().parents[2]  # D:\ZOHO\rag
+        PRODUCT_DIR = BASE_DIR / "general_information" / "product_json"
+        product_file = PRODUCT_DIR / f"{product}.json"
+
+        logger.info(f"Resolved product file path: {product_file}")
+
+        if not product_file.exists():
+            logger.error(f"Product file not found: {product_file}")
+            raise HTTPException(status_code=404, detail="Product information not found")
+
+        # --- Load JSON ---
+        try:
+            with open(product_file, "r", encoding="utf-8") as f:
+                info = json.load(f)
+        except Exception as e:
+            logger.error(f"Failed to load product file {product_file}: {e}")
+            raise HTTPException(status_code=500, detail="Failed to load product information")
+
+        logger.info(f"General info served for product={product}")
+        return JSONResponse(content=info)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)} (product={product})")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 # ---------- API router (prefix /api) ----------
-api_router = APIRouter()  # app-level dependency covers these too now
+# api_router = APIRouter()  # app-level dependency covers these too now
 
 
 @api_router.post("/session", response_model=CreateSessionResponse, tags=["Sessions"])
@@ -1471,8 +1484,6 @@ def _load_product_sections(product_id: str) -> Dict[str, List[Dict[str, str]]]:
 # ============================================================================
 # STARTUP/SHUTDOWN EVENTS
 # ============================================================================
-
-
 @app.on_event("startup")
 async def startup_event():
     """Initialize on startup"""

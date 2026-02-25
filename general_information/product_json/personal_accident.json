@@ -1,9 +1,9 @@
 {
-  "definition": "Personal Accident insurance provides compensation in case of injury, disability, or death caused by accidental events.",
+  "definition": "Personal Accident insurance provides financial protection in case of accidental injuries or death.",
   "benefits": [
     "Accidental death benefit",
-    "Permanent disability cover",
-    "Medical expense reimbursement"
+    "Medical expenses coverage",
+    "Permanent disability coverage"
   ],
-  "eligibility": "Open to individuals aged 18-65."
+  "eligibility": "Available to individuals aged 18-65."
 }

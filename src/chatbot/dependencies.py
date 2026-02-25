@@ -28,6 +28,8 @@ async def api_key_protection(
     request: Request = None,  # keep Request type so FastAPI injects it; default None for direct calls/tests
     x_api_key: str = Header(default=None, alias="X-API-KEY"),
 ):
+    # DEBUG: print what FastAPI sees
+    print("DEBUG: Received API Key from header:", x_api_key)
     debug = os.getenv("API_KEY_DEBUG", "").lower() in ("1", "true", "yes")
     path = request.url.path if request is not None else "<no-request>"
     if debug:

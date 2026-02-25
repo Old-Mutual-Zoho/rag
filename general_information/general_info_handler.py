@@ -1,10 +1,16 @@
 """
 General Info Handler: Scrapes and organizes product definition, benefits, and eligibility into per-product JSON files.
 """
+
 import os
 import json
 from pathlib import Path
 from typing import Dict, Any
+import logging
+
+# Setup basic logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("general_info_handler")
 
 # Dummy function to simulate scraping. Replace with real scraping logic.
 def scrape_general_info() -> Dict[str, Dict[str, Any]]:
@@ -20,45 +26,38 @@ def scrape_general_info() -> Dict[str, Dict[str, Any]]:
             "eligibility": "Available to individuals with privately registered vehicles."
         },
         "personal_accident": {
-            "definition": "Personal Accident insurance provides compensation in case of injury, disability, or death caused by accidental events.",
+            "definition": "Personal Accident insurance provides financial protection in case of accidental injuries or death.",
             "benefits": [
                 "Accidental death benefit",
-                "Permanent disability cover",
-                "Medical expense reimbursement"
+                "Medical expenses coverage",
+                "Permanent disability coverage"
             ],
-            "eligibility": "Open to individuals aged 18-65."
+            "eligibility": "Available to individuals aged 18-65."
         },
-        "serenicare": {
-            "definition": "Serenicare is a health insurance plan offering comprehensive medical coverage for individuals and families.",
-            "benefits": [
-                "Inpatient and outpatient cover",
-                "Maternity benefits",
-                "Chronic illness management",
-                "Emergency evacuation"
-            ],
-            "eligibility": "Available to individuals and families who meet the insurer's underwriting criteria."
-        },
-        "travel": {
-            "definition": "Travel insurance provides protection against risks such as medical emergencies, trip cancellations, and lost luggage while traveling.",
-            "benefits": [
-                "Emergency medical cover",
-                "Trip cancellation reimbursement",
-                "Lost luggage compensation",
-                "Personal accident cover"
-            ],
-            "eligibility": "Open to individuals traveling domestically or internationally, subject to policy terms."
+        # Extra product for testing
+        "test_product": {
+            "definition": "This is a test product created to verify JSON generation and paths.",
+            "benefits": ["Test benefit 1", "Test benefit 2"],
+            "eligibility": "Anyone can see this product."
         }
-        # Add more products as needed
     }
 
-def main(output_dir: str = "product_json"):
+def main():
+    # Resolve output folder relative to THIS script
+    BASE_DIR = Path(__file__).resolve().parent
+    output_dir = BASE_DIR / "product_json"
     os.makedirs(output_dir, exist_ok=True)
+
+    logger.info(f"Writing JSON files to: {output_dir}")
+
     product_data = scrape_general_info()
     for product_id, info in product_data.items():
-        out_path = Path(output_dir) / f"{product_id}.json"
+        out_path = output_dir / f"{product_id}.json"
         with open(out_path, "w", encoding="utf-8") as f:
             json.dump(info, f, indent=2, ensure_ascii=False)
-    print(f"General info JSON files written to {output_dir}")
+        logger.info(f"Created JSON for product: {product_id} -> {out_path}")
+
+    logger.info("All general info JSON files have been written successfully.")
 
 if __name__ == "__main__":
     main()

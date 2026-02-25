@@ -1,6 +1,5 @@
 """
 Integrations layer.
-
 This package contains all code used to communicate with external systems such as:
 - Old Mutual underwriting APIs (quote/premium decisions)
 - Payment systems (e.g., Mobile Money / payment gateways)
@@ -14,3 +13,52 @@ Key rule:
 Switching implementations:
 - The selection of mock vs real clients should happen in ONE place (src/api/main.py).
 """
+
+from .contracts.interfaces import Address, Beneficiary, CustomerProfile
+from .contracts.underwriting import (
+    KYCStatus,
+    MobileMoneyProvider,
+    PaymentRequest,
+    PaymentResponse,
+    PaymentStatus,
+    PolicyApplication,
+    PolicyStatus,
+    Product,
+    Provider,
+    ClaimRequest,
+    ClaimResponse,
+    ClaimStatus,
+    PolicyRenewal,
+    RiskAssessment,
+    RiskLevel,
+    is_policy_renewable,
+    validate_beneficiary_split,
+)
+from .contracts.payments import (
+    BulkPaymentRequest,
+    BulkPaymentResponse,
+    PaymentWebhookEvent,
+    is_terminal_status,
+    validate_payment_request,
+)
+from .contracts.product_catalogues import (
+    ProductFilter,
+    ProductQuote,
+    filter_products,
+)
+
+__all__ = [
+    # interfaces
+    "Address", "Beneficiary", "CustomerProfile", "KYCStatus",
+    "MobileMoneyProvider", "PaymentRequest", "PaymentResponse",
+    "PaymentStatus", "PolicyApplication", "PolicyStatus",
+    "Product", "Provider",
+    # payments
+    "BulkPaymentRequest", "BulkPaymentResponse", "PaymentWebhookEvent",
+    "is_terminal_status", "validate_payment_request",
+    # products
+    "ProductFilter", "ProductQuote", "filter_products",
+    # underwriting
+    "ClaimRequest", "ClaimResponse", "ClaimStatus", "PolicyRenewal",
+    "RiskAssessment", "RiskLevel", "is_policy_renewable", "validate_beneficiary_split",
+]
