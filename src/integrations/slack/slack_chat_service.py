@@ -1,3 +1,6 @@
+import json
+import os
+
 try:
     from slack_sdk import WebClient
     from slack_sdk.errors import SlackApiError
@@ -13,6 +16,20 @@ class SlackChatService:
         self.client = client or WebClient(token=token)  # type: ignore[misc]
         self.channel = channel
         self._thread_cache = {}
+        self._agent_map = self._load_agent_map()
+
+    @staticmethod
+    def _load_agent_map() -> dict:
+        raw = os.getenv("SLACK_AGENT_MAP", "").strip()
+        if not raw:
+            return {}
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return {str(k): str(v) for k, v in parsed.items()}
+        except Exception:
+            pass
+        return {}
 
     def _chat_tag(self, chat_id: str) -> str:
         return f"[chat_id:{chat_id}]"
@@ -50,17 +67,22 @@ class SlackChatService:
         self._thread_cache[chat_id] = ts
         return ts
 
-    def send_message(self, chat_id: str, message: str, sender: str = "agent"):
+    def send_message(self, chat_id: str, message: str, sender: str = "agent", agent_id: str = None):
         try:
             thread_ts = self._ensure_thread(chat_id)
+            text = f"{self._message_prefix(sender, chat_id)} {message}"
+            if sender == "agent" and agent_id:
+                text = f"[agent_id:{agent_id}] {text}"
             response = self.client.chat_postMessage(
                 channel=self.channel,
                 thread_ts=thread_ts,
-                text=f"{self._message_prefix(sender, chat_id)} {message}",
+                text=text,
             )
             data = response.data
             data["thread_ts"] = thread_ts
             data["chat_id"] = chat_id
+            if agent_id:
+                data["agent_id"] = agent_id
             return data
         except SlackApiError as e:
             raise Exception(f"Slack API error: {self._extract_slack_error(e)}")
@@ -77,6 +99,7 @@ class SlackChatService:
                     continue
                 text = msg.get("text") or ""
                 sender = self._extract_sender(text, msg.get("user"), msg.get("bot_id"))
+                agent_id = self._extract_agent_id(text, msg.get("user"))
                 out.append(
                     {
                         "chat_id": chat_id,
@@ -85,6 +108,7 @@ class SlackChatService:
                         "text": text,
                         "message": text,
                         "sender": sender,
+                        "agent_id": agent_id,
                         "user": msg.get("user"),
                         "bot_id": msg.get("bot_id"),
                     }
@@ -101,6 +125,20 @@ class SlackChatService:
         if user and not bot_id:
             return "agent"
         return "unknown"
+
+    def resolve_agent_id(self, slack_user_id: str) -> str:
+        if not slack_user_id:
+            return ""
+        return self._agent_map.get(str(slack_user_id), "")
+
+    def _extract_agent_id(self, text: str, user: str = None) -> str:
+        marker = "[agent_id:"
+        if marker in text and "]" in text[text.find(marker) :]:
+            start = text.find(marker) + len(marker)
+            end = text.find("]", start)
+            if end > start:
+                return text[start:end].strip()
+        return self.resolve_agent_id(user or "")
 
     @staticmethod
     def _extract_slack_error(exc: Exception) -> str:

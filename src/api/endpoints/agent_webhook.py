@@ -31,9 +31,13 @@ async def agent_webhook(msg: AgentMessage):
     Webhook for agent to send a message to a client via Slack (for testing).
     """
     try:
-        if msg.agent_id and escalation_module.state_manager:
-            escalation_module.state_manager.mark_agent_joined(msg.chat_id, msg.agent_id)
-        resp = slack_service.send_message(msg.chat_id, msg.message, sender=msg.sender)
+        agent_id = msg.agent_id or ""
+        if not agent_id and msg.sender == "agent":
+            # If caller omitted agent_id, keep sender generic agent.
+            agent_id = "agent"
+        if agent_id and escalation_module.state_manager:
+            escalation_module.state_manager.mark_agent_joined(msg.chat_id, agent_id)
+        resp = slack_service.send_message(msg.chat_id, msg.message, sender=msg.sender, agent_id=agent_id or None)
         return {"success": True, "response": resp}
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
@@ -82,7 +86,8 @@ async def slack_events(request: Request):
             chat_id = tag.strip() or None
 
         if chat_id and escalation_module.state_manager and event.get("user"):
-            escalation_module.state_manager.mark_agent_joined(chat_id, str(event.get("user")))
+            mapped_agent_id = slack_service.resolve_agent_id(str(event.get("user"))) or str(event.get("user"))
+            escalation_module.state_manager.mark_agent_joined(chat_id, mapped_agent_id)
 
         return {"ok": True}
     except Exception as e:
