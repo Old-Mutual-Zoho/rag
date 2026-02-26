@@ -83,6 +83,19 @@ async def test_travel_party_return_before_departure_raises(flow):
 
 
 @pytest.mark.asyncio
+async def test_travel_party_ignores_non_travel_payload(flow):
+    payload = {"product_id": "worldwide_essential", "action": "select_cover"}
+
+    result = await flow._step_travel_party_and_trip(payload, {}, "user-1")
+
+    assert result.get("response", {}).get("type") == "form"
+    field_names = [field["name"] for field in result.get("response", {}).get("fields", [])]
+    assert "travel_party" in field_names
+    assert "departure_date" in field_names
+    assert result.get("next_step") == 3
+
+
+@pytest.mark.asyncio
 async def test_passport_upload_missing_file_ref_raises(flow):
     # Provide an empty field to enter the validation branch
     payload = {"passport_file_ref": ""}
