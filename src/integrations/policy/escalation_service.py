@@ -29,7 +29,7 @@ class EscalationService:
         }
         # Mark session as escalated in state manager (DB, Redis, etc.)
         if self.state_manager:
-            self.state_manager.update_session(session_id, {"escalated": True, "agent_id": None, "escalation_reason": reason})
+            self.state_manager.mark_escalated(session_id, reason=reason, metadata=metadata or {})
         # Add to queue for agents
         if self.queue_backend:
             self.queue_backend.add_to_queue(escalation_record)
@@ -43,7 +43,7 @@ class EscalationService:
         """
         logger.info(f"Agent {agent_id} joining session {session_id}")
         if self.state_manager:
-            self.state_manager.update_session(session_id, {"agent_id": agent_id, "escalated": True})
+            self.state_manager.mark_agent_joined(session_id, agent_id)
 
     def end_escalation(self, session_id: str):
         """
@@ -51,4 +51,4 @@ class EscalationService:
         """
         logger.info(f"Ending escalation for session {session_id}")
         if self.state_manager:
-            self.state_manager.update_session(session_id, {"escalated": False, "agent_id": None, "escalation_reason": None})
+            self.state_manager.end_escalation(session_id)

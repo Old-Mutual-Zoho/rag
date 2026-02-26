@@ -156,6 +156,20 @@ class ConversationalMode:
         if form_data and isinstance(form_data, dict) and form_data.get("action"):
             return await self._process_product_guide_action(form_data, session_id)
 
+        escalation_state = self.state_manager.get_escalation_state(session_id)
+        if escalation_state.get("escalated"):
+            logger.info(f"Routing message to human agent for session {session_id}")
+            agent_id = escalation_state.get("agent_id")
+            status_msg = "You are now chatting with a human agent."
+            if agent_id:
+                status_msg = f"You are now chatting with a human agent ({agent_id})."
+            return {
+                "mode": "escalated",
+                "response": status_msg,
+                "escalated": True,
+                "agent_id": agent_id,
+            }
+
         # If we previously offered to share a section (e.g., benefits) and the user replies "yes",
         # convert that into the corresponding section answer.
         session = self.state_manager.get_session(session_id) or {}
@@ -281,14 +295,6 @@ class ConversationalMode:
         response = await self.rag.generate(query=message, context_docs=retrieval_results, conversation_history=self._get_recent_history(session_id))
         # --- Escalation/handover logic ---
         session = self.state_manager.get_session(session_id) or {}
-        # If session is escalated, route to human agent (in-memory flag)
-        if session.get("escalated"):
-            logger.info(f"Routing message to human agent for session {session_id}")
-            return {
-                "mode": "escalated",
-                "response": "You are now chatting with a human agent.",
-                "escalated": True,
-            }
 
         # If confidence is low, suggest handover button
         show_handover_button = False

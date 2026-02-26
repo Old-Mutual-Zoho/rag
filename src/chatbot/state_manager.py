@@ -44,6 +44,77 @@ class StateManager:
         """Update session data"""
         self.redis.update_session(session_id, updates)
 
+    # --- Escalation state ----------------------------------------------------
+
+    def get_escalation_state(self, session_id: str) -> Dict[str, Any]:
+        """Get escalation state with DB fallback if session cache is stale."""
+        session = self.get_session(session_id) or {}
+        escalated = bool(session.get("escalated", False))
+        agent_id = session.get("agent_id")
+        reason = session.get("escalation_reason")
+
+        db_state = None
+        if hasattr(self.db, "get_escalation_state"):
+            try:
+                db_state = self.db.get_escalation_state(session_id)
+            except Exception:
+                db_state = None
+
+        if db_state:
+            escalated = bool(db_state.get("escalated", escalated))
+            agent_id = db_state.get("agent_id", agent_id)
+            reason = db_state.get("escalation_reason", reason)
+
+        return {
+            "session_id": session_id,
+            "escalated": escalated,
+            "agent_id": agent_id,
+            "escalation_reason": reason,
+            "db_state": db_state,
+        }
+
+    def mark_escalated(self, session_id: str, reason: str = None, metadata: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Mark a session as escalated in cache and DB."""
+        session = self.get_session(session_id) or {}
+        updates = {"escalated": True, "agent_id": None}
+        if reason:
+            updates["escalation_reason"] = reason
+        self.update_session(session_id, updates)
+
+        if hasattr(self.db, "mark_escalated"):
+            try:
+                self.db.mark_escalated(
+                    session_id=session_id,
+                    conversation_id=session.get("conversation_id"),
+                    user_id=session.get("user_id"),
+                    reason=reason,
+                    metadata=metadata or {},
+                )
+            except Exception:
+                pass
+
+        return self.get_escalation_state(session_id)
+
+    def mark_agent_joined(self, session_id: str, agent_id: str) -> Dict[str, Any]:
+        """Mark that an agent has joined this escalated session."""
+        self.update_session(session_id, {"escalated": True, "agent_id": agent_id})
+        if hasattr(self.db, "mark_agent_joined"):
+            try:
+                self.db.mark_agent_joined(session_id=session_id, agent_id=agent_id)
+            except Exception:
+                pass
+        return self.get_escalation_state(session_id)
+
+    def end_escalation(self, session_id: str) -> Dict[str, Any]:
+        """Clear escalation state for a session."""
+        self.update_session(session_id, {"escalated": False, "agent_id": None, "escalation_reason": None})
+        if hasattr(self.db, "end_escalation"):
+            try:
+                self.db.end_escalation(session_id=session_id)
+            except Exception:
+                pass
+        return self.get_escalation_state(session_id)
+
     def switch_mode(self, session_id: str, new_mode: str, flow: str = None):
         """Switch between conversational and guided mode"""
         updates = {"mode": new_mode, "current_flow": flow, "current_step": 0 if new_mode == "guided" else None}
