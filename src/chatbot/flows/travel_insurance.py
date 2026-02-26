@@ -405,12 +405,13 @@ class TravelInsuranceFlow:
                         "label": "Travel party",
                         "type": "radio",
                         "options": [
-                            {"id": "myself_only", "label": "Myself only"},
+                            {"id": "myself_only", "value": "myself_only", "label": "Myself only"},
                             {
                                 "id": "myself_and_someone_else",
+                                "value": "myself_and_someone_else",
                                 "label": "Myself and someone else",
                             },
-                            {"id": "group", "label": "Group"},
+                            {"id": "group", "value": "group", "label": "Group"},
                         ],
                         "required": True,
                     },
