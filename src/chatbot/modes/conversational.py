@@ -659,9 +659,9 @@ class ConversationalMode:
             "how are u?",
             "how's it going",
             "how's it going?",
-            "hi"
-            "whatsapp"
-            "hello"
+            "hi",
+            "whatsapp",
+            "hello",
         }
         if m in small_talk_phrases:
             return "SMALL_TALK"
