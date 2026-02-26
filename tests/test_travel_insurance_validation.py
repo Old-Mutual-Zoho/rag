@@ -96,6 +96,26 @@ async def test_travel_party_ignores_non_travel_payload(flow):
 
 
 @pytest.mark.asyncio
+async def test_travel_party_country_select_options_use_value_label(flow):
+    result = await flow._step_travel_party_and_trip({}, {}, "user-1")
+    fields = result.get("response", {}).get("fields", [])
+
+    departure_field = next(field for field in fields if field.get("name") == "departure_country")
+    destination_field = next(field for field in fields if field.get("name") == "destination_country")
+
+    departure_options = departure_field.get("options", [])
+    destination_options = destination_field.get("options", [])
+
+    assert departure_options and isinstance(departure_options[0], dict)
+    assert "value" in departure_options[0]
+    assert "label" in departure_options[0]
+
+    assert destination_options and isinstance(destination_options[0], dict)
+    assert "value" in destination_options[0]
+    assert "label" in destination_options[0]
+
+
+@pytest.mark.asyncio
 async def test_passport_upload_missing_file_ref_raises(flow):
     # Provide an empty field to enter the validation branch
     payload = {"passport_file_ref": ""}
