@@ -1,6 +1,6 @@
 from src.api.escalation import router as escalation_router
 from src.api.endpoints.payments import payments_api
-from src.api.endpoints.agent_webhook import router as agent_webhook_router
+from src.api.endpoints.agent_webhook import router as agent_webhook_router, slack_service
 import src.api.escalation as escalation_module
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -396,6 +396,15 @@ async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: Pos
         existing_session = state_manager.get_session(session_id)
         if not existing_session:
             session_id = state_manager.create_session(internal_user_id)
+
+    # While escalated, mirror incoming client messages to the session-specific
+    # Slack thread so human agents can reply in-context.
+    try:
+        esc = state_manager.get_escalation_state(session_id)
+        if esc.get("escalated") and (request.message or "").strip():
+            slack_service.send_message(chat_id=session_id, message=(request.message or "").strip(), sender="client")
+    except Exception as e:
+        logger.warning("Failed to mirror client message to Slack for session %s: %s", session_id, e)
 
     # Route message (form_data from frontend is used as user_input in guided flows)
     # Conversational path uses APIRAGAdapter.retrieve() with cfg.retrieval.top_k, synonym expansion, re-ranking
