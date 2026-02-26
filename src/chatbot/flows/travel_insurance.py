@@ -312,7 +312,21 @@ class TravelInsuranceFlow:
         data: Dict[str, Any],
         user_id: str,
     ) -> Dict[str, Any]:
-        if payload and "_raw" not in payload:
+        travel_fields = {
+            "travel_party",
+            "num_travellers_18_69",
+            "num_travellers_0_17",
+            "num_travellers_70_75",
+            "num_travellers_76_80",
+            "num_travellers_81_85",
+            "departure_country",
+            "destination_country",
+            "departure_date",
+            "return_date",
+        }
+        has_travel_submission = any(field in payload for field in travel_fields)
+
+        if payload and "_raw" not in payload and has_travel_submission:
             errors: Dict[str, str] = {}
 
             travel_party = validate_in(
