@@ -1,3 +1,5 @@
+import os
+
 from src.integrations.slack.slack_chat_service import SlackChatService
 
 
@@ -90,3 +92,24 @@ def test_unprefixed_human_reply_is_detected_as_agent():
     direct = [m for m in msgs if m["ts"] == "99"][0]
     assert direct["sender"] == "agent"
     assert direct["message"] == "Sure, I can help with that."
+
+
+def test_agent_id_mapping_from_slack_user():
+    os.environ["SLACK_AGENT_MAP"] = '{"U05SFSW0GKA":"agent-234"}'
+    fake = FakeSlackClient()
+    svc = SlackChatService(token="x", channel="C1", client=fake)
+    svc.send_message(chat_id="sess-11", message="client hello", sender="client")
+    fake.messages.append(
+        {
+            "channel": "C1",
+            "text": "On it.",
+            "ts": "150",
+            "thread_ts": "1",
+            "user": "U05SFSW0GKA",
+        }
+    )
+
+    msgs = svc.receive_messages("sess-11")
+    direct = [m for m in msgs if m["ts"] == "150"][0]
+    assert direct["agent_id"] == "agent-234"
+    del os.environ["SLACK_AGENT_MAP"]
