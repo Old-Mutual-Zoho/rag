@@ -222,7 +222,7 @@ or
 
 ### Chat response shape
 
-The API returns the same structure for both `/api/v1/chat/message` and `/chat/message`:
+The API returns the same structure for `POST /api/v1/chat/message`:
 
 ```json
 {
@@ -435,7 +435,7 @@ See **RAILWAY_DEPLOYMENT.md** and **SESSIONS_AND_STORAGE.md** for details.
 | GET | `/api/v1/products/{category}` | Subcategories or products for that category |
 | GET | `/api/v1/products/{category}/{subcategory}` | Products in category + subcategory |
 | GET | `/api/v1/products/by-id/{product_id}` | Product info for **General** card (overview, benefits, general; optional `?include_details=true` for FAQ) |
-| GET | `/api/v1/products/by-id/{product_id}/details` | Same as by-id with FAQ included |
+| GET | `/api/v1/products/by-id/{product_id}?include_details=true` | Same as by-id with FAQ included |
 | GET | `/api/v1/sessions/{session_id}/history` | Conversation history |
 | DELETE | `/api/v1/sessions/{session_id}` | End session |
 | POST | `/api/v1/quotes/generate` | Generate quote from underwriting data |
