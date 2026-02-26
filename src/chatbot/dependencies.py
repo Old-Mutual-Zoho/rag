@@ -16,6 +16,7 @@ _ALLOWLIST_PATHS = {
     "/docs/oauth2-redirect",
     "/openapi.json",
     "/redoc",
+    "/api/v1/agent/slack/events",
 }
 
 

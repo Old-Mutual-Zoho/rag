@@ -67,3 +67,26 @@ def test_receive_messages_returns_only_session_thread_messages():
     assert all(m["chat_id"] == "sess-1" for m in msgs)
     assert [m["sender"] for m in msgs] == ["client", "agent"]
     assert all("[chat_id:sess-1]" in (m["text"] or "") for m in msgs)
+    assert all("message" in m for m in msgs)
+
+
+def test_unprefixed_human_reply_is_detected_as_agent():
+    fake = FakeSlackClient()
+    svc = SlackChatService(token="x", channel="C1", client=fake)
+    svc.send_message(chat_id="sess-9", message="client hello", sender="client")
+
+    # Simulate a human agent typing directly in Slack thread (no prefix).
+    fake.messages.append(
+        {
+            "channel": "C1",
+            "text": "Sure, I can help with that.",
+            "ts": "99",
+            "thread_ts": "1",
+            "user": "UAGENT1",
+        }
+    )
+
+    msgs = svc.receive_messages("sess-9")
+    direct = [m for m in msgs if m["ts"] == "99"][0]
+    assert direct["sender"] == "agent"
+    assert direct["message"] == "Sure, I can help with that."

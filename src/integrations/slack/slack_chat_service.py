@@ -76,13 +76,15 @@ class SlackChatService:
                 if msg.get("ts") == thread_ts:
                     continue
                 text = msg.get("text") or ""
+                sender = self._extract_sender(text, msg.get("user"), msg.get("bot_id"))
                 out.append(
                     {
                         "chat_id": chat_id,
                         "thread_ts": thread_ts,
                         "ts": msg.get("ts"),
                         "text": text,
-                        "sender": self._extract_sender(text),
+                        "message": text,
+                        "sender": sender,
                         "user": msg.get("user"),
                         "bot_id": msg.get("bot_id"),
                     }
@@ -92,9 +94,12 @@ class SlackChatService:
             raise Exception(f"Slack API error: {self._extract_slack_error(e)}")
 
     @staticmethod
-    def _extract_sender(text: str) -> str:
+    def _extract_sender(text: str, user: str = None, bot_id: str = None) -> str:
         if text.startswith("[") and "]" in text:
             return text[1 : text.find("]")]
+        # Human-typed thread replies in Slack usually have `user` and no `bot_id`.
+        if user and not bot_id:
+            return "agent"
         return "unknown"
 
     @staticmethod
