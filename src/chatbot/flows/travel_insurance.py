@@ -454,14 +454,25 @@ class TravelInsuranceFlow:
                         "name": "departure_country",
                         "label": "Departure Country",
                         "type": "select",
-                        "options": [DEPARTURE_COUNTRY],
+                        "options": [
+                            {
+                                "value": DEPARTURE_COUNTRY,
+                                "label": DEPARTURE_COUNTRY,
+                            }
+                        ],
                         "required": True,
                     },
                     {
                         "name": "destination_country",
                         "label": "Destination Country",
                         "type": "select",
-                        "options": DESTINATION_COUNTRIES,
+                        "options": [
+                            {
+                                "value": country,
+                                "label": country,
+                            }
+                            for country in DESTINATION_COUNTRIES
+                        ],
                         "required": True,
                     },
                     {"name": "departure_date", "label": "Departure Date", "type": "date", "required": True},
