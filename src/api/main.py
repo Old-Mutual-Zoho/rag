@@ -1506,12 +1506,7 @@ async def startup_event():
     else:
         logger.info("DATABASE_URL not set; using in-memory PostgresDB stub")
 
-    # Create database tables if they don't exist
-    try:
-        postgres_db.create_tables()
-        logger.info("Database tables initialized")
-    except Exception as e:
-        logger.error(f"Error initializing database: {str(e)}")
+    logger.info("Database schema initialization is managed by Alembic migrations")
 
     # Test Redis connection
     if redis_cache.ping():
