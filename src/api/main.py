@@ -390,6 +390,12 @@ async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: Pos
     session_id = request.session_id
     if not session_id:
         session_id = state_manager.create_session(internal_user_id)
+    else:
+        # If a provided session_id no longer exists in Redis (e.g., TTL expired),
+        # create a fresh session and return that id so the client can continue consistently.
+        existing_session = state_manager.get_session(session_id)
+        if not existing_session:
+            session_id = state_manager.create_session(internal_user_id)
 
     # Route message (form_data from frontend is used as user_input in guided flows)
     # Conversational path uses APIRAGAdapter.retrieve() with cfg.retrieval.top_k, synonym expansion, re-ranking
