@@ -38,6 +38,50 @@ class ChatRouter:
             self.state_manager.switch_mode(session_id, "conversational")
             return {"message": "👋 Exited guided flow. How else can I help you?", "mode": "conversational"}
 
+        # Resolve any pending chat-to-guided confirmation before routing elsewhere.
+        pending_switch = self._get_pending_guided_switch(session)
+
+        if form_data and isinstance(form_data, dict):
+            action = str(form_data.get("action") or "").strip().lower()
+
+            if action == "confirm_guided_switch" and pending_switch:
+                self._clear_pending_guided_switch(session_id, session)
+                return await self.guided.start_flow(
+                    "journey",
+                    session_id,
+                    user_id,
+                    initial_data=self._build_initial_data_from_pending(pending_switch),
+                )
+
+            if action == "cancel_guided_switch" and pending_switch:
+                self._clear_pending_guided_switch(session_id, session)
+                return {
+                    "mode": "conversational",
+                    "response": "No problem — we can stay in chat, and I can still answer your questions here.",
+                }
+
+        if form_data is None and pending_switch:
+            user_reply = (message or "").strip()
+            if self._is_confirmation_intent(user_reply):
+                self._clear_pending_guided_switch(session_id, session)
+                return await self.guided.start_flow(
+                    "journey",
+                    session_id,
+                    user_id,
+                    initial_data=self._build_initial_data_from_pending(pending_switch),
+                )
+
+            if self._is_decline_intent(user_reply):
+                self._clear_pending_guided_switch(session_id, session)
+                return {
+                    "mode": "conversational",
+                    "response": "No problem — we can stay in chat, and I can still answer your questions here.",
+                }
+
+            # User moved on with a different topic; avoid stale confirmations.
+            if user_reply and not self._is_guided_trigger(user_reply):
+                self._clear_pending_guided_switch(session_id, session)
+
         # Button actions from the frontend to start guided mode and immediately return the first form/cards.
         # This is used for digital products where the user clicks "Get quotation".
         if form_data and isinstance(form_data, dict):
@@ -63,17 +107,33 @@ class ChatRouter:
         # Check for guided flow triggers (only when no form_data)
         if form_data is None and self._is_guided_trigger(message):
             flow_type = self._detect_flow_type(message)
-            initial_data = None
-            if flow_type in ("personal_accident", "travel_insurance", "motor_private", "serenicare"):
-                initial_data = {"product_flow": flow_type}
+            self._set_pending_guided_switch(session_id, session, flow_type)
 
-            logger.info(
-                "[Router] Guided trigger detected: message='%s' flow_type=%s initial_data=%s",
-                message[:100], flow_type, initial_data
+            flow_label = self._flow_label(flow_type)
+            response_text = (
+                f"I can guide you through {flow_label} to get your quote. "
+                "Would you like me to proceed?"
             )
 
-            # Always start the journey engine for guided triggers.
-            return await self.guided.start_flow("journey", session_id, user_id, initial_data=initial_data)
+            logger.info(
+                "[Router] Guided trigger detected, awaiting confirmation: message='%s' flow_type=%s",
+                message[:100], flow_type
+            )
+
+            return {
+                "mode": "conversational",
+                "response": response_text,
+                "suggested_action": {
+                    "type": "switch_to_guided",
+                    "message": response_text,
+                    "flow": "journey",
+                    "initial_data": self._build_initial_data_from_pending({"flow_type": flow_type}),
+                    "buttons": [
+                        {"label": "Yes, proceed", "action": "confirm_guided_switch"},
+                        {"label": "Not now", "action": "cancel_guided_switch"},
+                    ],
+                },
+            }
 
         # Default to conversational mode
         return await self.conversational.process(message, session_id, user_id, form_data=form_data)
@@ -180,3 +240,83 @@ class ChatRouter:
 
         message_lower = message.lower()
         return any(exit in message_lower for exit in exits)
+
+    def _is_confirmation_intent(self, message: str) -> bool:
+        """Check if user confirmed proceeding to guided flow."""
+        text = (message or "").strip().lower()
+        if not text:
+            return False
+        confirmations = {
+            "yes",
+            "y",
+            "yeah",
+            "yep",
+            "sure",
+            "ok",
+            "okay",
+            "proceed",
+            "continue",
+            "confirm",
+            "go ahead",
+            "let's go",
+            "start",
+        }
+        return text in confirmations or any(token in text for token in ["go ahead", "proceed", "continue", "yes"])
+
+    def _is_decline_intent(self, message: str) -> bool:
+        """Check if user declined proceeding to guided flow."""
+        text = (message or "").strip().lower()
+        if not text:
+            return False
+        declines = {
+            "no",
+            "n",
+            "nope",
+            "nah",
+            "not now",
+            "later",
+            "cancel",
+            "stop",
+        }
+        return text in declines or "not now" in text
+
+    def _flow_label(self, flow_type: str) -> str:
+        labels = {
+            "personal_accident": "Personal Accident",
+            "travel_insurance": "Travel Insurance",
+            "motor_private": "Motor Private",
+            "serenicare": "Serenicare",
+        }
+        return labels.get(flow_type, "guided support")
+
+    def _build_initial_data_from_pending(self, pending_switch: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        flow_type = str((pending_switch or {}).get("flow_type") or "").strip()
+        if flow_type in ("personal_accident", "travel_insurance", "motor_private", "serenicare"):
+            return {"product_flow": flow_type}
+        return None
+
+    def _get_pending_guided_switch(self, session: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not isinstance(session, dict):
+            return None
+        ctx = session.get("context") or {}
+        if not isinstance(ctx, dict):
+            return None
+        pending = ctx.get("pending_guided_switch")
+        return pending if isinstance(pending, dict) else None
+
+    def _set_pending_guided_switch(self, session_id: str, session: Dict[str, Any], flow_type: str) -> None:
+        ctx = (session.get("context") or {}) if isinstance(session, dict) else {}
+        if not isinstance(ctx, dict):
+            ctx = {}
+        ctx["pending_guided_switch"] = {"flow_type": flow_type}
+        self.state_manager.update_session(session_id, {"context": ctx})
+
+    def _clear_pending_guided_switch(self, session_id: str, session: Optional[Dict[str, Any]]) -> None:
+        if not isinstance(session, dict):
+            return
+        ctx = session.get("context") or {}
+        if not isinstance(ctx, dict):
+            return
+        if "pending_guided_switch" in ctx:
+            ctx.pop("pending_guided_switch", None)
+            self.state_manager.update_session(session_id, {"context": ctx})
