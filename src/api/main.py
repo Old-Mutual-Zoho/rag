@@ -87,7 +87,6 @@ state_manager = StateManager(redis_cache, postgres_db)
 escalation_module.state_manager = state_manager
 # Register escalation router
 app.include_router(escalation_router, prefix="/api/v1")
-app.include_router(escalation_router, prefix="/api")
 
 # Register payments API router
 app.include_router(payments_api, prefix="/api/v1/payments", tags=["Payments"])
@@ -1048,38 +1047,6 @@ async def api_get_product_by_id(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@api_router.get("/products/by-id/{product_id:path}/details", tags=["Products"])
-async def api_get_product_details_by_id(
-    product_id: str,
-    matcher: ProductMatcher = Depends(lambda: product_matcher),
-):
-    """Same as by-id with include_details=true: overview, benefits, general, and faq."""
-    try:
-        doc_id = _resolve_product_doc_id(matcher, product_id)
-        product = matcher.get_product_by_id(doc_id)
-        if not product:
-            raise HTTPException(status_code=404, detail="Product not found")
-        sections = _load_product_sections(doc_id)
-        public_id = product.get("product_key") or matcher.get_public_id(doc_id) or doc_id
-        return {
-            "product_id": public_id,
-            "doc_id": doc_id,
-            "name": product.get("name"),
-            "category": product.get("category_name"),
-            "subcategory": product.get("sub_category_name"),
-            "url": product.get("url"),
-            "overview": sections.get("overview", []),
-            "benefits": sections.get("benefits", []),
-            "general": sections.get("general", []),
-            "faq": sections.get("faq", []),
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error getting product details: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @api_router.get("/products/{category}", tags=["Products"])
 async def api_list_product_subcategories_or_products(category: str, matcher: ProductMatcher = Depends(lambda: product_matcher)):
     """
@@ -1434,9 +1401,8 @@ async def end_session(session_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# API versioning: primary prefix is /api/v1; /api is kept for backward compatibility
+# API versioning: expose routes under /api/v1
 app.include_router(api_router, prefix="/api/v1")
-app.include_router(api_router, prefix="/api")  # backward compat: same routes under /api
 
 # Register applications router
 try:
@@ -1450,8 +1416,7 @@ except Exception:
 try:
     from src.api.pa_quote_forms_router import api as pa_quote_api
 
-    app.include_router(pa_quote_api, prefix="/api")
-    # Also expose under versioned prefix for consistency
+    # Expose under versioned prefix
     app.include_router(pa_quote_api, prefix="/api/v1")
 except Exception:
     pass
