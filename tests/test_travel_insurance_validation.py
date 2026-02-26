@@ -116,6 +116,64 @@ async def test_travel_party_country_select_options_use_value_label(flow):
 
 
 @pytest.mark.asyncio
+async def test_travel_party_myself_only_requires_primary_dob(flow):
+    payload = {
+        "travel_party": "myself_only",
+        "departure_country": "Uganda",
+        "destination_country": "Portugal",
+        "departure_date": "2026-03-08",
+        "return_date": "2026-03-10",
+    }
+
+    with pytest.raises(FormValidationError) as exc:
+        await flow._step_travel_party_and_trip(payload, {}, "user-1")
+
+    err = exc.value.field_errors
+    assert "traveller_1_date_of_birth" in err
+
+
+@pytest.mark.asyncio
+async def test_travel_party_myself_and_someone_else_requires_second_dob(flow):
+    payload = {
+        "travel_party": "myself_and_someone_else",
+        "traveller_1_date_of_birth": "1990-01-01",
+        "departure_country": "Uganda",
+        "destination_country": "Portugal",
+        "departure_date": "2026-03-08",
+        "return_date": "2026-03-10",
+    }
+
+    with pytest.raises(FormValidationError) as exc:
+        await flow._step_travel_party_and_trip(payload, {}, "user-1")
+
+    err = exc.value.field_errors
+    assert "traveller_2_date_of_birth" in err
+
+
+@pytest.mark.asyncio
+async def test_travel_party_group_total_must_match_age_ranges(flow):
+    payload = {
+        "travel_party": "group",
+        "total_travellers": 4,
+        "num_travellers_18_69": 1,
+        "num_travellers_0_17": 1,
+        "num_travellers_70_75": 0,
+        "num_travellers_76_80": 0,
+        "num_travellers_81_85": 0,
+        "departure_country": "Uganda",
+        "destination_country": "Portugal",
+        "departure_date": "2026-03-08",
+        "return_date": "2026-03-10",
+    }
+
+    with pytest.raises(FormValidationError) as exc:
+        await flow._step_travel_party_and_trip(payload, {}, "user-1")
+
+    err = exc.value.field_errors
+    assert "total_travellers" in err
+
+
+@pytest.mark.asyncio
 async def test_passport_upload_missing_file_ref_raises(flow):
     # Provide an empty field to enter the validation branch
     payload = {"passport_file_ref": ""}

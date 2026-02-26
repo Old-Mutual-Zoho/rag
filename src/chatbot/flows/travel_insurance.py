@@ -314,6 +314,9 @@ class TravelInsuranceFlow:
     ) -> Dict[str, Any]:
         travel_fields = {
             "travel_party",
+            "total_travellers",
+            "traveller_1_date_of_birth",
+            "traveller_2_date_of_birth",
             "num_travellers_18_69",
             "num_travellers_0_17",
             "num_travellers_70_75",
@@ -337,11 +340,84 @@ class TravelInsuranceFlow:
                 required=True,
             )
 
-            n18_69 = parse_int(payload, "num_travellers_18_69", errors, min_value=0, required=True)
-            n0_17 = parse_int(payload, "num_travellers_0_17", errors, min_value=0, required=False)
-            n70_75 = parse_int(payload, "num_travellers_70_75", errors, min_value=0, required=False)
-            n76_80 = parse_int(payload, "num_travellers_76_80", errors, min_value=0, required=False)
-            n81_85 = parse_int(payload, "num_travellers_81_85", errors, min_value=0, required=False)
+            n18_69 = 0
+            n0_17 = 0
+            n70_75 = 0
+            n76_80 = 0
+            n81_85 = 0
+            total_travellers = 0
+            traveller_1_date_of_birth = ""
+            traveller_2_date_of_birth = ""
+
+            if travel_party in ("myself_only", "myself_and_someone_else"):
+                traveller_1_date_of_birth = validate_date_iso(
+                    payload.get("traveller_1_date_of_birth", ""),
+                    errors,
+                    "traveller_1_date_of_birth",
+                    required=True,
+                    not_future=True,
+                )
+
+                if travel_party == "myself_and_someone_else":
+                    traveller_2_date_of_birth = validate_date_iso(
+                        payload.get("traveller_2_date_of_birth", ""),
+                        errors,
+                        "traveller_2_date_of_birth",
+                        required=True,
+                        not_future=True,
+                    )
+
+                for field_name, dob_value in (
+                    ("traveller_1_date_of_birth", traveller_1_date_of_birth),
+                    ("traveller_2_date_of_birth", traveller_2_date_of_birth),
+                ):
+                    if not dob_value:
+                        continue
+
+                    parsed_dob = parse_iso_date(dob_value)
+                    if not parsed_dob:
+                        continue
+
+                    age = self._calculate_age(parsed_dob)
+                    if age > 85:
+                        add_error(errors, field_name, "Traveller age must be 85 years or below")
+                        continue
+
+                    bucket = self._age_bucket(age)
+                    if bucket == "0_17":
+                        n0_17 += 1
+                    elif bucket == "18_69":
+                        n18_69 += 1
+                    elif bucket == "70_75":
+                        n70_75 += 1
+                    elif bucket == "76_80":
+                        n76_80 += 1
+                    elif bucket == "81_85":
+                        n81_85 += 1
+
+                total_travellers = 1 if travel_party == "myself_only" else 2
+
+            elif travel_party == "group":
+                total_travellers = parse_int(
+                    payload,
+                    "total_travellers",
+                    errors,
+                    min_value=1,
+                    required=True,
+                )
+                n18_69 = parse_int(payload, "num_travellers_18_69", errors, min_value=0, required=True)
+                n0_17 = parse_int(payload, "num_travellers_0_17", errors, min_value=0, required=True)
+                n70_75 = parse_int(payload, "num_travellers_70_75", errors, min_value=0, required=True)
+                n76_80 = parse_int(payload, "num_travellers_76_80", errors, min_value=0, required=True)
+                n81_85 = parse_int(payload, "num_travellers_81_85", errors, min_value=0, required=True)
+
+                range_total = n18_69 + n0_17 + n70_75 + n76_80 + n81_85
+                if total_travellers and range_total != total_travellers:
+                    add_error(
+                        errors,
+                        "total_travellers",
+                        "Total travellers must equal the sum of all age-range counts",
+                    )
 
             departure_country = validate_in(
                 payload.get("departure_country", DEPARTURE_COUNTRY),
@@ -380,6 +456,9 @@ class TravelInsuranceFlow:
 
             data["travel_party_and_trip"] = {
                 "travel_party": travel_party,
+                "total_travellers": total_travellers,
+                "traveller_1_date_of_birth": traveller_1_date_of_birth,
+                "traveller_2_date_of_birth": traveller_2_date_of_birth,
                 "num_travellers_18_69": n18_69,
                 "num_travellers_0_17": n0_17,
                 "num_travellers_70_75": n70_75,
@@ -416,11 +495,38 @@ class TravelInsuranceFlow:
                         "required": True,
                     },
                     {
+                        "name": "traveller_1_date_of_birth",
+                        "label": "Your Date of Birth",
+                        "type": "date",
+                        "required": False,
+                        "required_when": {"travel_party": ["myself_only", "myself_and_someone_else"]},
+                        "show_when": {"travel_party": ["myself_only", "myself_and_someone_else"]},
+                    },
+                    {
+                        "name": "traveller_2_date_of_birth",
+                        "label": "Second Traveller Date of Birth",
+                        "type": "date",
+                        "required": False,
+                        "required_when": {"travel_party": ["myself_and_someone_else"]},
+                        "show_when": {"travel_party": ["myself_and_someone_else"]},
+                    },
+                    {
+                        "name": "total_travellers",
+                        "label": "Total number of travellers",
+                        "type": "number",
+                        "min": 1,
+                        "required": False,
+                        "required_when": {"travel_party": ["group"]},
+                        "show_when": {"travel_party": ["group"]},
+                    },
+                    {
                         "name": "num_travellers_18_69",
                         "label": "Number of travellers (18–69 years)",
                         "type": "number",
                         "min": 0,
-                        "required": True,
+                        "required": False,
+                        "required_when": {"travel_party": ["group"]},
+                        "show_when": {"travel_party": ["group"]},
                     },
                     {
                         "name": "num_travellers_0_17",
@@ -428,6 +534,8 @@ class TravelInsuranceFlow:
                         "type": "number",
                         "min": 0,
                         "required": False,
+                        "required_when": {"travel_party": ["group"]},
+                        "show_when": {"travel_party": ["group"]},
                     },
                     {
                         "name": "num_travellers_70_75",
@@ -435,6 +543,8 @@ class TravelInsuranceFlow:
                         "type": "number",
                         "min": 0,
                         "required": False,
+                        "required_when": {"travel_party": ["group"]},
+                        "show_when": {"travel_party": ["group"]},
                     },
                     {
                         "name": "num_travellers_76_80",
@@ -442,6 +552,8 @@ class TravelInsuranceFlow:
                         "type": "number",
                         "min": 0,
                         "required": False,
+                        "required_when": {"travel_party": ["group"]},
+                        "show_when": {"travel_party": ["group"]},
                     },
                     {
                         "name": "num_travellers_81_85",
@@ -449,6 +561,8 @@ class TravelInsuranceFlow:
                         "type": "number",
                         "min": 0,
                         "required": False,
+                        "required_when": {"travel_party": ["group"]},
+                        "show_when": {"travel_party": ["group"]},
                     },
                     {
                         "name": "departure_country",
@@ -483,6 +597,27 @@ class TravelInsuranceFlow:
             "next_step": 3,
             "collected_data": data,
         }
+
+    @staticmethod
+    def _calculate_age(dob: date) -> int:
+        today = date.today()
+        return today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+
+    @staticmethod
+    def _age_bucket(age: int) -> Optional[str]:
+        if age < 0:
+            return None
+        if age <= 17:
+            return "0_17"
+        if age <= 69:
+            return "18_69"
+        if age <= 75:
+            return "70_75"
+        if age <= 80:
+            return "76_80"
+        if age <= 85:
+            return "81_85"
+        return None
 
     async def _step_data_consent(
         self,
