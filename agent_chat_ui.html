@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Agent Chat UI</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 2em; }
+        #chat { border: 1px solid #ccc; padding: 1em; height: 300px; overflow-y: scroll; margin-bottom: 1em; }
+        #chat p { margin: 0.5em 0; }
+        .agent { color: blue; }
+        .client { color: green; }
+    </style>
+</head>
+<body>
+    <h2>Agent Chat UI</h2>
+    <label>Chat ID: <input type="text" id="chatId" value="" /></label>
+    <div id="chat"></div>
+    <textarea id="message" rows="3" cols="50" placeholder="Type your message..."></textarea><br>
+    <button onclick="sendMessage()">Send</button>
+    <script>
+        const API_KEY = "JAWNlQeUuLQNMNLWWAfwJSCH72K6GFtueLsR0s6uUdU"; // Replace with your actual API key if different
+        async function sendMessage() {
+            const chatId = document.getElementById('chatId').value;
+            const message = document.getElementById('message').value;
+            if (!chatId || !message) return alert('Chat ID and message required');
+            const resp = await fetch('http://127.0.0.1:8000/api/v1/agent/webhook', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': API_KEY
+                },
+                body: JSON.stringify({ chat_id: chatId, message: message, sender: 'agent' })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                addMessage('agent', message);
+                document.getElementById('message').value = '';
+            } else {
+                alert('Failed to send: ' + (data.detail || 'Unknown error'));
+            }
+        }
+        function addMessage(sender, text) {
+            const chat = document.getElementById('chat');
+            const p = document.createElement('p');
+            p.className = sender;
+            p.textContent = sender + ': ' + text;
+            chat.appendChild(p);
+            chat.scrollTop = chat.scrollHeight;
+        }
+    </script>
+</body>
+</html>

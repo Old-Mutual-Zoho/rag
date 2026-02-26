@@ -1,5 +1,6 @@
 from src.api.escalation import router as escalation_router
 from src.api.endpoints.payments import payments_api
+from src.api.endpoints.agent_webhook import router as agent_webhook_router
 import src.api.escalation as escalation_module
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -18,6 +19,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, status
@@ -86,8 +88,12 @@ escalation_module.state_manager = state_manager
 # Register escalation router
 app.include_router(escalation_router, prefix="/api/v1")
 app.include_router(escalation_router, prefix="/api")
+
 # Register payments API router
 app.include_router(payments_api, prefix="/api/v1/payments", tags=["Payments"])
+
+# Register agent webhook router
+app.include_router(agent_webhook_router, prefix="/api/v1")
 
 product_matcher = ProductMatcher()
 
@@ -1498,6 +1504,27 @@ def _load_product_sections(product_id: str) -> Dict[str, List[Dict[str, str]]]:
 async def startup_event():
     """Initialize on startup"""
     logger.info("Starting Old Mutual Chatbot API...")
+
+    # Log sanitized DB target details (no credentials) for connectivity debugging.
+    db_url = os.getenv("DATABASE_URL", "")
+    if db_url:
+        try:
+            parsed = urlparse(db_url)
+            query = parse_qs(parsed.query or "")
+            logger.info(
+                "DATABASE_URL target: scheme=%s host=%s port=%s db=%s sslmode=%s channel_binding=%s use_postgres=%s",
+                parsed.scheme,
+                parsed.hostname,
+                parsed.port or 5432,
+                (parsed.path or "").lstrip("/"),
+                (query.get("sslmode") or [""])[0],
+                (query.get("channel_binding") or [""])[0],
+                os.getenv("USE_POSTGRES_CONVERSATIONS", ""),
+            )
+        except Exception as e:
+            logger.warning("Could not parse DATABASE_URL for startup logging: %s", e)
+    else:
+        logger.info("DATABASE_URL not set; using in-memory PostgresDB stub")
 
     # Create database tables if they don't exist
     try:

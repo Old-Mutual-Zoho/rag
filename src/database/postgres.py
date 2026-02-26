@@ -105,6 +105,23 @@ class SerenicareApplication:
     updated_at: datetime = field(default_factory=datetime.utcnow)
 
 
+@dataclass
+class EscalationSession:
+    id: str
+    session_id: str
+    conversation_id: Optional[str] = None
+    user_id: Optional[str] = None
+    escalated: bool = False
+    agent_id: Optional[str] = None
+    escalation_reason: Optional[str] = None
+    escalation_metadata: Dict[str, Any] = field(default_factory=dict)
+    escalated_at: Optional[datetime] = None
+    agent_joined_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    created_at: datetime = field(default_factory=datetime.utcnow)
+    updated_at: datetime = field(default_factory=datetime.utcnow)
+
+
 class PostgresDB:
     """
     In-memory stand‑in for a Postgres-backed data access layer.
@@ -125,6 +142,8 @@ class PostgresDB:
         self._travel_applications: Dict[str, TravelInsuranceApplication] = {}
         # Serenicare applications
         self._serenicare_applications: Dict[str, SerenicareApplication] = {}
+        # Escalation state by session_id
+        self._escalation_sessions: Dict[str, EscalationSession] = {}
 
     # ------------------------------------------------------------------ #
     # Schema / lifecycle
@@ -407,3 +426,75 @@ class PostgresDB:
         key_fn = orderable.get(order_by) or orderable["created_at"]
         apps.sort(key=key_fn, reverse=descending)
         return apps
+
+    # ------------------------------------------------------------------ #
+    # Escalation persistence
+    # ------------------------------------------------------------------ #
+    def get_escalation_state(self, session_id: str) -> Optional[Dict[str, Any]]:
+        rec = self._escalation_sessions.get(str(session_id))
+        if not rec:
+            return None
+        return {
+            "session_id": rec.session_id,
+            "conversation_id": rec.conversation_id,
+            "user_id": rec.user_id,
+            "escalated": rec.escalated,
+            "agent_id": rec.agent_id,
+            "escalation_reason": rec.escalation_reason,
+            "escalation_metadata": rec.escalation_metadata or {},
+            "escalated_at": rec.escalated_at.isoformat() if rec.escalated_at else None,
+            "agent_joined_at": rec.agent_joined_at.isoformat() if rec.agent_joined_at else None,
+            "ended_at": rec.ended_at.isoformat() if rec.ended_at else None,
+            "updated_at": rec.updated_at.isoformat() if rec.updated_at else None,
+        }
+
+    def mark_escalated(
+        self,
+        session_id: str,
+        *,
+        conversation_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        reason: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        now = datetime.utcnow()
+        rec = self._escalation_sessions.get(str(session_id))
+        if not rec:
+            rec = EscalationSession(id=str(uuid.uuid4()), session_id=str(session_id))
+            self._escalation_sessions[str(session_id)] = rec
+
+        rec.conversation_id = conversation_id or rec.conversation_id
+        rec.user_id = user_id or rec.user_id
+        rec.escalated = True
+        rec.agent_id = None
+        rec.escalation_reason = reason or rec.escalation_reason
+        rec.escalation_metadata = dict(metadata or rec.escalation_metadata or {})
+        rec.escalated_at = now
+        rec.ended_at = None
+        rec.updated_at = now
+        return self.get_escalation_state(session_id) or {}
+
+    def mark_agent_joined(self, session_id: str, agent_id: str) -> Dict[str, Any]:
+        now = datetime.utcnow()
+        rec = self._escalation_sessions.get(str(session_id))
+        if not rec:
+            rec = EscalationSession(id=str(uuid.uuid4()), session_id=str(session_id))
+            self._escalation_sessions[str(session_id)] = rec
+        rec.escalated = True
+        rec.agent_id = str(agent_id)
+        rec.agent_joined_at = now
+        rec.updated_at = now
+        return self.get_escalation_state(session_id) or {}
+
+    def end_escalation(self, session_id: str) -> Dict[str, Any]:
+        now = datetime.utcnow()
+        rec = self._escalation_sessions.get(str(session_id))
+        if not rec:
+            rec = EscalationSession(id=str(uuid.uuid4()), session_id=str(session_id))
+            self._escalation_sessions[str(session_id)] = rec
+        rec.escalated = False
+        rec.agent_id = None
+        rec.escalation_reason = None
+        rec.ended_at = now
+        rec.updated_at = now
+        return self.get_escalation_state(session_id) or {}

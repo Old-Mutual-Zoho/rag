@@ -368,6 +368,9 @@ class MotorPrivateFlow:
                     "phone_number": phone_number,
                     "email": email,
                 }
+                out = await self._step_vehicle_details({}, data, user_id)
+                out["next_step"] = 1
+                return out
         except Exception as e:
             return {"error": f"Exception in about_you: {str(e)}", "step": "about_you"}
 
@@ -464,6 +467,9 @@ class MotorPrivateFlow:
                     "tracking_system_installed": tracking_system_installed,
                     "car_usage_region": car_usage_region,
                 }
+                out = await self._step_excess_parameters({}, data, user_id)
+                out["next_step"] = 2
+                return out
         except Exception as e:
             return {"error": f"Exception in vehicle_details: {str(e)}", "step": "vehicle_details"}
 
@@ -530,6 +536,9 @@ class MotorPrivateFlow:
                 if not selected:
                     return {"error": "No excess parameters selected", "step": "excess_parameters"}
                 data["excess_parameters"] = selected
+                out = await self._step_additional_benefits({}, data, user_id)
+                out["next_step"] = 3
+                return out
         except Exception as e:
             return {"error": f"Exception in excess_parameters: {str(e)}", "step": "excess_parameters"}
 
@@ -556,6 +565,9 @@ class MotorPrivateFlow:
                 if not selected:
                     return {"error": "No additional benefits selected", "step": "additional_benefits"}
                 data["additional_benefits"] = selected
+                out = await self._step_benefits_summary({}, data, user_id)
+                out["next_step"] = 4
+                return out
         except Exception as e:
             return {"error": f"Exception in additional_benefits: {str(e)}", "step": "additional_benefits"}
 
@@ -575,7 +587,10 @@ class MotorPrivateFlow:
 
     async def _step_benefits_summary(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         try:
-            pass  # No required input for this step
+            if payload and "_raw" not in payload:
+                out = await self._step_premium_calculation({}, data, user_id)
+                out["next_step"] = 5
+                return out
         except Exception as e:
             return {"error": f"Exception in benefits_summary: {str(e)}", "step": "benefits_summary"}
 
@@ -603,6 +618,9 @@ class MotorPrivateFlow:
                     "vat": payload.get("vat", ""),
                     "stamp_duty": payload.get("stamp_duty", ""),
                 }
+                out = await self._step_premium_and_download({}, data, user_id)
+                out["next_step"] = 6
+                return out
         except Exception as e:
             return {"error": f"Exception in premium_calculation: {str(e)}", "step": "premium_calculation"}
 
@@ -628,6 +646,10 @@ class MotorPrivateFlow:
     async def _step_premium_and_download(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         try:
             premium = self._calculate_motor_private_premium(data)
+            if payload and "_raw" not in payload:
+                out = await self._step_choose_plan_and_pay({}, data, user_id)
+                out["next_step"] = 7
+                return out
         except Exception as e:
             return {"error": f"Exception in premium_and_download: {str(e)}", "step": "premium_and_download"}
 

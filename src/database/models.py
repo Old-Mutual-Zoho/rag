@@ -38,6 +38,27 @@ class Conversation(Base):
     messages: Mapped[list["Message"]] = relationship("Message", back_populates="conversation", order_by="Message.timestamp")
 
 
+class EscalationSession(Base):
+    __tablename__ = "escalation_sessions"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    session_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    conversation_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True, index=True)
+
+    escalated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    agent_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)
+    escalation_reason: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    escalation_metadata: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+
+    escalated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    agent_joined_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+
+
 class Message(Base):
     __tablename__ = "messages"
 

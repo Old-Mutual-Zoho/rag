@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from src.database.models import (
     Base,
     Conversation,
+    EscalationSession,
     Message,
     Quote,
     User,
@@ -389,3 +390,157 @@ class PostgresDB:
             col = orderable.get(order_by) or SerenicareApplication.created_at
             stmt = stmt.order_by(col.desc() if descending else col.asc())
             return list(s.execute(stmt).scalars().all())
+
+    # ------------------------------------------------------------------ #
+    # Escalation persistence
+    # ------------------------------------------------------------------ #
+    def get_escalation_state(self, session_id: str) -> Optional[Dict[str, Any]]:
+        with self._session() as s:
+            stmt = select(EscalationSession).where(EscalationSession.session_id == str(session_id))
+            rec = s.execute(stmt).scalar_one_or_none()
+            if not rec:
+                return None
+            return {
+                "session_id": rec.session_id,
+                "conversation_id": rec.conversation_id,
+                "user_id": rec.user_id,
+                "escalated": bool(rec.escalated),
+                "agent_id": rec.agent_id,
+                "escalation_reason": rec.escalation_reason,
+                "escalation_metadata": rec.escalation_metadata or {},
+                "escalated_at": rec.escalated_at.isoformat() if rec.escalated_at else None,
+                "agent_joined_at": rec.agent_joined_at.isoformat() if rec.agent_joined_at else None,
+                "ended_at": rec.ended_at.isoformat() if rec.ended_at else None,
+                "updated_at": rec.updated_at.isoformat() if rec.updated_at else None,
+            }
+
+    def mark_escalated(
+        self,
+        session_id: str,
+        *,
+        conversation_id: Optional[str] = None,
+        user_id: Optional[str] = None,
+        reason: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        with self._session() as s:
+            stmt = select(EscalationSession).where(EscalationSession.session_id == str(session_id))
+            rec = s.execute(stmt).scalar_one_or_none()
+            now = datetime.utcnow()
+            if not rec:
+                rec = EscalationSession(
+                    id=str(uuid4()),
+                    session_id=str(session_id),
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    escalated=True,
+                    agent_id=None,
+                    escalation_reason=reason,
+                    escalation_metadata=metadata or {},
+                    escalated_at=now,
+                    ended_at=None,
+                    created_at=now,
+                    updated_at=now,
+                )
+                s.add(rec)
+            else:
+                rec.conversation_id = conversation_id or rec.conversation_id
+                rec.user_id = user_id or rec.user_id
+                rec.escalated = True
+                rec.agent_id = None
+                rec.escalation_reason = reason or rec.escalation_reason
+                rec.escalation_metadata = dict(metadata or rec.escalation_metadata or {})
+                rec.escalated_at = now
+                rec.ended_at = None
+                rec.updated_at = now
+                s.add(rec)
+            s.flush()
+            return {
+                "session_id": rec.session_id,
+                "conversation_id": rec.conversation_id,
+                "user_id": rec.user_id,
+                "escalated": bool(rec.escalated),
+                "agent_id": rec.agent_id,
+                "escalation_reason": rec.escalation_reason,
+                "escalation_metadata": rec.escalation_metadata or {},
+                "escalated_at": rec.escalated_at.isoformat() if rec.escalated_at else None,
+                "agent_joined_at": rec.agent_joined_at.isoformat() if rec.agent_joined_at else None,
+                "ended_at": rec.ended_at.isoformat() if rec.ended_at else None,
+                "updated_at": rec.updated_at.isoformat() if rec.updated_at else None,
+            }
+
+    def mark_agent_joined(self, session_id: str, agent_id: str) -> Dict[str, Any]:
+        with self._session() as s:
+            stmt = select(EscalationSession).where(EscalationSession.session_id == str(session_id))
+            rec = s.execute(stmt).scalar_one_or_none()
+            now = datetime.utcnow()
+            if not rec:
+                rec = EscalationSession(
+                    id=str(uuid4()),
+                    session_id=str(session_id),
+                    escalated=True,
+                    agent_id=str(agent_id),
+                    escalation_metadata={},
+                    agent_joined_at=now,
+                    created_at=now,
+                    updated_at=now,
+                )
+                s.add(rec)
+            else:
+                rec.escalated = True
+                rec.agent_id = str(agent_id)
+                rec.agent_joined_at = now
+                rec.updated_at = now
+                s.add(rec)
+            s.flush()
+            return {
+                "session_id": rec.session_id,
+                "conversation_id": rec.conversation_id,
+                "user_id": rec.user_id,
+                "escalated": bool(rec.escalated),
+                "agent_id": rec.agent_id,
+                "escalation_reason": rec.escalation_reason,
+                "escalation_metadata": rec.escalation_metadata or {},
+                "escalated_at": rec.escalated_at.isoformat() if rec.escalated_at else None,
+                "agent_joined_at": rec.agent_joined_at.isoformat() if rec.agent_joined_at else None,
+                "ended_at": rec.ended_at.isoformat() if rec.ended_at else None,
+                "updated_at": rec.updated_at.isoformat() if rec.updated_at else None,
+            }
+
+    def end_escalation(self, session_id: str) -> Dict[str, Any]:
+        with self._session() as s:
+            stmt = select(EscalationSession).where(EscalationSession.session_id == str(session_id))
+            rec = s.execute(stmt).scalar_one_or_none()
+            now = datetime.utcnow()
+            if not rec:
+                rec = EscalationSession(
+                    id=str(uuid4()),
+                    session_id=str(session_id),
+                    escalated=False,
+                    escalation_metadata={},
+                    ended_at=now,
+                    created_at=now,
+                    updated_at=now,
+                )
+                s.add(rec)
+            else:
+                rec.escalated = False
+                rec.agent_id = None
+                rec.escalation_reason = None
+                rec.ended_at = now
+                rec.updated_at = now
+                s.add(rec)
+            s.flush()
+            return {
+                "session_id": rec.session_id,
+                "conversation_id": rec.conversation_id,
+                "user_id": rec.user_id,
+                "escalated": bool(rec.escalated),
+                "agent_id": rec.agent_id,
+                "escalation_reason": rec.escalation_reason,
+                "escalation_metadata": rec.escalation_metadata or {},
+                "escalated_at": rec.escalated_at.isoformat() if rec.escalated_at else None,
+                "agent_joined_at": rec.agent_joined_at.isoformat() if rec.agent_joined_at else None,
+                "ended_at": rec.ended_at.isoformat() if rec.ended_at else None,
+                "updated_at": rec.updated_at.isoformat() if rec.updated_at else None,
+            }
