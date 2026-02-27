@@ -160,9 +160,9 @@ class ConversationalMode:
         if escalation_state.get("escalated"):
             logger.info(f"Routing message to human agent for session {session_id}")
             agent_id = escalation_state.get("agent_id")
-            status_msg = "You are now chatting with a human agent."
+            status_msg = "Message sent to human agent."
             if agent_id:
-                status_msg = f"You are now chatting with a human agent ({agent_id})."
+                status_msg = f"Message sent to human agent ({agent_id})."
             return {
                 "mode": "escalated",
                 "response": status_msg,

@@ -396,15 +396,6 @@ async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: Pos
         if not existing_session:
             session_id = state_manager.create_session(internal_user_id)
 
-    # While escalated, mirror incoming client messages to the session-specific
-    # Slack thread so human agents can reply in-context.
-    try:
-        esc = state_manager.get_escalation_state(session_id)
-        if esc.get("escalated") and (request.message or "").strip():
-            slack_service.send_message(chat_id=session_id, message=(request.message or "").strip(), sender="client")
-    except Exception as e:
-        logger.warning("Failed to mirror client message to Slack for session %s: %s", session_id, e)
-
     # Route message (form_data from frontend is used as user_input in guided flows)
     # Conversational path uses APIRAGAdapter.retrieve() with cfg.retrieval.top_k, synonym expansion, re-ranking
     response = await router.route(
@@ -413,6 +404,38 @@ async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: Pos
         user_id=internal_user_id,
         form_data=request.form_data,
     )
+
+    # In escalated mode, hand over to human agent: mirror every user text message to
+    # the session thread in Slack and seed recent bot/user context once for the agent.
+    if response.get("mode") == "escalated" and (request.message or "").strip():
+        try:
+            session_for_thread = state_manager.get_session(session_id) or {}
+            already_seeded = bool(session_for_thread.get("agent_thread_seeded"))
+
+            if not already_seeded:
+                conv_id = session_for_thread.get("conversation_id")
+                if conv_id:
+                    history = db.get_conversation_history(conv_id, limit=12)
+                    if history:
+                        if not slack_service.thread_exists(session_id):
+                            slack_service.send_history_message(session_id, "Context before human-agent handoff:")
+                        for msg in reversed(history):
+                            role = (getattr(msg, "role", "") or "").lower()
+                            content = (getattr(msg, "content", "") or "").strip()
+                            if not content:
+                                continue
+                            if role == "assistant" and content.startswith("Message sent to human agent"):
+                                continue
+                            who = "User" if role == "user" else "Bot"
+                            slack_service.send_history_message(session_id, f"{who}: {content}")
+                state_manager.update_session(session_id, {"agent_thread_seeded": True})
+
+            slack_service.send_message(chat_id=session_id, message=(request.message or "").strip(), sender="client")
+            response["forwarded_to_agent"] = True
+        except Exception as e:
+            logger.warning("Failed to mirror client message to Slack for session %s: %s", session_id, e)
+            response["forwarded_to_agent"] = False
+            response["forward_error"] = str(e)
 
     # Save message to database
     session = state_manager.get_session(session_id)
@@ -424,17 +447,19 @@ async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: Pos
             content=user_content,
             metadata=request.metadata or {},
         )
-        resp_val = response.get("response")
-        if isinstance(resp_val, dict):
-            assistant_content = resp_val.get("response") or resp_val.get("message") or str(resp_val)
-        else:
-            assistant_content = str(resp_val)
-        db.add_message(
-            conversation_id=session["conversation_id"],
-            role="assistant",
-            content=assistant_content,
-            metadata={"mode": response.get("mode")},
-        )
+        # In escalated mode, avoid storing repeated bot acknowledgements as assistant replies.
+        if response.get("mode") != "escalated":
+            resp_val = response.get("response")
+            if isinstance(resp_val, dict):
+                assistant_content = resp_val.get("response") or resp_val.get("message") or str(resp_val)
+            else:
+                assistant_content = str(resp_val)
+            db.add_message(
+                conversation_id=session["conversation_id"],
+                role="assistant",
+                content=assistant_content,
+                metadata={"mode": response.get("mode")},
+            )
 
     return ChatResponse(response=response, session_id=session_id, mode=response.get("mode", "conversational"), timestamp=datetime.now().isoformat())
 

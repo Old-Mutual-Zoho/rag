@@ -67,6 +67,16 @@ class SlackChatService:
         self._thread_cache[chat_id] = ts
         return ts
 
+    def thread_exists(self, chat_id: str) -> bool:
+        return bool(self._find_thread_ts(chat_id))
+
+    def send_history_message(self, chat_id: str, message: str):
+        """
+        Send a context/history note to the Slack thread.
+        These entries are for agent context and are filtered out from client polling.
+        """
+        return self.send_message(chat_id=chat_id, message=message, sender="history")
+
     def send_message(self, chat_id: str, message: str, sender: str = "agent", agent_id: str = None):
         try:
             thread_ts = self._ensure_thread(chat_id)
@@ -99,6 +109,8 @@ class SlackChatService:
                     continue
                 text = msg.get("text") or ""
                 sender = self._extract_sender(text, msg.get("user"), msg.get("bot_id"))
+                if sender in {"history", "system"}:
+                    continue
                 agent_id = self._extract_agent_id(text, msg.get("user"))
                 out.append(
                     {
