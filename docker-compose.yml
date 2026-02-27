@@ -3,15 +3,15 @@ services:
     image: postgres:16
     container_name: rag-postgres
     environment:
-      POSTGRES_DB: rag
-      POSTGRES_USER: rag_user
-      POSTGRES_PASSWORD: rag_password
+      POSTGRES_DB: ${POSTGRES_DB:-rag}
+      POSTGRES_USER: ${POSTGRES_USER:-rag_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-rag_password}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U rag_user -d rag"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-rag_user} -d ${POSTGRES_DB:-rag}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -46,11 +46,11 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://rag_user:rag_password@postgres:5432/rag
-      QDRANT_URL: http://qdrant:6333
-      REDIS_URL: redis://redis:6379/0
-      USE_POSTGRES_CONVERSATIONS: "true"
-      USE_ALEMBIC_MIGRATIONS: "true"
+      DATABASE_URL: postgresql://${POSTGRES_USER:-rag_user}:${POSTGRES_PASSWORD:-rag_password}@postgres:5432/${POSTGRES_DB:-rag}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      USE_POSTGRES_CONVERSATIONS: ${USE_POSTGRES_CONVERSATIONS:-true}
+      USE_ALEMBIC_MIGRATIONS: ${USE_ALEMBIC_MIGRATIONS:-true}
     depends_on:
       postgres:
         condition: service_healthy
