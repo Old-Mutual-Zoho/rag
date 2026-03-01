@@ -37,6 +37,7 @@ from src.rag.generate import MiaGenerator
 from src.rag.query import retrieve_context
 from src.utils.product_matcher import ProductMatcher
 from src.utils.rag_config_loader import load_rag_config
+from src.api.endpoints.mock_underwriting import router as mock_router
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -1544,3 +1545,6 @@ async def startup_event():
 async def shutdown_event():
     """Cleanup on shutdown"""
     logger.info("Shutting down Old Mutual Chatbot API...")
+
+
+app.include_router(mock_router)
