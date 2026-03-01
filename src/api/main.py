@@ -843,8 +843,10 @@ def _build_flow_schema(flow_id: str) -> Dict:
                         {"name": "email", "label": "Email", "type": "email", "required": True},
                     ],
                 }
-            elif name in ("premium_and_download", "choose_plan_and_pay"):
+            elif name == "premium_and_download":
                 entry["form"] = {"type": "premium_summary", "actions": ["view_all_plans", "proceed_to_pay"]}
+            elif name == "choose_plan_and_pay":
+                entry["form"] = {"type": "proceed_to_payment", "actions": ["confirm"]}
             steps.append(entry)
         return {"flow_id": "serenicare", "steps": steps}
 

@@ -97,10 +97,13 @@ class GuidedMode:
                 },
             )
 
+        # Refresh session so returned flow/step reflect any transitions done above.
+        updated_session = self.state_manager.get_session(session_id) or session
+
         return {
             "mode": "guided",
-            "flow": session["current_flow"],
-            "step": result.get("next_step", session["current_step"]),
+            "flow": updated_session.get("current_flow", session["current_flow"]),
+            "step": result.get("next_step", updated_session.get("current_step", session["current_step"])),
             "response": result.get("response"),
             "complete": result.get("complete", False),
             "data": result.get("data"),

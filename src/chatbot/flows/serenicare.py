@@ -354,11 +354,11 @@ class SerenicareFlow:
                 plan = next((p for p in SERENICARE_PLANS if p["id"] == plan_id), None)
                 if plan:
                     data["plan_option"] = plan
-                else:
-                    raise_if_errors({"plan_option": "Please select a valid plan"})
                     app_id = data.get("application_id")
                     if self.controller and app_id:
                         self.controller.update_plan_selection(app_id, payload)
+                else:
+                    raise_if_errors({"plan_option": "Please select a valid plan"})
         return {
             "response": {
                 "type": "options",
