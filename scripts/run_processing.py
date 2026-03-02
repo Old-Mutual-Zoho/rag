@@ -11,6 +11,7 @@ Outputs:
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import sys
 from pathlib import Path
@@ -38,10 +39,47 @@ def setup_logging(verbose: bool = False, log_file: Optional[Path] = None) -> Non
 
 
 def find_latest_website_scrape(raw_dir: Path) -> Path:
-    candidates = sorted(raw_dir.glob("website_scrape_*.json"))
+    candidates = sorted(raw_dir.glob("website_scrape_*.json"), reverse=True)
     if not candidates:
         raise FileNotFoundError(f"No website scrape files found in {raw_dir}")
-    return candidates[-1]
+
+    def _is_viable_scrape(path: Path) -> bool:
+        # Very small files are typically blocked/empty scrape outputs.
+        if path.stat().st_size < 2048:
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception:
+            return False
+
+        if isinstance(data, list):
+            return len(data) > 0
+        if not isinstance(data, dict):
+            return False
+
+        products = data.get("products") or {}
+        if isinstance(products, dict):
+            for subcats in products.values():
+                if isinstance(subcats, dict):
+                    for items in subcats.values():
+                        if isinstance(items, list) and items:
+                            return True
+        for key in ("articles", "faqs", "info_pages"):
+            v = data.get(key)
+            if isinstance(v, list) and v:
+                return True
+            if isinstance(v, dict) and any(isinstance(items, list) and items for items in v.values()):
+                return True
+        return False
+
+    for candidate in candidates:
+        if _is_viable_scrape(candidate):
+            return candidate
+    raise FileNotFoundError(
+        f"No viable website scrape files found in {raw_dir}. "
+        "Latest files may be empty/blocked (e.g., HTTP 403)."
+    )
 
 
 def main() -> int:

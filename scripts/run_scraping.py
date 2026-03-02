@@ -205,6 +205,10 @@ Examples:
         logger.info("SCRAPING COMPLETE")
         logger.info("=" * 80)
         logger.info(f"Total pages scraped: {len(flat_items)}")
+
+        if len(flat_items) == 0:
+            logger.error("No pages were scraped successfully. This usually means upstream blocking (e.g., HTTP 403).")
+            return 2
         
         # Breakdown by type
         type_counts = {}
@@ -258,7 +262,7 @@ Examples:
         logger.info("\n" + "=" * 80)
         logger.info("Scraping completed successfully!")
         logger.info("=" * 80)
-        
+
         return 0
         
     except KeyboardInterrupt:
