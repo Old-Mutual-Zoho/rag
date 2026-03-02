@@ -28,5 +28,7 @@ jobs:
             cd /opt/rag
             git fetch origin main
             git checkout main
+            # Ensure local tracked edits on the droplet do not block pull-based deploys.
+            git restore --source=HEAD --staged --worktree .
             git pull --ff-only origin main
             ./scripts/deploy.sh
