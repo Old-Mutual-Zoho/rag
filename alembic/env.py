@@ -24,7 +24,9 @@ target_metadata = Base.metadata
 
 database_url = os.getenv("DATABASE_URL", "").strip()
 if database_url:
-    config.set_main_option("sqlalchemy.url", _normalize_connection_string(database_url))
+    # Alembic uses ConfigParser interpolation; escape '%' in URL-encoded values.
+    safe_url = _normalize_connection_string(database_url).replace("%", "%%")
+    config.set_main_option("sqlalchemy.url", safe_url)
 
 
 def run_migrations_offline() -> None:
