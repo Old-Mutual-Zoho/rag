@@ -21,6 +21,7 @@ from src.chatbot.validation import (
     validate_nin_ug,
     validate_phone_ug,
 )
+from src.integrations.policy.premium import premium_service
 
 
 def parse_date_flexible(date_str: Any) -> Optional[date]:
@@ -806,59 +807,10 @@ class PersonalAccidentFlow:
         - Age-based modifiers: lower risk for 25-45, higher for <25 or >60 (if DOB provided).
         - Risky activities: add loading when any risky activities are selected.
         """
-        # Defensive: parse DOB from provided data when available
-
-        base_rate = Decimal("0.0015")  # 0.15% of sum assured per year
-        annual = Decimal(sum_assured) * base_rate
-
-        breakdown: Dict[str, Any] = {"base_annual": float(annual)}
-
-        # Optional age modifier if DOB is available
-        dob: Optional[date] = None
-        try:
-            dob_str = ""
-            if isinstance(data, dict):
-                dob_str = str(data.get("dob") or "")
-                if not dob_str:
-                    q = data.get("quick_quote") or {}
-                    dob_str = str((q or {}).get("dob") or "")
-            if dob_str:
-                dob = date.fromisoformat(dob_str)
-        except Exception:
-            dob = None
-
-        if dob:
-            today = date.today()
-            age = today.year - dob.year - (1 if (today.month, today.day) < (dob.month, dob.day) else 0)
-
-            if age < 25:
-                modifier = Decimal("1.25")  # 25% loading for younger applicants
-                loading = annual * (modifier - 1)
-                annual += loading
-                breakdown["age_loading"] = float(loading)
-            elif age > 60:
-                modifier = Decimal("1.20")  # 20% loading for older applicants
-                loading = annual * (modifier - 1)
-                annual += loading
-                breakdown["age_loading"] = float(loading)
-
-        # Risky activities loading (simple 10% if any risky activities selected)
-        risky_selected = []
-        if isinstance(data, dict):
-            risky = data.get("risky_activities") or {}
-            risky_selected = risky.get("selected") or []
-        if isinstance(risky_selected, list) and len(risky_selected) > 0:
-            loading = annual * Decimal("0.10")
-            annual += loading
-            breakdown["risky_activities_loading"] = float(loading)
-
-        monthly = annual / 12
-
-        return {
-            "annual": float(annual.quantize(Decimal("0.01"))),
-            "monthly": float(monthly.quantize(Decimal("0.01"))),
-            "breakdown": breakdown,
-        }
+        return premium_service.calculate_sync(
+            "personal_accident",
+            {"data": data, "sum_assured": sum_assured},
+        )
 
 
 """
