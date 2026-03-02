@@ -26,6 +26,7 @@ from src.chatbot.validation import (
     validate_in,
     validate_phone_ug,
 )
+from src.integrations.policy.premium import premium_service
 
 # Travel insurance product cards (from product selection screen)
 TRAVEL_INSURANCE_PRODUCTS: List[Dict[str, str]] = [
@@ -1109,66 +1110,7 @@ class TravelInsuranceFlow:
         - breakdown includes "days"
         - for 2026-03-03 to 2026-03-08 => days == 6
         """
-        trip = data.get("travel_party_and_trip") or {}
-        days = self._calculate_trip_days(trip.get("departure_date"), trip.get("return_date"))
-
-        travellers_18_69 = int(trip.get("num_travellers_18_69") or 0)
-        travellers_0_17 = int(trip.get("num_travellers_0_17") or 0)
-        travellers_70_75 = int(trip.get("num_travellers_70_75") or 0)
-        travellers_76_80 = int(trip.get("num_travellers_76_80") or 0)
-        travellers_81_85 = int(trip.get("num_travellers_81_85") or 0)
-
-        product = data.get("selected_product") or {}
-        product_id = product.get("id", "worldwide_essential")
-
-        product_multiplier = {
-            "worldwide_essential": Decimal("1.0"),
-            "worldwide_elite": Decimal("1.5"),
-            "schengen_essential": Decimal("1.2"),
-            "schengen_elite": Decimal("1.7"),
-            "student_cover": Decimal("0.9"),
-            "africa_asia": Decimal("0.8"),
-            "inbound_karibu": Decimal("0.6"),
-        }.get(product_id, Decimal("1.0"))
-
-        # Base daily rates (USD)
-        rate_18_69 = Decimal("2.0")
-        rate_0_17 = Decimal("1.0")
-        rate_70_75 = Decimal("3.0")
-        rate_76_80 = Decimal("4.0")
-        rate_81_85 = Decimal("5.0")
-
-        base_usd = Decimal(days) * (
-            Decimal(travellers_18_69) * rate_18_69
-            + Decimal(travellers_0_17) * rate_0_17
-            + Decimal(travellers_70_75) * rate_70_75
-            + Decimal(travellers_76_80) * rate_76_80
-            + Decimal(travellers_81_85) * rate_81_85
-        )
-
-        total_usd = (base_usd * product_multiplier).quantize(Decimal("0.01"))
-
-        usd_to_ugx = Decimal("3900")
-        total_ugx = (total_usd * usd_to_ugx).quantize(Decimal("1."))
-
-        return {
-            "total_usd": float(total_usd),
-            "total_ugx": float(total_ugx),
-            "breakdown": {
-                "days": days,
-                "product_id": product_id,
-                "product_multiplier": float(product_multiplier),
-                "travellers": {
-                    "18_69": travellers_18_69,
-                    "0_17": travellers_0_17,
-                    "70_75": travellers_70_75,
-                    "76_80": travellers_76_80,
-                    "81_85": travellers_81_85,
-                },
-                "base_usd": float(base_usd),
-                "usd_to_ugx": float(usd_to_ugx),
-            },
-        }
+        return premium_service.calculate_sync("travel_insurance", {"data": data})
 
     @staticmethod
     def _calculate_trip_days(departure_date: Any, return_date: Any) -> int:
