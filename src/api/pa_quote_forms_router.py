@@ -374,7 +374,14 @@ async def motor_submit(draft_id: str, body: Dict[str, Any] | None = None, db=Dep
             metadata={"draft_id": draft_id},
         )
         if workflow_result.get("declined"):
-            raise HTTPException(status_code=422, detail={"error": "underwriting_declined", "decision_status": workflow_result.get("decision_status"), "underwriting": workflow_result.get("underwriting")})
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "underwriting_declined",
+                    "decision_status": workflow_result.get("decision_status"),
+                    "underwriting": workflow_result.get("underwriting"),
+                },
+            )
         quotation = workflow_result.get("quotation") or {}
         payable_amount = float(quotation.get("payable_amount") or 0.0)
         quote_status = "payment_initiated" if workflow_result.get("payment") else "quoted"
@@ -530,7 +537,14 @@ async def serenicare_submit(draft_id: str, body: Dict[str, Any] | None = None, d
             metadata={"draft_id": draft_id},
         )
         if workflow_result.get("declined"):
-            raise HTTPException(status_code=422, detail={"error": "underwriting_declined", "decision_status": workflow_result.get("decision_status"), "underwriting": workflow_result.get("underwriting")})
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "underwriting_declined",
+                    "decision_status": workflow_result.get("decision_status"),
+                    "underwriting": workflow_result.get("underwriting"),
+                },
+            )
         quotation = workflow_result.get("quotation") or {}
         payable_amount = float(quotation.get("payable_amount") or 0.0)
         quote_status = "payment_initiated" if workflow_result.get("payment") else "quoted"
@@ -686,7 +700,14 @@ async def travel_submit(draft_id: str, body: Dict[str, Any] | None = None, db=De
             metadata={"draft_id": draft_id},
         )
         if workflow_result.get("declined"):
-            raise HTTPException(status_code=422, detail={"error": "underwriting_declined", "decision_status": workflow_result.get("decision_status"), "underwriting": workflow_result.get("underwriting")})
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "error": "underwriting_declined",
+                    "decision_status": workflow_result.get("decision_status"),
+                    "underwriting": workflow_result.get("underwriting"),
+                },
+            )
         quotation = workflow_result.get("quotation") or {}
         payable_amount = float(quotation.get("payable_amount") or 0.0)
         quote_status = "payment_initiated" if workflow_result.get("payment") else "quoted"
