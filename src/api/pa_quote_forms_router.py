@@ -205,22 +205,24 @@ def _load_product_draft(redis_cache, product: str, draft_id: str) -> Dict[str, A
 
 def _start_product_draft(*, body: Dict[str, Any], db, redis_cache, product_id: str) -> Dict[str, Any]:
     user_id = str(body.get("user_id") or "").strip()
+    client_session_id = str(body.get("session_id") or "").strip()
     if not user_id:
         raise FormValidationError(field_errors={"user_id": "user_id is required"})
     user = db.get_or_create_user(phone_number=user_id)
     internal_user_id = str(user.id)
     draft_id = str(uuid4())
-    session_id = _redis_product_session_key(product_id, draft_id)
+    redis_key = _redis_product_session_key(product_id, draft_id)
     draft = {
         "draft_id": draft_id,
+        "session_id": client_session_id or None,
         "product": product_id,
         "user_id": internal_user_id,
         "data": {},
         "current_step": 0,
         "updated_at": _now_iso(),
     }
-    redis_cache.set_session(session_id, draft, ttl=86400)
-    return {"draft_id": draft_id}
+    redis_cache.set_session(redis_key, draft, ttl=86400)
+    return {"draft_id": draft_id, "session_id": client_session_id or None}
 
 
 def _validate_bool_like(payload: Dict[str, Any], field: str, errors: Dict[str, str]) -> str:
@@ -338,6 +340,7 @@ def pa_start(
     """
     try:
         user_id = str(body.get("user_id") or "").strip()
+        client_session_id = str(body.get("session_id") or "").strip()
         if not user_id:
             raise FormValidationError(field_errors={"user_id": "user_id is required"})
 
@@ -346,9 +349,10 @@ def pa_start(
         internal_user_id = str(user.id)
 
         draft_id = str(uuid4())
-        session_id = _redis_session_key(draft_id)
+        redis_key = _redis_session_key(draft_id)
         draft = {
             "draft_id": draft_id,
+            "session_id": client_session_id or None,
             "product": "personal_accident",
             "user_id": internal_user_id,
             "data": {},
@@ -356,8 +360,8 @@ def pa_start(
             "updated_at": _now_iso(),
         }
         # TTL: 24h (86400 seconds)
-        redis_cache.set_session(session_id, draft, ttl=86400)
-        return {"draft_id": draft_id}
+        redis_cache.set_session(redis_key, draft, ttl=86400)
+        return {"draft_id": draft_id, "session_id": client_session_id or None}
     except FormValidationError as e:
         raise _validation_http_exception(e)
 
@@ -481,7 +485,7 @@ async def motor_submit(draft_id: str, body: Dict[str, Any] | None = None, db=Dep
             currency=str(body.get("currency") or "UGX"),
             payee_name=str(body.get("payee_name") or "Old Mutual"),
             payment_before_policy=bool(body.get("payment_before_policy", False)),
-            metadata={"draft_id": draft_id},
+            metadata={"draft_id": draft_id, "session_id": draft.get("session_id")},
         )
         if workflow_result.get("declined"):
             raise HTTPException(
@@ -508,6 +512,7 @@ async def motor_submit(draft_id: str, body: Dict[str, Any] | None = None, db=Dep
         redis_cache.delete_session(_redis_product_session_key("motor_private", draft_id))
         return {
             "quote_id": str(quote.id),
+            "session_id": draft.get("session_id"),
             "status": quote_status,
             "workflow": workflow_result.get("workflow"),
             "underwriting": workflow_result.get("underwriting"),
@@ -655,7 +660,7 @@ async def serenicare_submit(draft_id: str, body: Dict[str, Any] | None = None, d
             currency=str(body.get("currency") or "UGX"),
             payee_name=str(body.get("payee_name") or "Old Mutual"),
             payment_before_policy=bool(body.get("payment_before_policy", False)),
-            metadata={"draft_id": draft_id},
+            metadata={"draft_id": draft_id, "session_id": draft.get("session_id")},
         )
         if workflow_result.get("declined"):
             raise HTTPException(
@@ -682,6 +687,7 @@ async def serenicare_submit(draft_id: str, body: Dict[str, Any] | None = None, d
         redis_cache.delete_session(_redis_product_session_key("serenicare", draft_id))
         return {
             "quote_id": str(quote.id),
+            "session_id": draft.get("session_id"),
             "status": quote_status,
             "workflow": workflow_result.get("workflow"),
             "underwriting": workflow_result.get("underwriting"),
@@ -820,7 +826,7 @@ async def travel_submit(draft_id: str, body: Dict[str, Any] | None = None, db=De
             currency=str(body.get("currency") or "UGX"),
             payee_name=str(body.get("payee_name") or "Old Mutual"),
             payment_before_policy=bool(body.get("payment_before_policy", False)),
-            metadata={"draft_id": draft_id},
+            metadata={"draft_id": draft_id, "session_id": draft.get("session_id")},
         )
         if workflow_result.get("declined"):
             raise HTTPException(
@@ -847,6 +853,7 @@ async def travel_submit(draft_id: str, body: Dict[str, Any] | None = None, db=De
         redis_cache.delete_session(_redis_product_session_key("travel_insurance", draft_id))
         return {
             "quote_id": str(quote.id),
+            "session_id": draft.get("session_id"),
             "status": quote_status,
             "workflow": workflow_result.get("workflow"),
             "underwriting": workflow_result.get("underwriting"),
@@ -962,7 +969,7 @@ async def pa_submit(
             currency=str(body.get("currency") or "UGX"),
             payee_name=str(body.get("payee_name") or "Old Mutual"),
             payment_before_policy=bool(body.get("payment_before_policy", False)),
-            metadata={"draft_id": draft_id},
+            metadata={"draft_id": draft_id, "session_id": draft.get("session_id")},
         )
 
         if workflow_result.get("declined"):
@@ -999,6 +1006,7 @@ async def pa_submit(
 
         return {
             "quote_id": str(quote.id),
+            "session_id": draft.get("session_id"),
             "status": quote_status,
             "workflow": workflow_result.get("workflow"),
             "underwriting": workflow_result.get("underwriting"),
