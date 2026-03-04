@@ -29,6 +29,7 @@ from src.chatbot.validation import (
     validate_date_iso,
     add_error,
     validate_in,
+    validate_nin_ug,
 )
 
 
@@ -158,6 +159,32 @@ def _validate_step_3(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
     raise_if_errors(errors)
     return {"coverLimitAmountUgx": cover}
+
+
+def _validate_step_4(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Step 4 (Proceed to Buy details): NIN, occupation, gender, optional TIN.
+    """
+    errors: Dict[str, str] = {}
+    nin = validate_nin_ug(payload.get("national_id_number", ""), errors, field="national_id_number")
+    occupation = require_str(payload, "occupation", errors, label="Occupation")
+    gender = validate_in(
+        str(payload.get("gender", "")),
+        {"Male", "Female", "Other"},
+        errors,
+        field="gender",
+        required=True,
+    )
+    tin = optional_str(payload, "tax_identification_number")
+    if tin and len(tin) > 30:
+        add_error(errors, "tax_identification_number", "TIN must be at most 30 characters")
+    raise_if_errors(errors)
+    return {
+        "national_id_number": nin,
+        "occupation": occupation,
+        "gender": gender,
+        "tax_identification_number": tin,
+    }
 
 
 def _load_draft(redis_cache, draft_id: str) -> Dict[str, Any]:
@@ -840,14 +867,14 @@ def pa_update_step(
     redis_cache=Depends(get_redis),
 ):
     """
-    Update a specific step (0..3). Validates fields for that step only,
+    Update a specific step (0..4). Validates fields for that step only,
     merges into draft["data"], bumps current_step and timestamp, and stores in Redis.
     Returns the updated draft object.
     """
     try:
-        if step_index < 0 or step_index > 3:
+        if step_index < 0 or step_index > 4:
             raise FormValidationError(
-                field_errors={"step_index": "Invalid step index. Expected a value from 0 to 3."}
+                field_errors={"step_index": "Invalid step index. Expected a value from 0 to 4."}
             )
 
         draft = _load_draft(redis_cache, draft_id)
@@ -859,8 +886,10 @@ def pa_update_step(
             step_data = _validate_step_1(body)
         elif step_index == 2:
             step_data = _validate_step_2(body)
-        else:
+        elif step_index == 3:
             step_data = _validate_step_3(body)
+        else:
+            step_data = _validate_step_4(body)
 
         # Merge and update metadata
         data = dict(draft.get("data") or {})
@@ -905,6 +934,7 @@ async def pa_submit(
         _validate_step_1(data)
         _validate_step_2(data)
         final = _validate_step_3(data)
+        _validate_step_4(data)
 
         # Build underwriting payload aligned to the Personal Accident mock/service contract
         sum_assured_str = final["coverLimitAmountUgx"]
@@ -922,6 +952,10 @@ async def pa_submit(
                 "coverLimitAmountUgx": sum_assured_str,
                 "riskyActivities": data.get("riskyActivities", []),
                 "policyStartDate": data.get("policyStartDate"),
+                "national_id_number": data.get("national_id_number"),
+                "occupation": data.get("occupation"),
+                "gender": data.get("gender"),
+                "tax_identification_number": data.get("tax_identification_number"),
             },
             provider=body.get("provider"),
             phone_number=body.get("phone_number") or data.get("mobile"),

@@ -349,6 +349,11 @@ class PersonalAccidentFlow:
                 "collected_data": data,
             }
 
+        # If user clicks proceed, immediately return the next backend-defined form
+        # (personal details) instead of requiring an extra request/round-trip.
+        if any(token in action for token in ("proceed_to_details", "proceed_to_buy", "proceed_to_pay", "proceed", "continue")):
+            return await self._step_personal_details({}, data, user_id)
+
         # Get cover limit from collected data
         cover_limit = data.get("quick_quote", {}).get("cover_limit_ugx") or 5000000
         cover_limit_str = str(cover_limit)
