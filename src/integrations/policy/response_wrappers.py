@@ -55,6 +55,18 @@ def normalize_underwriting_response(raw: Dict[str, Any]) -> UnderwritingResponse
     premium = _coerce_positive_amount(_first_non_empty(raw, "premium", "amount", "premium_amount"), "underwriting premium")
     currency = str(_first_non_empty(raw, "currency", default="UGX")).upper()
     decision_status = str(_first_non_empty(raw, "decision_status", "decisionStatus", "status", "decision")).upper()
+    decision_aliases = {
+        "APPROVED": "APPROVED",
+        "APPROVE": "APPROVED",
+        "PENDING_REVIEW": "PENDING",
+        "PENDING REVIEW": "PENDING",
+        "REFERRED": "REFERRED",
+        "DECLINED": "DECLINED",
+        "REJECTED": "REJECTED",
+        "QUOTED": "QUOTED",
+        "PENDING": "PENDING",
+    }
+    decision_status = decision_aliases.get(decision_status, decision_status)
     requirements = raw.get("requirements") if isinstance(raw.get("requirements"), list) else []
 
     if decision_status not in {"APPROVED", "REFERRED", "PENDING", "DECLINED", "REJECTED", "QUOTED"}:

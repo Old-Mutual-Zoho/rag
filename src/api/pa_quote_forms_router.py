@@ -39,6 +39,11 @@ def _redis_session_key(draft_id: str) -> str:
     return f"pa_quote:{draft_id}"
 
 
+def _redis_product_session_key(product: str, draft_id: str) -> str:
+    safe = str(product or "").strip().lower().replace("-", "_")
+    return f"{safe}_quote:{draft_id}"
+
+
 def _now_iso() -> str:
     return datetime.utcnow().isoformat()
 
@@ -152,6 +157,63 @@ def _load_draft(redis_cache, draft_id: str) -> Dict[str, Any]:
     return obj
 
 
+def _load_product_draft(redis_cache, product: str, draft_id: str) -> Dict[str, Any]:
+    session_id = _redis_product_session_key(product, draft_id)
+    obj = redis_cache.get_session(session_id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    return obj
+
+
+def _start_product_draft(*, body: Dict[str, Any], db, redis_cache, product_id: str) -> Dict[str, Any]:
+    user_id = str(body.get("user_id") or "").strip()
+    if not user_id:
+        raise FormValidationError(field_errors={"user_id": "user_id is required"})
+    user = db.get_or_create_user(phone_number=user_id)
+    internal_user_id = str(user.id)
+    draft_id = str(uuid4())
+    session_id = _redis_product_session_key(product_id, draft_id)
+    draft = {
+        "draft_id": draft_id,
+        "product": product_id,
+        "user_id": internal_user_id,
+        "data": {},
+        "current_step": 0,
+        "updated_at": _now_iso(),
+    }
+    redis_cache.set_session(session_id, draft, ttl=86400)
+    return {"draft_id": draft_id}
+
+
+def _validate_bool_like(payload: Dict[str, Any], field: str, errors: Dict[str, str]) -> str:
+    raw = str(payload.get(field) or "").strip().lower()
+    if raw not in {"yes", "no", "true", "false"}:
+        add_error(errors, field, f"{field} must be yes/no")
+    return raw
+
+
+def _to_int(v: Any, field: str, errors: Dict[str, str], *, min_value: int | None = None) -> int:
+    try:
+        val = int(str(v))
+    except Exception:
+        add_error(errors, field, f"{field} must be a whole number")
+        return 0
+    if min_value is not None and val < min_value:
+        add_error(errors, field, f"{field} must be at least {min_value}")
+    return val
+
+
+def _to_float(v: Any, field: str, errors: Dict[str, str], *, min_value: float | None = None) -> float:
+    try:
+        val = float(str(v))
+    except Exception:
+        add_error(errors, field, f"{field} must be a number")
+        return 0.0
+    if min_value is not None and val < min_value:
+        add_error(errors, field, f"{field} must be at least {min_value}")
+    return val
+
+
 @api.post("/quote-forms/personal-accident/start")
 def pa_start(
     body: Dict[str, Any],
@@ -190,6 +252,467 @@ def pa_start(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"error": "validation_error", "message": e.message, "field_errors": e.field_errors},
         )
+
+
+# ============================================================================
+# Motor Private quote forms (PA-style endpoints)
+# ============================================================================
+def _validate_motor_step_0(payload: Dict[str, Any]) -> Dict[str, Any]:
+    errors: Dict[str, str] = {}
+    first_name = require_str(payload, "firstName", errors, label="First Name")
+    surname = require_str(payload, "surname", errors, label="Surname")
+    mobile = validate_phone_ug(payload.get("mobile", ""), errors, field="mobile")
+    email = validate_email(payload.get("email", ""), errors, field="email")
+    raise_if_errors(errors)
+    return {"firstName": first_name, "surname": surname, "mobile": mobile, "email": email}
+
+
+def _validate_motor_step_1(payload: Dict[str, Any]) -> Dict[str, Any]:
+    errors: Dict[str, str] = {}
+    cover_type = validate_in(str(payload.get("coverType", "")), {"comprehensive", "third_party"}, errors, "coverType", required=True)
+    vehicle_make = require_str(payload, "vehicleMake", errors, label="Vehicle Make")
+    year = _to_int(payload.get("yearOfManufacture"), "yearOfManufacture", errors, min_value=1980)
+    if year > date.today().year + 1:
+        add_error(errors, "yearOfManufacture", "yearOfManufacture is too far in the future")
+    raise_if_errors(errors)
+    return {"coverType": cover_type, "vehicleMake": vehicle_make, "yearOfManufacture": year}
+
+
+def _validate_motor_step_2(payload: Dict[str, Any]) -> Dict[str, Any]:
+    errors: Dict[str, str] = {}
+    start_date = validate_date_iso(payload.get("coverStartDate", ""), errors, "coverStartDate", required=True)
+    d = None
+    if start_date:
+        try:
+            d = date.fromisoformat(start_date)
+        except Exception:
+            pass
+    if d and d < date.today():
+        add_error(errors, "coverStartDate", "coverStartDate cannot be in the past")
+    is_rare = _validate_bool_like(payload, "isRareModel", errors)
+    valuation = _validate_bool_like(payload, "hasUndergoneValuation", errors)
+    vehicle_value = _to_float(payload.get("vehicleValueUgx"), "vehicleValueUgx", errors, min_value=1.0)
+    raise_if_errors(errors)
+    return {
+        "coverStartDate": start_date,
+        "isRareModel": is_rare,
+        "hasUndergoneValuation": valuation,
+        "vehicleValueUgx": vehicle_value,
+    }
+
+
+def _validate_motor_step_3(payload: Dict[str, Any]) -> Dict[str, Any]:
+    errors: Dict[str, str] = {}
+    alarm = _validate_bool_like(payload, "carAlarmInstalled", errors)
+    tracking = _validate_bool_like(payload, "trackingSystemInstalled", errors)
+    region = validate_in(
+        str(payload.get("carUsageRegion", "")),
+        {"Within Uganda", "Within East Africa", "Outside East Africa"},
+        errors,
+        "carUsageRegion",
+        required=True,
+    )
+    raise_if_errors(errors)
+    return {"carAlarmInstalled": alarm, "trackingSystemInstalled": tracking, "carUsageRegion": region}
+
+
+@api.post("/quote-forms/motor-private/start")
+def motor_start(body: Dict[str, Any], db=Depends(get_db), redis_cache=Depends(get_redis)):
+    try:
+        return _start_product_draft(body=body, db=db, redis_cache=redis_cache, product_id="motor_private")
+    except FormValidationError as e:
+        raise HTTPException(status_code=422, detail={"error": "validation_error", "message": e.message, "field_errors": e.field_errors})
+
+
+@api.put("/quote-forms/motor-private/{draft_id}/steps/{step_index}")
+def motor_update_step(draft_id: str, step_index: int, body: Dict[str, Any], redis_cache=Depends(get_redis)):
+    try:
+        if step_index < 0 or step_index > 3:
+            raise HTTPException(status_code=400, detail="Invalid step index")
+        draft = _load_product_draft(redis_cache, "motor_private", draft_id)
+        step_data = [_validate_motor_step_0, _validate_motor_step_1, _validate_motor_step_2, _validate_motor_step_3][step_index](body)
+        data = dict(draft.get("data") or {})
+        data.update(step_data)
+        draft["data"] = data
+        draft["current_step"] = step_index
+        draft["updated_at"] = _now_iso()
+        redis_cache.set_session(_redis_product_session_key("motor_private", draft_id), draft, ttl=86400)
+        return draft
+    except FormValidationError as e:
+        raise HTTPException(status_code=422, detail={"error": "validation_error", "message": e.message, "field_errors": e.field_errors})
+
+
+@api.get("/quote-forms/motor-private/{draft_id}")
+def motor_get_draft(draft_id: str, redis_cache=Depends(get_redis)):
+    return _load_product_draft(redis_cache, "motor_private", draft_id)
+
+
+@api.post("/quote-forms/motor-private/{draft_id}/submit")
+async def motor_submit(draft_id: str, body: Dict[str, Any] | None = None, db=Depends(get_db), redis_cache=Depends(get_redis)):
+    try:
+        body = body or {}
+        draft = _load_product_draft(redis_cache, "motor_private", draft_id)
+        data = dict(draft.get("data") or {})
+        _validate_motor_step_0(data)
+        _validate_motor_step_1(data)
+        s2 = _validate_motor_step_2(data)
+        _validate_motor_step_3(data)
+
+        workflow_result = await run_underwrite_quote_policy_payment(
+            user_id=draft["user_id"],
+            product_id="motor_private",
+            underwriting_data={
+                "policyStartDate": s2.get("coverStartDate"),
+                "vehicleValueUgx": s2.get("vehicleValueUgx"),
+                "coverType": data.get("coverType"),
+            },
+            provider=body.get("provider"),
+            phone_number=body.get("phone_number") or data.get("mobile"),
+            currency=str(body.get("currency") or "UGX"),
+            payee_name=str(body.get("payee_name") or "Old Mutual"),
+            payment_before_policy=bool(body.get("payment_before_policy", False)),
+            metadata={"draft_id": draft_id},
+        )
+        if workflow_result.get("declined"):
+            raise HTTPException(status_code=422, detail={"error": "underwriting_declined", "decision_status": workflow_result.get("decision_status"), "underwriting": workflow_result.get("underwriting")})
+        quotation = workflow_result.get("quotation") or {}
+        payable_amount = float(quotation.get("payable_amount") or 0.0)
+        quote_status = "payment_initiated" if workflow_result.get("payment") else "quoted"
+        quote = db.create_quote(
+            user_id=draft["user_id"],
+            product_id="motor_private",
+            product_name="Motor Private",
+            premium_amount=payable_amount,
+            sum_assured=float(data.get("vehicleValueUgx") or 0.0),
+            underwriting_data={"form_data": data, "workflow": workflow_result},
+            pricing_breakdown=quotation.get("raw"),
+            status=quote_status,
+        )
+        redis_cache.delete_session(_redis_product_session_key("motor_private", draft_id))
+        return {
+            "quote_id": str(quote.id),
+            "status": quote_status,
+            "workflow": workflow_result.get("workflow"),
+            "underwriting": workflow_result.get("underwriting"),
+            "quotation": workflow_result.get("quotation"),
+            "policy": workflow_result.get("policy"),
+            "payment": workflow_result.get("payment"),
+            "next_action": workflow_result.get("next_action"),
+        }
+    except FormValidationError as e:
+        raise HTTPException(status_code=422, detail={"error": "validation_error", "message": e.message, "field_errors": e.field_errors})
+
+
+# ============================================================================
+# Serenicare quote forms (PA-style endpoints)
+# ============================================================================
+def _validate_sereni_step_0(payload: Dict[str, Any]) -> Dict[str, Any]:
+    errors: Dict[str, str] = {}
+    first_name = require_str(payload, "firstName", errors, label="First Name")
+    last_name = require_str(payload, "lastName", errors, label="Last Name")
+    mobile = validate_phone_ug(payload.get("mobile", ""), errors, field="mobile")
+    email = validate_email(payload.get("email", ""), errors, field="email")
+    raise_if_errors(errors)
+    return {"firstName": first_name, "lastName": last_name, "mobile": mobile, "email": email}
+
+
+def _validate_sereni_step_1(payload: Dict[str, Any]) -> Dict[str, Any]:
+    errors: Dict[str, str] = {}
+    plan_type = validate_in(
+        str(payload.get("planType", "")),
+        {"essential", "classic", "comprehensive", "premium"},
+        errors,
+        "planType",
+        required=True,
+    )
+    serious = validate_in(str(payload.get("seriousConditions", "")), {"yes", "no"}, errors, "seriousConditions", required=True)
+    optional_benefits = payload.get("optionalBenefits", [])
+    if isinstance(optional_benefits, str):
+        optional_benefits = [v.strip() for v in optional_benefits.split(",") if v.strip()]
+    if not isinstance(optional_benefits, list):
+        add_error(errors, "optionalBenefits", "optionalBenefits must be a list")
+        optional_benefits = []
+    allowed = {"outpatient", "maternity", "dental", "optical", "covid"}
+    for opt in optional_benefits:
+        if str(opt) not in allowed:
+            add_error(errors, "optionalBenefits", "optionalBenefits contains invalid value(s)")
+            break
+    raise_if_errors(errors)
+    return {"planType": plan_type, "seriousConditions": serious, "optionalBenefits": optional_benefits}
+
+
+def _validate_sereni_step_2(payload: Dict[str, Any]) -> Dict[str, Any]:
+    errors: Dict[str, str] = {}
+    members = payload.get("mainMembers", [])
+    if not isinstance(members, list) or not members:
+        add_error(errors, "mainMembers", "At least one main member is required")
+    else:
+        for idx, m in enumerate(members):
+            if not isinstance(m, dict):
+                add_error(errors, "mainMembers", "Each main member must be an object")
+                break
+            validate_date_iso(m.get("dob", ""), errors, f"mainMembers[{idx}].dob", required=True, not_future=True)
+    raise_if_errors(errors)
+    return {"mainMembers": members}
+
+
+def _validate_sereni_step_3(payload: Dict[str, Any]) -> Dict[str, Any]:
+    errors: Dict[str, str] = {}
+    dob = validate_date_iso(payload.get("date_of_birth", ""), errors, "date_of_birth", required=True, not_future=True)
+    include_spouse = bool(payload.get("include_spouse", False))
+    include_children = bool(payload.get("include_children", False))
+    add_member = bool(payload.get("add_another_main_member", False))
+    raise_if_errors(errors)
+    return {
+        "date_of_birth": dob,
+        "include_spouse": include_spouse,
+        "include_children": include_children,
+        "add_another_main_member": add_member,
+    }
+
+
+@api.post("/quote-forms/serenicare/start")
+def serenicare_start(body: Dict[str, Any], db=Depends(get_db), redis_cache=Depends(get_redis)):
+    try:
+        return _start_product_draft(body=body, db=db, redis_cache=redis_cache, product_id="serenicare")
+    except FormValidationError as e:
+        raise HTTPException(status_code=422, detail={"error": "validation_error", "message": e.message, "field_errors": e.field_errors})
+
+
+@api.put("/quote-forms/serenicare/{draft_id}/steps/{step_index}")
+def serenicare_update_step(draft_id: str, step_index: int, body: Dict[str, Any], redis_cache=Depends(get_redis)):
+    try:
+        if step_index < 0 or step_index > 3:
+            raise HTTPException(status_code=400, detail="Invalid step index")
+        draft = _load_product_draft(redis_cache, "serenicare", draft_id)
+        step_data = [_validate_sereni_step_0, _validate_sereni_step_1, _validate_sereni_step_2, _validate_sereni_step_3][step_index](body)
+        data = dict(draft.get("data") or {})
+        data.update(step_data)
+        draft["data"] = data
+        draft["current_step"] = step_index
+        draft["updated_at"] = _now_iso()
+        redis_cache.set_session(_redis_product_session_key("serenicare", draft_id), draft, ttl=86400)
+        return draft
+    except FormValidationError as e:
+        raise HTTPException(status_code=422, detail={"error": "validation_error", "message": e.message, "field_errors": e.field_errors})
+
+
+@api.get("/quote-forms/serenicare/{draft_id}")
+def serenicare_get_draft(draft_id: str, redis_cache=Depends(get_redis)):
+    return _load_product_draft(redis_cache, "serenicare", draft_id)
+
+
+@api.post("/quote-forms/serenicare/{draft_id}/submit")
+async def serenicare_submit(draft_id: str, body: Dict[str, Any] | None = None, db=Depends(get_db), redis_cache=Depends(get_redis)):
+    try:
+        body = body or {}
+        draft = _load_product_draft(redis_cache, "serenicare", draft_id)
+        data = dict(draft.get("data") or {})
+        _validate_sereni_step_0(data)
+        s1 = _validate_sereni_step_1(data)
+        _validate_sereni_step_2(data)
+        s3 = _validate_sereni_step_3(data)
+        workflow_result = await run_underwrite_quote_policy_payment(
+            user_id=draft["user_id"],
+            product_id="serenicare",
+            underwriting_data={
+                "plan_option": {"id": s1.get("planType")},
+                "optional_benefits": s1.get("optionalBenefits", []),
+                "medical_conditions": s1.get("seriousConditions") == "yes",
+                "dob": s3.get("date_of_birth"),
+                "policyStartDate": date.today().isoformat(),
+            },
+            provider=body.get("provider"),
+            phone_number=body.get("phone_number") or data.get("mobile"),
+            currency=str(body.get("currency") or "UGX"),
+            payee_name=str(body.get("payee_name") or "Old Mutual"),
+            payment_before_policy=bool(body.get("payment_before_policy", False)),
+            metadata={"draft_id": draft_id},
+        )
+        if workflow_result.get("declined"):
+            raise HTTPException(status_code=422, detail={"error": "underwriting_declined", "decision_status": workflow_result.get("decision_status"), "underwriting": workflow_result.get("underwriting")})
+        quotation = workflow_result.get("quotation") or {}
+        payable_amount = float(quotation.get("payable_amount") or 0.0)
+        quote_status = "payment_initiated" if workflow_result.get("payment") else "quoted"
+        quote = db.create_quote(
+            user_id=draft["user_id"],
+            product_id="serenicare",
+            product_name="Serenicare",
+            premium_amount=payable_amount,
+            sum_assured=None,
+            underwriting_data={"form_data": data, "workflow": workflow_result},
+            pricing_breakdown=quotation.get("raw"),
+            status=quote_status,
+        )
+        redis_cache.delete_session(_redis_product_session_key("serenicare", draft_id))
+        return {
+            "quote_id": str(quote.id),
+            "status": quote_status,
+            "workflow": workflow_result.get("workflow"),
+            "underwriting": workflow_result.get("underwriting"),
+            "quotation": workflow_result.get("quotation"),
+            "policy": workflow_result.get("policy"),
+            "payment": workflow_result.get("payment"),
+            "next_action": workflow_result.get("next_action"),
+        }
+    except FormValidationError as e:
+        raise HTTPException(status_code=422, detail={"error": "validation_error", "message": e.message, "field_errors": e.field_errors})
+
+
+# ============================================================================
+# Travel Insurance quote forms (PA-style endpoints)
+# ============================================================================
+def _validate_travel_step_0(payload: Dict[str, Any]) -> Dict[str, Any]:
+    errors: Dict[str, str] = {}
+    first_name = require_str(payload, "first_name", errors, label="First Name")
+    surname = require_str(payload, "surname", errors, label="Surname")
+    phone = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
+    email = validate_email(payload.get("email", ""), errors, field="email")
+    raise_if_errors(errors)
+    return {"first_name": first_name, "surname": surname, "phone_number": phone, "email": email}
+
+
+def _validate_travel_step_1(payload: Dict[str, Any]) -> Dict[str, Any]:
+    errors: Dict[str, str] = {}
+    product_id = require_str(payload, "product_id", errors, label="Product")
+    travel_party = validate_in(str(payload.get("travel_party", "")), {"myself_only", "myself_and_someone_else", "group"}, errors, "travel_party", required=True)
+    n1 = _to_int(payload.get("num_travellers_18_69"), "num_travellers_18_69", errors, min_value=1)
+    n2 = _to_int(payload.get("num_travellers_0_17", 0), "num_travellers_0_17", errors, min_value=0)
+    departure_country = require_str(payload, "departure_country", errors, label="Departure Country")
+    destination_country = require_str(payload, "destination_country", errors, label="Destination Country")
+    departure_date = validate_date_iso(payload.get("departure_date", ""), errors, "departure_date", required=True)
+    return_date = validate_date_iso(payload.get("return_date", ""), errors, "return_date", required=True)
+    try:
+        if departure_date and return_date and date.fromisoformat(return_date) < date.fromisoformat(departure_date):
+            add_error(errors, "return_date", "Return date cannot be before departure date")
+    except Exception:
+        pass
+    raise_if_errors(errors)
+    return {
+        "product_id": product_id,
+        "travel_party": travel_party,
+        "num_travellers_18_69": n1,
+        "num_travellers_0_17": n2,
+        "departure_country": departure_country,
+        "destination_country": destination_country,
+        "departure_date": departure_date,
+        "return_date": return_date,
+    }
+
+
+def _validate_travel_step_2(payload: Dict[str, Any]) -> Dict[str, Any]:
+    errors: Dict[str, str] = {}
+    agreed = payload.get("terms_and_conditions_agreed") in (True, "yes", "true", "1")
+    if not agreed:
+        add_error(errors, "terms_and_conditions_agreed", "You must agree to the Terms and Conditions")
+    raise_if_errors(errors)
+    return {"terms_and_conditions_agreed": agreed}
+
+
+def _validate_travel_step_3(payload: Dict[str, Any]) -> Dict[str, Any]:
+    errors: Dict[str, str] = {}
+    ec_surname = require_str(payload, "ec_surname", errors, label="Emergency contact surname")
+    ec_relationship = require_str(payload, "ec_relationship", errors, label="Emergency contact relationship")
+    ec_phone = validate_phone_ug(payload.get("ec_phone_number", ""), errors, field="ec_phone_number")
+    ec_email = validate_email(payload.get("ec_email", ""), errors, field="ec_email")
+    passport = require_str(payload, "passport_file_ref", errors, label="Passport file")
+    raise_if_errors(errors)
+    return {
+        "ec_surname": ec_surname,
+        "ec_relationship": ec_relationship,
+        "ec_phone_number": ec_phone,
+        "ec_email": ec_email,
+        "passport_file_ref": passport,
+    }
+
+
+@api.post("/quote-forms/travel-insurance/start")
+def travel_start(body: Dict[str, Any], db=Depends(get_db), redis_cache=Depends(get_redis)):
+    try:
+        return _start_product_draft(body=body, db=db, redis_cache=redis_cache, product_id="travel_insurance")
+    except FormValidationError as e:
+        raise HTTPException(status_code=422, detail={"error": "validation_error", "message": e.message, "field_errors": e.field_errors})
+
+
+@api.put("/quote-forms/travel-insurance/{draft_id}/steps/{step_index}")
+def travel_update_step(draft_id: str, step_index: int, body: Dict[str, Any], redis_cache=Depends(get_redis)):
+    try:
+        if step_index < 0 or step_index > 3:
+            raise HTTPException(status_code=400, detail="Invalid step index")
+        draft = _load_product_draft(redis_cache, "travel_insurance", draft_id)
+        step_data = [_validate_travel_step_0, _validate_travel_step_1, _validate_travel_step_2, _validate_travel_step_3][step_index](body)
+        data = dict(draft.get("data") or {})
+        data.update(step_data)
+        draft["data"] = data
+        draft["current_step"] = step_index
+        draft["updated_at"] = _now_iso()
+        redis_cache.set_session(_redis_product_session_key("travel_insurance", draft_id), draft, ttl=86400)
+        return draft
+    except FormValidationError as e:
+        raise HTTPException(status_code=422, detail={"error": "validation_error", "message": e.message, "field_errors": e.field_errors})
+
+
+@api.get("/quote-forms/travel-insurance/{draft_id}")
+def travel_get_draft(draft_id: str, redis_cache=Depends(get_redis)):
+    return _load_product_draft(redis_cache, "travel_insurance", draft_id)
+
+
+@api.post("/quote-forms/travel-insurance/{draft_id}/submit")
+async def travel_submit(draft_id: str, body: Dict[str, Any] | None = None, db=Depends(get_db), redis_cache=Depends(get_redis)):
+    try:
+        body = body or {}
+        draft = _load_product_draft(redis_cache, "travel_insurance", draft_id)
+        data = dict(draft.get("data") or {})
+        _validate_travel_step_0(data)
+        s1 = _validate_travel_step_1(data)
+        _validate_travel_step_2(data)
+        _validate_travel_step_3(data)
+        travellers_total = int(s1.get("num_travellers_18_69", 0)) + int(s1.get("num_travellers_0_17", 0))
+        workflow_result = await run_underwrite_quote_policy_payment(
+            user_id=draft["user_id"],
+            product_id="travel_insurance",
+            underwriting_data={
+                "product_id": s1.get("product_id"),
+                "departure_date": s1.get("departure_date"),
+                "return_date": s1.get("return_date"),
+                "travellers_total": travellers_total,
+                "policyStartDate": s1.get("departure_date"),
+            },
+            provider=body.get("provider"),
+            phone_number=body.get("phone_number") or data.get("phone_number"),
+            currency=str(body.get("currency") or "UGX"),
+            payee_name=str(body.get("payee_name") or "Old Mutual"),
+            payment_before_policy=bool(body.get("payment_before_policy", False)),
+            metadata={"draft_id": draft_id},
+        )
+        if workflow_result.get("declined"):
+            raise HTTPException(status_code=422, detail={"error": "underwriting_declined", "decision_status": workflow_result.get("decision_status"), "underwriting": workflow_result.get("underwriting")})
+        quotation = workflow_result.get("quotation") or {}
+        payable_amount = float(quotation.get("payable_amount") or 0.0)
+        quote_status = "payment_initiated" if workflow_result.get("payment") else "quoted"
+        quote = db.create_quote(
+            user_id=draft["user_id"],
+            product_id="travel_insurance",
+            product_name="Travel Insurance",
+            premium_amount=payable_amount,
+            sum_assured=None,
+            underwriting_data={"form_data": data, "workflow": workflow_result},
+            pricing_breakdown=quotation.get("raw"),
+            status=quote_status,
+        )
+        redis_cache.delete_session(_redis_product_session_key("travel_insurance", draft_id))
+        return {
+            "quote_id": str(quote.id),
+            "status": quote_status,
+            "workflow": workflow_result.get("workflow"),
+            "underwriting": workflow_result.get("underwriting"),
+            "quotation": workflow_result.get("quotation"),
+            "policy": workflow_result.get("policy"),
+            "payment": workflow_result.get("payment"),
+            "next_action": workflow_result.get("next_action"),
+        }
+    except FormValidationError as e:
+        raise HTTPException(status_code=422, detail={"error": "validation_error", "message": e.message, "field_errors": e.field_errors})
 
 
 @api.put("/quote-forms/personal-accident/{draft_id}/steps/{step_index}")
