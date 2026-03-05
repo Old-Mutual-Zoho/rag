@@ -21,6 +21,7 @@ from src.chatbot.validation import (
     validate_phone_ug,
 )
 from src.integrations.policy.premium import premium_service
+from src.integrations.underwriting import run_quote_preview
 
 
 def parse_date_flexible(date_str: Any) -> Optional[date]:
@@ -366,7 +367,28 @@ class PersonalAccidentFlow:
 
         premium = self._calculate_pa_premium({"quick_quote": quick_quote}, cover_limit)
 
-        return {
+        # Attempt a non-destructive quotation preview from the underwriting pipeline.
+        # This is used to display mocked quotation information to the user while
+        # the flow continues to collect remaining details before payment.
+        quotation_preview = None
+        try:
+            preview_result = await run_quote_preview(
+                user_id=user_id,
+                product_id="personal_accident",
+                underwriting_data={
+                    "dob": quick_quote.get("dob"),
+                    "policyStartDate": quick_quote.get("policy_start_date"),
+                    "coverLimitAmountUgx": str(cover_limit),
+                },
+                currency="UGX",
+            )
+            quotation_preview = preview_result.get("quotation") if preview_result else None
+            if quotation_preview:
+                data["preview_quotation"] = quotation_preview
+        except Exception:
+            quotation_preview = None
+
+        resp = {
             "response": {
                 "type": "premium_summary",
                 "message": " Your Personal Accident Premium",
@@ -386,6 +408,12 @@ class PersonalAccidentFlow:
             "next_step": 2,
             "collected_data": data,
         }
+
+        if quotation_preview:
+            resp["response"]["quotation_preview"] = quotation_preview
+            resp["response"]["payable_amount"] = quotation_preview.get("payable_amount")
+
+        return resp
 
     async def _step_personal_details(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         """
