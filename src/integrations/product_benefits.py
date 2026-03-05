@@ -1,0 +1,146 @@
+"""
+Product benefits and configuration loader.
+
+Loads product benefits, exclusions, premium factors from JSON configuration files
+instead of hardcoding them in flow logic.
+
+Why:
+- Allows non-developers to update benefits via JSON
+- Centralizes product configuration
+- Makes it easy to version and track changes
+- Supports dynamic loading and caching
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+
+class ProductBenefitsLoader:
+    """Loads and caches product configuration from JSON files."""
+
+    def __init__(self, config_dir: Optional[Path] = None):
+        if config_dir is None:
+            # Default to project_root/product_json
+            # __file__ = .../rag/src/integrations/product_benefits.py
+            # parents[2] = .../rag (project root)
+            self.config_dir = Path(__file__).resolve().parents[2] / "product_json"
+        else:
+            self.config_dir = Path(config_dir)
+        
+        self._cache: Dict[str, Dict[str, Any]] = {}
+    
+    def get_product_config(self, product_id: str) -> Dict[str, Any]:
+        """Load product configuration from JSON file."""
+        if product_id in self._cache:
+            return self._cache[product_id]
+        
+        config_file = self.config_dir / f"{product_id}_config.json"
+        
+        if not config_file.exists():
+            logger.warning(f"Product config file not found: {config_file}")
+            return self._get_default_config(product_id)
+        
+        try:
+            with open(config_file, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+            self._cache[product_id] = config
+            logger.info(f"Loaded product config for {product_id}")
+            return config
+        except Exception as e:
+            logger.error(f"Failed to load product config for {product_id}: {e}")
+            return self._get_default_config(product_id)
+    
+    def get_benefits_for_tier(self, product_id: str, sum_assured: float) -> List[Dict[str, Any]]:
+        """Get benefits for a specific coverage tier based on sum assured."""
+        config = self.get_product_config(product_id)
+        tiers = config.get("coverage_tiers", [])
+        
+        # Find the tier matching the sum assured
+        for tier in tiers:
+            if tier.get("sum_assured") == sum_assured:
+                return tier.get("benefits", [])
+        
+        # If exact match not found, find closest tier
+        if tiers:
+            # Sort by sum_assured and find closest
+            sorted_tiers = sorted(tiers, key=lambda t: abs(t.get("sum_assured", 0) - sum_assured))
+            return sorted_tiers[0].get("benefits", [])
+        
+        return []
+    
+    def get_exclusions(self, product_id: str) -> List[str]:
+        """Get standard exclusions for a product."""
+        config = self.get_product_config(product_id)
+        return config.get("standard_exclusions", [])
+    
+    def get_important_notes(self, product_id: str) -> List[str]:
+        """Get important notes/assumptions for quotes."""
+        config = self.get_product_config(product_id)
+        return config.get("important_notes", [])
+    
+    def get_premium_factors(self, product_id: str, sum_assured: float) -> Dict[str, Any]:
+        """Get premium calculation factors for a specific tier."""
+        config = self.get_product_config(product_id)
+        tiers = config.get("coverage_tiers", [])
+        
+        for tier in tiers:
+            if tier.get("sum_assured") == sum_assured:
+                return tier.get("premium_factors", {})
+        
+        # Return first tier's factors as default
+        if tiers:
+            return tiers[0].get("premium_factors", {})
+        
+        return {}
+    
+    def format_benefit_description(self, benefit: Dict[str, Any]) -> str:
+        """Format a benefit into a human-readable string."""
+        desc = benefit.get("description", "")
+        amount = benefit.get("amount")
+        unit = benefit.get("unit", "")
+        max_days = benefit.get("max_days")
+        
+        if amount:
+            formatted_amount = f"UGX {amount:,.0f}"
+            if unit:
+                if max_days:
+                    return f"{desc}: {formatted_amount} {unit} (max {max_days} days)"
+                else:
+                    return f"{desc}: {formatted_amount} {unit}"
+            else:
+                return f"{desc}: {formatted_amount}"
+        else:
+            return desc
+    
+    def get_formatted_benefits(self, product_id: str, sum_assured: float) -> List[str]:
+        """Get formatted benefit descriptions as strings (backward compatible)."""
+        benefits = self.get_benefits_for_tier(product_id, sum_assured)
+        return [self.format_benefit_description(b) for b in benefits]
+    
+    def clear_cache(self):
+        """Clear the configuration cache (useful for reloading)."""
+        self._cache.clear()
+        logger.info("Product configuration cache cleared")
+    
+    def _get_default_config(self, product_id: str) -> Dict[str, Any]:
+        """Return minimal default config when file is missing."""
+        return {
+            "product_id": product_id,
+            "name": product_id.replace("_", " ").title(),
+            "coverage_tiers": [],
+            "standard_exclusions": [],
+            "important_notes": []
+        }
+
+
+# Global instance
+product_benefits_loader = ProductBenefitsLoader()
+
+
+__all__ = ["ProductBenefitsLoader", "product_benefits_loader"]
