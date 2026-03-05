@@ -2,6 +2,7 @@ from src.api.escalation import router as escalation_router
 from src.api.endpoints.payments import payments_api
 from src.api.endpoints.policies import policies_api
 from src.api.endpoints.premiums import premiums_api
+from src.api.endpoints.quotes_underwriting import api as quotes_underwriting_api
 from src.api.endpoints.agent_webhook import router as agent_webhook_router, slack_service
 import src.api.escalation as escalation_module
 from fastapi import APIRouter
@@ -99,6 +100,9 @@ app.include_router(policies_api, prefix="/api/v1/policies", tags=["Policies"])
 
 # Register premiums API router
 app.include_router(premiums_api, prefix="/api/v1/premiums", tags=["Premiums"])
+
+# Register quotes and underwriting API router  
+app.include_router(quotes_underwriting_api, prefix="/api")
 
 # Register agent webhook router
 app.include_router(agent_webhook_router, prefix="/api/v1")
@@ -649,10 +653,17 @@ def _build_flow_schema(flow_id: str) -> Dict:
     """Build step and form schema for a guided flow. Raises KeyError for unknown flow_id."""
     if flow_id == "personal_accident":
         from src.chatbot.flows.personal_accident import (
-            PA_BENEFITS_BY_LEVEL,
             PERSONAL_ACCIDENT_RISKY_ACTIVITIES,
             PersonalAccidentFlow,
         )
+        from src.integrations.product_benefits import product_benefits_loader
+
+        # Load benefits dynamically from product config
+        benefits_config = {}
+        for tier_amount in ["5000000", "10000000", "20000000"]:
+            benefits_config[tier_amount] = product_benefits_loader.get_formatted_benefits(
+                "personal_accident", float(tier_amount)
+            )
 
         steps = []
         for i, name in enumerate(PersonalAccidentFlow.STEPS):
@@ -680,7 +691,7 @@ def _build_flow_schema(flow_id: str) -> Dict:
                 entry["form"] = {
                     "type": "premium_summary",
                     "message": "Your Personal Accident Premium",
-                    "benefits": PA_BENEFITS_BY_LEVEL,
+                    "benefits": benefits_config,
                     "actions": ["edit", "proceed_to_details"],
                 }
             elif name == "personal_details":
