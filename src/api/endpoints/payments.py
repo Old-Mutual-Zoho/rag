@@ -1,14 +1,12 @@
 import os
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
-from src.integrations.clients.mocks.mtn import MTNMockClient
-from src.integrations.clients.mocks.airtel import AirtelMockClient
 from src.integrations.clients.mocks.underwriting import mock_underwriting_client
-from src.integrations.clients.real_http.payments import RealPaymentsClient
 from src.integrations.contracts.payments import PaymentRequest, PaymentResponse
+from src.integrations.payments.payment_service import PaymentService
 from src.integrations.policy.policy_service import PolicyService
 from src.integrations.policy.quotation_service import QuotationService
 from src.integrations.policy.response_wrappers import (
@@ -21,6 +19,7 @@ from src.integrations.policy.underwriting_service import UnderwritingService
 
 api = APIRouter()
 payments_api = api
+payment_service = PaymentService()
 
 
 class PaymentInitiateRequest(BaseModel):
@@ -30,6 +29,7 @@ class PaymentInitiateRequest(BaseModel):
     amount: float
     currency: str = "UGX"
     payee_name: str = "Old Mutual"
+    metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
 class UnderwriteQuotePayRequest(BaseModel):
@@ -47,6 +47,10 @@ class UnderwriteQuotePayRequest(BaseModel):
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
+class TriggerCallbackRequest(BaseModel):
+    outcome: Optional[str] = Field(default=None, description="Optional: success or failed")
+
+
 def _should_use_real_integrations() -> bool:
     mode = os.getenv("INTEGRATIONS_MODE", "").strip().lower()
     if mode in {"real", "live"}:
@@ -61,37 +65,69 @@ def _should_use_real_integrations() -> bool:
     )
 
 
-def _select_payment_client(provider: str):
-    provider_key = (provider or "").strip().lower()
-    if provider_key not in {"mtn", "airtel"}:
-        raise HTTPException(status_code=400, detail="Invalid provider. Expected 'mtn' or 'airtel'.")
-
-    if _should_use_real_integrations() and os.getenv("PARTNER_PAYMENT_API_URL"):
-        return RealPaymentsClient(provider=provider_key)
-
-    return MTNMockClient() if provider_key == "mtn" else AirtelMockClient()
-
-
 def _normalize_status(value: Optional[str]) -> str:
     raw = (value or "").strip().upper()
     return raw or "UNKNOWN"
 
 
 @api.post("/initiate", tags=["Payments"])
-@api.post("/payments/initiate", tags=["Payments"])
 async def initiate_payment(request: PaymentInitiateRequest):
-    client = _select_payment_client(request.provider)
+    metadata = {
+        "payee_name": request.payee_name,
+        **(request.metadata or {}),
+    }
+
     payment_request = PaymentRequest(
         reference=request.quote_id,
         phone_number=request.phone_number,
         amount=request.amount,
         currency=request.currency,
         description=f"Payment to {request.payee_name} for quote {request.quote_id}",
-        metadata={"payee_name": request.payee_name},
+        metadata=metadata,
     )
 
-    payment_response: PaymentResponse = await _initiate_payment(client, payment_request)
+    try:
+        payment_response = await payment_service.initiate_payment(provider=request.provider, request=payment_request)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     return _payment_response_to_dict(payment_response)
+
+
+@api.get("/status/{quote_id}", tags=["Payments"])
+async def get_payment_status(quote_id: str):
+    try:
+        return _payment_response_to_dict(payment_service.get_payment_status(quote_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Payment transaction not found") from exc
+
+
+@api.get("/transactions/{quote_id}", tags=["Payments"])
+async def get_payment_transaction(quote_id: str):
+    try:
+        return payment_service.get_payment_transaction(quote_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Payment transaction not found") from exc
+
+
+@api.post("/webhook/callback", tags=["Payments"])
+async def payment_webhook_callback(payload: Dict[str, Any], x_signature: str = Header(..., alias="X-Signature")):
+    try:
+        return payment_service.apply_webhook_callback(payload, x_signature)
+    except PermissionError as exc:
+        raise HTTPException(status_code=401, detail="Invalid webhook signature") from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Payment transaction not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@api.post("/mock/trigger-callback/{quote_id}", tags=["Payments"])
+async def trigger_mock_callback(quote_id: str, request: TriggerCallbackRequest):
+    try:
+        return payment_service.trigger_mock_callback(quote_id, outcome=request.outcome)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Payment transaction not found") from exc
 
 
 @api.post("/underwrite-quote-pay", tags=["Payments"])
@@ -128,6 +164,8 @@ async def underwrite_quote_pay(request: UnderwriteQuotePayRequest):
                 "payload": e.payload,
             },
         ) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 async def run_underwrite_quote_policy_payment(
@@ -210,7 +248,6 @@ async def run_underwrite_quote_policy_payment(
     )
 
     async def _do_payment() -> Dict[str, Any]:
-        client = _select_payment_client(str(provider))
         req = PaymentRequest(
             reference=quotation.quote_id,
             phone_number=str(phone_number),
@@ -225,7 +262,7 @@ async def run_underwrite_quote_policy_payment(
                 **metadata,
             },
         )
-        payment_response = await _initiate_payment(client, req)
+        payment_response = await payment_service.initiate_payment(provider=str(provider), request=req)
         return _payment_response_to_dict(payment_response)
 
     async def _do_policy_issue(current_payment_status: str) -> Dict[str, Any]:
@@ -288,13 +325,6 @@ async def run_underwrite_quote_policy_payment(
         result["next_action"] = "collect_payment_details_and_initiate_payment"
 
     return result
-
-
-async def _initiate_payment(client, payment_request: PaymentRequest) -> PaymentResponse:
-    payment = client.initiate_payment(payment_request)
-    if hasattr(payment, "__await__"):
-        return await payment
-    return payment
 
 
 def _payment_response_to_dict(payment_response: PaymentResponse) -> Dict[str, Any]:
