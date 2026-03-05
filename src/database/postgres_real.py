@@ -19,6 +19,8 @@ from src.database.models import (
     Conversation,
     EscalationSession,
     Message,
+    PaymentAuditEvent,
+    PaymentTransaction,
     Quote,
     User,
     PersonalAccidentApplication,
@@ -165,6 +167,103 @@ class PostgresDB:
         with self._session() as s:
             stmt = select(Quote).where(Quote.id == str(quote_id))
             return s.execute(stmt).scalar_one_or_none()
+
+    # ------------------------------------------------------------------ #
+    # Payments
+    # ------------------------------------------------------------------ #
+    def create_payment_transaction(
+        self,
+        *,
+        reference: str,
+        provider: str,
+        provider_reference: str,
+        phone_number: str,
+        amount: Any,
+        currency: str,
+        status: str = "PENDING",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> PaymentTransaction:
+        with self._session() as s:
+            txn = PaymentTransaction(
+                reference=str(reference),
+                provider=str(provider),
+                provider_reference=str(provider_reference),
+                phone_number=str(phone_number),
+                amount=float(amount or 0.0),
+                currency=str(currency),
+                status=str(status),
+                transaction_metadata=metadata or {},
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            s.add(txn)
+            s.flush()
+            s.refresh(txn)
+            return txn
+
+    def get_payment_transaction_by_reference(self, reference: str) -> Optional[PaymentTransaction]:
+        with self._session() as s:
+            stmt = select(PaymentTransaction).where(PaymentTransaction.reference == str(reference))
+            return s.execute(stmt).scalar_one_or_none()
+
+    def update_payment_transaction_status(
+        self,
+        reference: str,
+        status: str,
+        *,
+        provider_reference: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Optional[PaymentTransaction]:
+        with self._session() as s:
+            stmt = select(PaymentTransaction).where(PaymentTransaction.reference == str(reference))
+            txn = s.execute(stmt).scalar_one_or_none()
+            if not txn:
+                return None
+
+            txn.status = str(status)
+            if provider_reference:
+                txn.provider_reference = str(provider_reference)
+            if metadata:
+                txn.transaction_metadata = {**(txn.transaction_metadata or {}), **metadata}
+            txn.updated_at = datetime.utcnow()
+
+            s.add(txn)
+            s.flush()
+            s.refresh(txn)
+            return txn
+
+    def add_payment_audit_event(
+        self,
+        *,
+        payment_reference: str,
+        event_type: str,
+        payload: Optional[Dict[str, Any]] = None,
+        status_from: Optional[str] = None,
+        status_to: Optional[str] = None,
+    ) -> PaymentAuditEvent:
+        with self._session() as s:
+            event = PaymentAuditEvent(
+                id=str(uuid4()),
+                payment_reference=str(payment_reference),
+                event_type=str(event_type),
+                status_from=status_from,
+                status_to=status_to,
+                payload=payload or {},
+                created_at=datetime.utcnow(),
+            )
+            s.add(event)
+            s.flush()
+            s.refresh(event)
+            return event
+
+    def list_payment_audit_events(self, payment_reference: str) -> List[PaymentAuditEvent]:
+        with self._session() as s:
+            stmt = (
+                select(PaymentAuditEvent)
+                .where(PaymentAuditEvent.payment_reference == str(payment_reference))
+                .order_by(PaymentAuditEvent.created_at.asc())
+            )
+            return list(s.execute(stmt).scalars().all())
 
     # ------------------------------------------------------------------ #
     # Personal Accident applications
