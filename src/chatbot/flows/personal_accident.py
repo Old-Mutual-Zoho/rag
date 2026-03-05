@@ -22,6 +22,7 @@ from src.chatbot.validation import (
 )
 from src.integrations.policy.premium import premium_service
 from src.integrations.underwriting import run_quote_preview
+from src.integrations.product_benefits import product_benefits_loader
 
 
 def parse_date_flexible(date_str: Any) -> Optional[date]:
@@ -88,7 +89,8 @@ def parse_date_flexible(date_str: Any) -> Optional[date]:
     return None
 
 
-# Benefits per coverage level (from config as requested)
+# DEPRECATED: Benefits are now loaded from product_json/personal_accident_config.json
+# This constant is kept for backward compatibility only
 PA_BENEFITS_BY_LEVEL = {
     "5000000": [
         "Accidental death benefit: UGX 5,000,000",
@@ -359,8 +361,8 @@ class PersonalAccidentFlow:
         cover_limit = data.get("quick_quote", {}).get("cover_limit_ugx") or 5000000
         cover_limit_str = str(cover_limit)
 
-        # Get benefits for this level
-        benefits = PA_BENEFITS_BY_LEVEL.get(cover_limit_str, PA_BENEFITS_BY_LEVEL["5000000"])
+        # Get benefits for this level from product configuration
+        benefits = product_benefits_loader.get_formatted_benefits("personal_accident", float(cover_limit))
 
         # Re-calculate premium (or fetch from data if already calculated)
         quick_quote = data.get("quick_quote", {})
