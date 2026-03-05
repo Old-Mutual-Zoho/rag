@@ -26,6 +26,8 @@ from src.chatbot.validation import (
     validate_positive_number_field,
 )
 from src.integrations.policy.premium import premium_service
+from src.integrations.product_benefits import product_benefits_loader
+from src.integrations.underwriting import run_quote_preview
 
 MOTOR_PRIVATE_EXCESS_PARAMETERS = [
     {
@@ -57,30 +59,8 @@ MOTOR_PRIVATE_ADDITIONAL_BENEFITS = [
     }
 ]
 
-MOTOR_PRIVATE_BENEFITS = [
-    {"label": "Limit of liability: third party bodily injury per occurrence", "value": "UGX 20M"},
-    {"label": "Limit of liability: third party bodily injury in aggregate", "value": "UGX 50M"},
-    {"label": "Limit of liability: third party property damage per occurrence", "value": "UGX 20M"},
-    {"label": "Limit of liability: third party property damage in aggregate", "value": "UGX 50M"},
-    {"label": "Section 2: passenger liability per occurrence", "value": "UGX 20M"},
-    {"label": "Section 2: passenger liability in aggregate per policy period", "value": "UGX 50M"},
-    {"label": "Windscreen extension", "value": "UGX 2M"},
-    {"label": "Authorized repair limit", "value": "UGX 2M"},
-    {"label": "Towing/wreckage removal charges", "value": "UGX 2M"},
-    {"label": "Locks and keys extension", "value": "UGX 2M"},
-    {"label": "Fire extinguishing charges", "value": "UGX 2M"},
-    {"label": "Protection and removal", "value": "UGX 2M"},
-    {"label": "Claims preparation costs", "value": "UGX 1M"},
-    {"label": "Personal effects excluding cash", "value": "UGX 500,000/="},
-    {"label": "Personal accident to driver", "value": "UGX 1M"},
-    {"label": "Unobtainable parts extension", "value": "UGX 2M"},
-    {"label": "Limit of liability; section 111 – medical expenses", "value": "UGX 2M"},
-    {"label": "Free Cleaning and Fumigation of Vehicles after Repair following an accident", "value": "UGX 1M"},
-    {"label": "Modification of motor vehicle in case of Permanent Incapacitation of the driver following an accident", "value": "N/A"},
-    {"label": "Rim Damage following a motor accident", "value": "UGX 1M"},
-    {"label": "Alternative accommodation", "value": "N/A"},
-    {"label": "Hire of replacement vehicle", "value": "N/A"},
-]
+# MOTOR_PRIVATE_BENEFITS has been moved to product_json/motor_private_config.json
+# and is now loaded dynamically via product_benefits_loader
 
 
 class MotorPrivateFlow:
@@ -594,11 +574,15 @@ class MotorPrivateFlow:
         except Exception as e:
             return {"error": f"Exception in benefits_summary: {str(e)}", "step": "benefits_summary"}
 
+        # Load dynamic benefits from configuration
+        # For motor_private, comprehensive coverage has standard benefits regardless of vehicle value
+        benefits = product_benefits_loader.get_benefits_as_dict("motor_private", 0)
+
         return {
             "response": {
                 "type": "benefits_summary",
                 "message": "Benefits",
-                "benefits": MOTOR_PRIVATE_BENEFITS,
+                "benefits": benefits,
             },
             "next_step": 5,          # ✅ Correct
             "collected_data": data,
@@ -624,20 +608,66 @@ class MotorPrivateFlow:
         except Exception as e:
             return {"error": f"Exception in premium_calculation: {str(e)}", "step": "premium_calculation"}
 
+        # Calculate premium
         premium = self._calculate_motor_private_premium(data)
-        return {
+        
+        # Load dynamic benefits from configuration
+        # For motor_private, comprehensive coverage has standard benefits regardless of vehicle value
+        benefits = product_benefits_loader.get_benefits_as_dict("motor_private", 0)
+        
+        # Attempt a non-destructive quotation preview from the underwriting pipeline
+        # This is used to display mocked quotation information to the user while
+        # the flow continues to collect remaining details before payment
+        quotation_preview = None
+        try:
+            motor_data = data.get("motor_frontend", {})
+            vehicle_value = motor_data.get("vehicle_value", 0)
+            cover_start = motor_data.get("cover_start_date", "")
+            cover_type = motor_data.get("cover_type", "comprehensive")
+            
+            preview_result = await run_quote_preview(
+                user_id=user_id,
+                product_id="motor_private",
+                underwriting_data={
+                    "vehicleValue": str(vehicle_value),
+                    "vehicleMake": motor_data.get("vehicle_make", ""),
+                    "yearOfManufacture": str(motor_data.get("year_of_manufacture", "")),
+                    "coverType": cover_type,
+                    "rareModel": motor_data.get("rare_model", "no"),
+                    "policyStartDate": cover_start,
+                },
+                currency="UGX",
+            )
+            quotation_preview = preview_result.get("quotation") if preview_result else None
+            if quotation_preview:
+                data["preview_quotation"] = quotation_preview
+        except Exception:
+            quotation_preview = None
+        
+        resp = {
             "response": {
                 "type": "premium_summary",
-                "message": "Premium Calculation",
+                "message": "Motor Private Premium",
+                "product_name": "Motor Private",
                 "quote_summary": premium,
+                "benefits": benefits,
+                "download_option": True,
+                "download_label": "Download Quote (PDF)",
                 "actions": [
-                    {"type": "edit", "label": "Edit"},
+                    {"type": "edit", "label": "Edit Quote"},
                     {"type": "download_quote", "label": "Download Quote"},
+                    {"type": "proceed_to_pay", "label": "Proceed to Pay"},
                 ],
             },
-            "next_step": 6,          # ✅ Correct
+            "next_step": 6,
             "collected_data": data,
         }
+        
+        if quotation_preview:
+            resp["response"]["quotation_preview"] = quotation_preview
+            resp["response"]["payable_amount"] = quotation_preview.get("payable_amount")
+        
+        return resp
 
     # ------------------------------------------------------------------
     # Step 6 – Premium & Download

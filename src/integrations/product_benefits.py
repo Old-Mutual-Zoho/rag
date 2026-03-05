@@ -123,6 +123,38 @@ class ProductBenefitsLoader:
         benefits = self.get_benefits_for_tier(product_id, sum_assured)
         return [self.format_benefit_description(b) for b in benefits]
     
+    def get_benefits_as_dict(self, product_id: str, sum_assured: float) -> List[Dict[str, str]]:
+        """Get benefits formatted as label/value dictionaries."""
+        benefits = self.get_benefits_for_tier(product_id, sum_assured)
+        result = []
+        for benefit in benefits:
+            desc = benefit.get("description", "")
+            amount = benefit.get("amount")
+            unit = benefit.get("unit", "")
+            max_days = benefit.get("max_days")
+            
+            # Format the value part
+            if amount:
+                if amount is None or (isinstance(amount, str) and amount.lower() == "null"):
+                    value = unit if unit else "N/A"
+                else:
+                    formatted_amount = f"UGX {amount:,.0f}"
+                    if unit:
+                        if max_days:
+                            value = f"{formatted_amount} {unit} (max {max_days} days)"
+                        else:
+                            value = f"{formatted_amount} {unit}"
+                    else:
+                        value = formatted_amount
+            else:
+                value = unit if unit else "N/A"
+            
+            result.append({
+                "label": desc,
+                "value": value
+            })
+        return result
+    
     def clear_cache(self):
         """Clear the configuration cache (useful for reloading)."""
         self._cache.clear()
