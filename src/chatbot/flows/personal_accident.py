@@ -359,7 +359,6 @@ class PersonalAccidentFlow:
 
         # Get cover limit from collected data
         cover_limit = data.get("quick_quote", {}).get("cover_limit_ugx") or 5000000
-        cover_limit_str = str(cover_limit)
 
         # Get benefits for this level from product configuration
         benefits = product_benefits_loader.get_formatted_benefits("personal_accident", float(cover_limit))
