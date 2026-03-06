@@ -20,6 +20,12 @@ from src.chatbot.validation import (
     validate_nin_ug,
     validate_phone_ug,
 )
+from src.chatbot.flows.field_filter import (
+    filter_missing_fields, 
+    add_validation_hints_to_fields, 
+    add_frontend_validation_rules,
+    filter_already_collected_fields
+)
 from src.integrations.policy.premium import premium_service
 from src.integrations.underwriting import run_quote_preview
 from src.integrations.product_benefits import product_benefits_loader
@@ -87,36 +93,6 @@ def parse_date_flexible(date_str: Any) -> Optional[date]:
                 pass
 
     return None
-
-
-# DEPRECATED: Benefits are now loaded from product_json/personal_accident_config.json
-# This constant is kept for backward compatibility only
-PA_BENEFITS_BY_LEVEL = {
-    "5000000": [
-        "Accidental death benefit: UGX 5,000,000",
-        "Permanent disability: Up to UGX 5,000,000",
-        "Temporary disability: UGX 2,500 per day (max 365 days)",
-        "Medical expenses: UGX 1,000,000",
-        "Hospitalization: UGX 10,000 per day (max 30 days)",
-    ],
-    "10000000": [
-        "Accidental death benefit: UGX 10,000,000",
-        "Permanent disability: Up to UGX 10,000,000",
-        "Temporary disability: UGX 5,000 per day (max 365 days)",
-        "Medical expenses: UGX 2,000,000",
-        "Hospitalization: UGX 15,000 per day (max 30 days)",
-        "Funeral expenses: UGX 1,000,000",
-    ],
-    "20000000": [
-        "Accidental death benefit: UGX 20,000,000",
-        "Permanent disability: Up to UGX 20,000,000",
-        "Temporary disability: UGX 7,500 per day (max 365 days)",
-        "Medical expenses: UGX 5,000,000",
-        "Hospitalization: UGX 20,000 per day (max 30 days)",
-        "Funeral expenses: UGX 2,000,000",
-        "Family trauma counseling: UGX 500,000",
-    ],
-}
 
 
 # Risky activities for the checkbox step (per product requirements)
@@ -232,9 +208,9 @@ class PersonalAccidentFlow:
         Collect minimal info: firstName, lastName, mobile, email, dob, policyStartDate, coverLimitAmountUgx.
         Calculate premium immediately and store in Postgres.
         """
+        errors: Dict[str, str] = {}
+        
         if payload and "_raw" not in payload:
-            errors: Dict[str, str] = {}
-
             # Frontend-style field names
             first_name = require_str(payload, "firstName", errors, label="First Name")
             last_name = require_str(payload, "lastName", errors, label="Last Name")
@@ -275,63 +251,87 @@ class PersonalAccidentFlow:
             if cover_limit_str not in allowed_limits:
                 errors["coverLimitAmountUgx"] = f"Cover limit must be one of: {', '.join(allowed_limits)}"
 
-            raise_if_errors(errors)
+            # If no errors, calculate premium and save data
+            if not errors:
+                # Calculate premium
+                premium = self._calculate_pa_premium({"dob": dob}, int(cover_limit_str))
 
-            # Calculate premium
-            premium = self._calculate_pa_premium({"dob": dob}, int(cover_limit_str))
+                # Create quote in Postgres (status="draft" for now)
+                quote = self.db.create_quote(
+                    user_id=user_id,
+                    product_id="personal_accident",
+                    premium_amount=premium["monthly"],
+                    sum_assured=int(cover_limit_str),
+                    underwriting_data={
+                        "first_name": first_name,
+                        "last_name": last_name,
+                        "middle_name": middle_name,
+                        "email": email,
+                        "mobile": mobile,
+                        "dob": dob.isoformat() if hasattr(dob, "isoformat") else None,
+                        "policy_start_date": policy_start.isoformat() if policy_start else None,
+                    },
+                    pricing_breakdown=premium.get("breakdown"),
+                    product_name="Personal Accident",
+                )
 
-            # Create quote in Postgres (status="draft" for now)
-            quote = self.db.create_quote(
-                user_id=user_id,
-                product_id="personal_accident",
-                premium_amount=premium["monthly"],
-                sum_assured=int(cover_limit_str),
-                underwriting_data={
+                # Store quick quote data for later autofill
+                data["quick_quote"] = {
                     "first_name": first_name,
                     "last_name": last_name,
                     "middle_name": middle_name,
                     "email": email,
                     "mobile": mobile,
-                    "dob": dob.isoformat() if hasattr(dob, "isoformat") else None,
+                    "dob": dob.isoformat() if dob else None,
                     "policy_start_date": policy_start.isoformat() if policy_start else None,
-                },
-                pricing_breakdown=premium.get("breakdown"),
-                product_name="Personal Accident",
-            )
+                    "cover_limit_ugx": int(cover_limit_str),
+                    "quote_id": str(quote.id),
+                }
 
-            # Store quick quote data for later autofill
-            data["quick_quote"] = {
-                "first_name": first_name,
-                "last_name": last_name,
-                "middle_name": middle_name,
-                "email": email,
-                "mobile": mobile,
-                "dob": dob.isoformat() if dob else None,
-                "policy_start_date": policy_start.isoformat() if policy_start else None,
-                "cover_limit_ugx": int(cover_limit_str),
-                "quote_id": str(quote.id),
-            }
+                data["quote_id"] = str(quote.id)
+                
+                # Proceed to premium summary
+                return await self._step_premium_summary({}, data, user_id)
 
-            data["quote_id"] = str(quote.id)
+        # Pre-fill from existing data
+        prefilled = data.get("quick_quote", {})
+        
+        # Define all fields
+        all_fields = [
+            {"name": "firstName", "label": "First Name", "type": "text", "required": True, "minLength": 2, "maxLength": 50, "defaultValue": prefilled.get("first_name", "")},
+            {"name": "lastName", "label": "Last Name", "type": "text", "required": True, "minLength": 2, "maxLength": 50, "defaultValue": prefilled.get("last_name", "")},
+            {"name": "middleName", "label": "Middle Name", "type": "text", "required": False, "maxLength": 50, "defaultValue": prefilled.get("middle_name", "")},
+            {"name": "mobile", "label": "Mobile Number", "type": "tel", "required": True, "placeholder": "07XX XXX XXX or +2567XX XXX XXX", "defaultValue": prefilled.get("mobile", "")},
+            {"name": "email", "label": "Email Address", "type": "email", "required": True, "maxLength": 100, "defaultValue": prefilled.get("email", "")},
+            {"name": "dob", "label": "Date of Birth", "type": "date", "required": True, "help": "Must be 18-65 years old", "defaultValue": prefilled.get("dob", "")},
+            {"name": "policyStartDate", "label": "Policy Start Date", "type": "date", "required": True, "help": "Must be after today", "defaultValue": prefilled.get("policy_start_date", "")},
+            {"name": "coverLimitAmountUgx", "label": "Cover Limit", "type": "select", "required": True, "defaultValue": str(prefilled.get("cover_limit_ugx", "")), "options": [
+                {"value": "5000000", "label": "UGX 5,000,000"},
+                {"value": "10000000", "label": "UGX 10,000,000"},
+                {"value": "20000000", "label": "UGX 20,000,000"},
+            ]},
+        ]
+        
+        # Filter to show only missing or invalid fields
+        filtered_fields = filter_missing_fields(
+            all_fields=all_fields,
+            payload=payload,
+            collected_data=data,
+            validation_errors=errors,
+            data_key="quick_quote"
+        )
+        
+        # Add validation error hints to fields
+        fields_with_hints = add_validation_hints_to_fields(filtered_fields, errors)
+        
+        # Add frontend validation rules for real-time validation
+        fields_with_validation = add_frontend_validation_rules(fields_with_hints)
 
         return {
             "response": {
                 "type": "form",
-                "message": "Get your Personal Accident quote in seconds",
-                "fields": [
-                    {"name": "firstName", "label": "First Name", "type": "text", "required": True, "minLength": 2, "maxLength": 50},
-                    {"name": "lastName", "label": "Last Name", "type": "text", "required": True, "minLength": 2, "maxLength": 50},
-                    {"name": "middleName", "label": "Middle Name", "type": "text", "required": False, "maxLength": 50},
-                    {"name": "mobile", "label": "Mobile Number", "type": "tel", "required": True, "placeholder": "07XX XXX XXX or +2567XX XXX XXX"},
-                    {"name": "email", "label": "Email Address", "type": "email", "required": True, "maxLength": 100},
-                    {"name": "dob", "label": "Date of Birth", "type": "date", "required": True, "help": "Must be 18-65 years old"},
-                    {"name": "policyStartDate", "label": "Policy Start Date", "type": "date", "required": True, "help": "Must be after today"},
-                    {"name": "coverLimitAmountUgx", "label": "Cover Limit", "type": "select", "required": True, "options": [
-                        {"value": "5000000", "label": "UGX 5,000,000"},
-                        {"value": "10000000", "label": "UGX 10,000,000"},
-                        {"value": "20000000", "label": "UGX 20,000,000"},
-                    ]},
-                ],
+                "message": "Get your Personal Accident quote in seconds" + (" - Please fix the errors below" if errors else ""),
+                "fields": fields_with_validation,
             },
             "next_step": 1,
             "collected_data": data,
@@ -421,29 +421,37 @@ class PersonalAccidentFlow:
         Step 2: Full Personal Details
         Collects additional personal information: surname, occupation, nationality, gender, address, etc.
         Pre-fills from quick quote where applicable.
+        Uses progressive disclosure - only shows NEW fields not collected in quick quote.
         """
+        errors: Dict[str, str] = {}
+        quick_quote = data.get("quick_quote", {})
+        
         if payload and "_raw" not in payload:
-            errors: Dict[str, str] = {}
-
-            # Get from payload or use quick quote data
-            surname = payload.get("surname") or data.get("quick_quote", {}).get("last_name", "")
+            # Auto-use data from quick quote for fields already collected in Step 0
+            # Only validate NEW fields that are being collected in this step
+            
+            surname = payload.get("surname") or quick_quote.get("last_name", "")
             if not surname:
                 errors["surname"] = "Surname is required"
 
-            first_name = payload.get("first_name") or data.get("quick_quote", {}).get("first_name", "")
+            first_name = payload.get("first_name") or quick_quote.get("first_name", "")
             if not first_name:
                 errors["first_name"] = "First name is required"
 
-            middle_name = optional_str(payload, "middle_name")
-            middle_name = optional_str(payload, "middle_name")
-            email = payload.get("email") or data.get("quick_quote", {}).get("email", "")
+            # Middle name - auto-use from quick quote if not in payload
+            middle_name = payload.get("middle_name") or quick_quote.get("middle_name", "")
+            
+            # Email - auto-use from quick quote if not in payload
+            email = payload.get("email") or quick_quote.get("email", "")
             if email:
                 validate_email(email, errors, field="email")
 
-            mobile_number = payload.get("mobile_number") or data.get("quick_quote", {}).get("mobile", "")
+            # Mobile - auto-use from quick quote if not in payload
+            mobile_number = payload.get("mobile_number") or quick_quote.get("mobile", "")
             if mobile_number:
                 validate_phone_ug(mobile_number, errors, field="mobile_number")
 
+            # NEW fields being collected in this step (not in quick quote)
             national_id_number = require_str(payload, "national_id_number", errors, label="National ID Number")
             if national_id_number:
                 validate_nin_ug(national_id_number, errors, field="national_id_number")
@@ -452,130 +460,158 @@ class PersonalAccidentFlow:
             occupation = require_str(payload, "occupation", errors, label="Occupation")
             gender = validate_in(payload.get("gender", ""), {"Male", "Female", "Other"}, errors, "gender", required=True)
             tax_identification_number = optional_str(payload, "tax_identification_number")
-            tax_identification_number = optional_str(payload, "tax_identification_number")
             country_of_residence = require_str(payload, "country_of_residence", errors, label="Country of Residence")
             physical_address = require_str(payload, "physical_address", errors, label="Physical Address")
 
-            raise_if_errors(errors)
+            # If no errors, save all data (including auto-filled from quick quote) and proceed
+            if not errors:
+                data["personal_details"] = {
+                    "surname": surname,
+                    "first_name": first_name,
+                    "middle_name": middle_name,
+                    "email": email,
+                    "mobile_number": mobile_number,
+                    "national_id_number": national_id_number,
+                    "nationality": nationality,
+                    "tax_identification_number": tax_identification_number,
+                    "occupation": occupation,
+                    "gender": gender,
+                    "country_of_residence": country_of_residence,
+                    "physical_address": physical_address,
+                }
+                # Return next step response
+                return await self._step_next_of_kin({}, data, user_id)
 
-            data["personal_details"] = {
-                "surname": surname,
-                "first_name": first_name,
-                "middle_name": middle_name,
-                "email": email,
-                "mobile_number": mobile_number,
-                "national_id_number": national_id_number,
-                "nationality": nationality,
-                "tax_identification_number": tax_identification_number,
-                "occupation": occupation,
-                "gender": gender,
-                "country_of_residence": country_of_residence,
-                "physical_address": physical_address,
-            }
-
-        # Pre-fill from quick quote
-        quick_quote = data.get("quick_quote", {})
+        # Pre-fill from quick quote and previous personal_details submissions
         prefilled_personal = data.get("personal_details", {})
+
+        # Define all fields
+        all_fields = [
+            {
+                "name": "surname",
+                "label": "Surname",
+                "type": "text",
+                "required": True,
+                "defaultValue": prefilled_personal.get("surname", quick_quote.get("last_name", "")),
+            },
+            {
+                "name": "first_name",
+                "label": "First Name",
+                "type": "text",
+                "required": True,
+                "defaultValue": prefilled_personal.get(
+                    "first_name", quick_quote.get("first_name", "")
+                ),
+            },
+            {
+                "name": "middle_name",
+                "label": "Middle Name",
+                "type": "text",
+                "required": False,
+                "defaultValue": prefilled_personal.get("middle_name", quick_quote.get("middle_name", "")),
+            },
+            {
+                "name": "email",
+                "label": "Email Address",
+                "type": "email",
+                "required": True,
+                "defaultValue": prefilled_personal.get("email", quick_quote.get("email", "")),
+            },
+            {
+                "name": "mobile_number",
+                "label": "Mobile Number",
+                "type": "tel",
+                "required": True,
+                "defaultValue": prefilled_personal.get(
+                    "mobile_number", quick_quote.get("mobile", "")
+                ),
+            },
+            {
+                "name": "national_id_number",
+                "label": "National ID Number",
+                "type": "text",
+                "required": True,
+                "defaultValue": prefilled_personal.get("national_id_number", ""),
+            },
+            {
+                "name": "nationality",
+                "label": "Nationality",
+                "type": "text",
+                "required": True,
+                "defaultValue": prefilled_personal.get("nationality", ""),
+            },
+            {
+                "name": "tax_identification_number",
+                "label": "Tax Identification Number",
+                "type": "text",
+                "required": False,
+                "defaultValue": prefilled_personal.get(
+                    "tax_identification_number", ""
+                ),
+            },
+            {
+                "name": "occupation",
+                "label": "Occupation",
+                "type": "text",
+                "required": True,
+                "defaultValue": prefilled_personal.get("occupation", ""),
+            },
+            {
+                "name": "gender",
+                "label": "Gender",
+                "type": "select",
+                "options": ["Male", "Female", "Other"],
+                "required": True,
+                "defaultValue": prefilled_personal.get("gender", ""),
+            },
+            {
+                "name": "country_of_residence",
+                "label": "Country of Residence",
+                "type": "text",
+                "required": True,
+                "defaultValue": prefilled_personal.get(
+                    "country_of_residence", ""
+                ),
+            },
+            {
+                "name": "physical_address",
+                "label": "Physical Address",
+                "type": "text",
+                "required": True,
+                "defaultValue": prefilled_personal.get("physical_address", ""),
+            },
+        ]
+        
+        # Progressive disclosure: If first visit, show only NEW fields (not already collected in quick_quote)
+        # If re-submission with errors, show only missing fields
+        if not payload or "_raw" in payload:
+            # First visit to this step - filter out already-collected fields
+            filtered_fields = filter_already_collected_fields(
+                all_fields=all_fields,
+                collected_data=data,
+                previous_step_keys=["quick_quote"]
+            )
+        else:
+            # Re-submission with validation errors - show only missing fields
+            filtered_fields = filter_missing_fields(
+                all_fields=all_fields,
+                payload=payload,
+                collected_data=data,
+                validation_errors=errors,
+                data_key="personal_details"
+            )
+        
+        # Add validation error hints to fields
+        fields_with_hints = add_validation_hints_to_fields(filtered_fields, errors)
+        
+        # Add frontend validation rules for real-time validation
+        fields_with_validation = add_frontend_validation_rules(fields_with_hints)
 
         return {
             "response": {
                 "type": "form",
-                "message": "📋 Complete your personal details",
-                "fields": [
-                    {
-                        "name": "surname",
-                        "label": "Surname",
-                        "type": "text",
-                        "required": True,
-                        "defaultValue": prefilled_personal.get("surname", quick_quote.get("last_name", "")),
-                    },
-                    {
-                        "name": "first_name",
-                        "label": "First Name",
-                        "type": "text",
-                        "required": True,
-                        "defaultValue": prefilled_personal.get(
-                            "first_name", quick_quote.get("first_name", "")
-                        ),
-                    },
-                    {
-                        "name": "middle_name",
-                        "label": "Middle Name",
-                        "type": "text",
-                        "required": False,
-                        "defaultValue": prefilled_personal.get("middle_name", ""),
-                    },
-                    {
-                        "name": "email",
-                        "label": "Email Address",
-                        "type": "email",
-                        "required": True,
-                        "defaultValue": prefilled_personal.get("email", quick_quote.get("email", "")),
-                    },
-                    {
-                        "name": "mobile_number",
-                        "label": "Mobile Number",
-                        "type": "tel",
-                        "required": True,
-                        "defaultValue": prefilled_personal.get(
-                            "mobile_number", quick_quote.get("mobile", "")
-                        ),
-                    },
-                    {
-                        "name": "national_id_number",
-                        "label": "National ID Number",
-                        "type": "text",
-                        "required": True,
-                        "defaultValue": prefilled_personal.get("national_id_number", ""),
-                    },
-                    {
-                        "name": "nationality",
-                        "label": "Nationality",
-                        "type": "text",
-                        "required": True,
-                        "defaultValue": prefilled_personal.get("nationality", ""),
-                    },
-                    {
-                        "name": "tax_identification_number",
-                        "label": "Tax Identification Number",
-                        "type": "text",
-                        "required": False,
-                        "defaultValue": prefilled_personal.get(
-                            "tax_identification_number", ""
-                        ),
-                    },
-                    {
-                        "name": "occupation",
-                        "label": "Occupation",
-                        "type": "text",
-                        "required": True,
-                        "defaultValue": prefilled_personal.get("occupation", ""),
-                    },
-                    {
-                        "name": "gender",
-                        "label": "Gender",
-                        "type": "select",
-                        "options": ["Male", "Female", "Other"],
-                        "required": True,
-                        "defaultValue": prefilled_personal.get("gender", ""),
-                    },
-                    {
-                        "name": "country_of_residence",
-                        "label": "Country of Residence",
-                        "type": "text",
-                        "required": True,
-                        "defaultValue": prefilled_personal.get(
-                            "country_of_residence", ""
-                        ),
-                    },
-                    {
-                        "name": "physical_address",
-                        "label": "Physical Address",
-                        "type": "text",
-                        "required": True,
-                        "defaultValue": prefilled_personal.get("physical_address", ""),
-                    },
-                ],
+                "message": "📋 Additional personal details" + (" - Please complete the missing fields" if errors else ""),
+                "fields": fields_with_validation,
             },
             "next_step": 3,
             "collected_data": data,
@@ -586,8 +622,9 @@ class PersonalAccidentFlow:
         Step 3: Next of Kin
         Collect beneficiary details. Pre-fill name from quick quote if available.
         """
+        errors: Dict[str, str] = {}
+        
         if payload and "_raw" not in payload:
-            errors: Dict[str, str] = {}
             first_name = require_str(payload, "nok_first_name", errors, label="First Name")
             last_name = require_str(payload, "nok_last_name", errors, label="Last Name")
             middle_name = optional_str(payload, "nok_middle_name")
@@ -599,36 +636,58 @@ class PersonalAccidentFlow:
             id_number = optional_str(payload, "nok_id_number")
             if id_number:
                 validate_nin_ug(id_number, errors, field="nok_id_number")
-            raise_if_errors(errors)
-
-            data["next_of_kin"] = {
-                "first_name": first_name,
-                "last_name": last_name,
-                "middle_name": middle_name,
-                "phone_number": phone_number,
-                "relationship": relationship,
-                "address": address,
-                "id_number": id_number,
-            }
+            
+            # If no errors, save and proceed
+            if not errors:
+                data["next_of_kin"] = {
+                    "first_name": first_name,
+                    "last_name": last_name,
+                    "middle_name": middle_name,
+                    "phone_number": phone_number,
+                    "relationship": relationship,
+                    "address": address,
+                    "id_number": id_number,
+                }
+                # Proceed to next step
+                return await self._step_previous_pa_policy({}, data, user_id)
 
         # Pre-fill from quick quote if available
         quick_quote = data.get("quick_quote", {})
-        autofill_first = quick_quote.get("first_name", "")
-        autofill_last = quick_quote.get("last_name", "")
+        prefilled_nok = data.get("next_of_kin", {})
+        autofill_first = prefilled_nok.get("first_name", quick_quote.get("first_name", ""))
+        autofill_last = prefilled_nok.get("last_name", quick_quote.get("last_name", ""))
+
+        # Define all fields
+        all_fields = [
+            {"name": "nok_first_name", "label": "First Name", "type": "text", "required": True, "defaultValue": autofill_first},
+            {"name": "nok_last_name", "label": "Last Name", "type": "text", "required": True, "defaultValue": autofill_last},
+            {"name": "nok_middle_name", "label": "Middle Name", "type": "text", "required": False, "defaultValue": prefilled_nok.get("middle_name", "")},
+            {"name": "nok_phone_number", "label": "Phone Number", "type": "tel", "required": True, "defaultValue": prefilled_nok.get("phone_number", "")},
+            {"name": "nok_relationship", "label": "Relationship", "type": "text", "required": True, "defaultValue": prefilled_nok.get("relationship", "")},
+            {"name": "nok_address", "label": "Address", "type": "text", "required": True, "defaultValue": prefilled_nok.get("address", "")},
+            {"name": "nok_id_number", "label": "ID Number", "type": "text", "required": False, "defaultValue": prefilled_nok.get("id_number", "")},
+        ]
+        
+        # Filter to show only missing or invalid fields
+        filtered_fields = filter_missing_fields(
+            all_fields=all_fields,
+            payload=payload,
+            collected_data=data,
+            validation_errors=errors,
+            data_key="next_of_kin"
+        )
+        
+        # Add validation error hints to fields
+        fields_with_hints = add_validation_hints_to_fields(filtered_fields, errors)
+        
+        # Add frontend validation rules for real-time validation
+        fields_with_validation = add_frontend_validation_rules(fields_with_hints)
 
         return {
             "response": {
                 "type": "form",
-                "message": "👥 Next of kin details",
-                "fields": [
-                    {"name": "nok_first_name", "label": "First Name", "type": "text", "required": True, "defaultValue": autofill_first},
-                    {"name": "nok_last_name", "label": "Last Name", "type": "text", "required": True, "defaultValue": autofill_last},
-                    {"name": "nok_middle_name", "label": "Middle Name", "type": "text", "required": False},
-                    {"name": "nok_phone_number", "label": "Phone Number", "type": "tel", "required": True},
-                    {"name": "nok_relationship", "label": "Relationship", "type": "text", "required": True},
-                    {"name": "nok_address", "label": "Address", "type": "text", "required": True},
-                    {"name": "nok_id_number", "label": "ID Number", "type": "text", "required": False},
-                ],
+                "message": "👥 Next of kin details" + (" - Please fix the errors below" if errors else ""),
+                "fields": fields_with_validation,
             },
             "next_step": 4,
             "collected_data": data,
@@ -844,15 +903,3 @@ class PersonalAccidentFlow:
             "personal_accident",
             {"data": data, "sum_assured": sum_assured},
         )
-
-
-"""
-Personal Accident schema =
-personal_accident_applications:
-JSON columns for each step
-(personal_details, next_of_kin, previous_pa_policy,
-physical_disability, risky_activities, coverage_plan, national_id_upload),
-plus status, user_id, and quote_id.
-quotes table storing computed premiums and breakdowns,
-linked back to the application via quote_id.
-"""
