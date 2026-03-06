@@ -25,6 +25,7 @@ from src.chatbot.validation import (
     validate_cover_start_date_range,
     validate_positive_number_field,
 )
+from src.chatbot.flows.field_filter import filter_missing_fields, add_validation_hints_to_fields, add_frontend_validation_rules
 from src.integrations.policy.premium import premium_service
 from src.integrations.product_benefits import product_benefits_loader
 from src.integrations.underwriting import run_quote_preview
@@ -339,32 +340,54 @@ class MotorPrivateFlow:
                 )
                 phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
                 email = validate_email(payload.get("email", ""), errors, field="email")
-                if errors:
-                    return {"error": "Validation failed in about_you", "details": errors, "step": "about_you"}
-                data["about_you"] = {
-                    "first_name": first_name,
-                    "middle_name": middle_name,
-                    "surname": surname,
-                    "phone_number": phone_number,
-                    "email": email,
-                }
-                out = await self._step_vehicle_details({}, data, user_id)
-                out["next_step"] = 1
-                return out
+                
+                # If no errors, save and proceed
+                if not errors:
+                    data["about_you"] = {
+                        "first_name": first_name,
+                        "middle_name": middle_name,
+                        "surname": surname,
+                        "phone_number": phone_number,
+                        "email": email,
+                    }
+                    out = await self._step_vehicle_details({}, data, user_id)
+                    out["next_step"] = 1
+                    return out
         except Exception as e:
             return {"error": f"Exception in about_you: {str(e)}", "step": "about_you"}
+
+        # Pre-fill from existing data
+        prefilled = data.get("about_you", {})
+        
+        # Define all fields
+        all_fields = [
+            {"name": "first_name", "label": "First Name", "type": "text", "required": True, "defaultValue": prefilled.get("first_name", "")},
+            {"name": "middle_name", "label": "Middle Name (Optional)", "type": "text", "required": False, "defaultValue": prefilled.get("middle_name", "")},
+            {"name": "surname", "label": "Surname", "type": "text", "required": True, "defaultValue": prefilled.get("surname", "")},
+            {"name": "phone_number", "label": "Phone Number", "type": "text", "required": True, "maxLength": 12, "defaultValue": prefilled.get("phone_number", "")},
+            {"name": "email", "label": "Email", "type": "email", "required": True, "defaultValue": prefilled.get("email", "")},
+        ]
+        
+        # Filter to show only missing or invalid fields
+        filtered_fields = filter_missing_fields(
+            all_fields=all_fields,
+            payload=payload,
+            collected_data=data,
+            validation_errors=errors,
+            data_key="about_you"
+        )
+        
+        # Add validation error hints to fields
+        fields_with_hints = add_validation_hints_to_fields(filtered_fields, errors)
+        
+        # Add frontend validation rules for real-time validation
+        fields_with_validation = add_frontend_validation_rules(fields_with_hints)
 
         return {
             "response": {
                 "type": "form",
-                "message": "About You",
-                "fields": [
-                    {"name": "first_name", "label": "First Name", "type": "text", "required": True},
-                    {"name": "middle_name", "label": "Middle Name (Optional)", "type": "text", "required": False},
-                    {"name": "surname", "label": "Surname", "type": "text", "required": True},
-                    {"name": "phone_number", "label": "Phone Number", "type": "text", "required": True, "maxLength": 12},
-                    {"name": "email", "label": "Email", "type": "email", "required": True},
-                ],
+                "message": "About You" + (" - Please fix the errors below" if errors else ""),
+                "fields": fields_with_validation,
             },
             "next_step": 1,          # ✅ Fixed: was incorrectly 6
             "collected_data": data,
