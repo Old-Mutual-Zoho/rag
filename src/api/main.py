@@ -101,7 +101,7 @@ app.include_router(policies_api, prefix="/api/v1/policies", tags=["Policies"])
 # Register premiums API router
 app.include_router(premiums_api, prefix="/api/v1/premiums", tags=["Premiums"])
 
-# Register quotes and underwriting API router  
+# Register quotes and underwriting API router
 app.include_router(quotes_underwriting_api, prefix="/api")
 
 # Register agent webhook router

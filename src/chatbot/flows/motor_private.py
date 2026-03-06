@@ -610,11 +610,11 @@ class MotorPrivateFlow:
 
         # Calculate premium
         premium = self._calculate_motor_private_premium(data)
-        
+
         # Load dynamic benefits from configuration
         # For motor_private, comprehensive coverage has standard benefits regardless of vehicle value
         benefits = product_benefits_loader.get_benefits_as_dict("motor_private", 0)
-        
+
         # Attempt a non-destructive quotation preview from the underwriting pipeline
         # This is used to display mocked quotation information to the user while
         # the flow continues to collect remaining details before payment
@@ -624,7 +624,7 @@ class MotorPrivateFlow:
             vehicle_value = motor_data.get("vehicle_value", 0)
             cover_start = motor_data.get("cover_start_date", "")
             cover_type = motor_data.get("cover_type", "comprehensive")
-            
+
             preview_result = await run_quote_preview(
                 user_id=user_id,
                 product_id="motor_private",
@@ -643,7 +643,7 @@ class MotorPrivateFlow:
                 data["preview_quotation"] = quotation_preview
         except Exception:
             quotation_preview = None
-        
+
         resp = {
             "response": {
                 "type": "premium_summary",
@@ -662,11 +662,11 @@ class MotorPrivateFlow:
             "next_step": 6,
             "collected_data": data,
         }
-        
+
         if quotation_preview:
             resp["response"]["quotation_preview"] = quotation_preview
             resp["response"]["payable_amount"] = quotation_preview.get("payable_amount")
-        
+
         return resp
 
     # ------------------------------------------------------------------

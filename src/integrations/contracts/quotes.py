@@ -25,23 +25,23 @@ class QuotePreviewRequest(BaseModel):
 
     product_id: str = Field(..., description="Product identifier (e.g., 'personal_accident', 'serenicare')")
     user_id: str = Field(..., description="User requesting the quote")
-    
+
     # Basic inputs for quick quote calculation
     sum_assured: Optional[float] = Field(None, description="Coverage amount requested")
     cover_limit_ugx: Optional[float] = Field(None, description="Alternative field for coverage amount")
-    
+
     # Customer basic info
     date_of_birth: Optional[str] = Field(None, description="Customer DOB (ISO format YYYY-MM-DD)")
     gender: Optional[str] = Field(None, description="Customer gender (Male/Female/Other)")
     occupation: Optional[str] = Field(None, description="Customer occupation")
-    
+
     # Policy details
     policy_start_date: Optional[str] = Field(None, description="Policy start date (ISO format)")
     payment_frequency: Optional[str] = Field("monthly", description="Payment frequency (monthly/quarterly/annually)")
-    
+
     # Product-specific data (flexible for different products)
     product_data: Dict[str, Any] = Field(default_factory=dict, description="Product-specific fields")
-    
+
     # Metadata
     currency: str = Field("UGX", description="Currency code")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
@@ -68,7 +68,7 @@ class PremiumBreakdown(BaseModel):
     levies: float = Field(0.0, description="Regulatory levies")
     taxes: float = Field(0.0, description="VAT or other taxes")
     total: float = Field(..., description="Total premium amount")
-    
+
     # Additional context
     frequency: str = Field("monthly", description="Premium frequency")
     annual_equivalent: Optional[float] = Field(None, description="Annual premium amount")
@@ -81,37 +81,37 @@ class QuotePreviewResponse(BaseModel):
     quote_id: str = Field(..., description="Unique quote identifier")
     product_id: str = Field(..., description="Product identifier")
     product_name: str = Field(..., description="Product display name")
-    
+
     # Quote status
     status: str = Field("preview", description="Quote status (preview/indicative)")
     is_binding: bool = Field(False, description="Whether this quote is binding (preview quotes are not)")
-    
+
     # Premium information
     premium: float = Field(..., description="Premium amount")
     currency: str = Field(..., description="Currency code")
     payment_frequency: str = Field(..., description="Payment frequency")
     breakdown: PremiumBreakdown = Field(..., description="Premium calculation breakdown")
-    
+
     # Coverage information
     sum_assured: float = Field(..., description="Coverage amount")
     benefits: List[BenefitItem] = Field(default_factory=list, description="List of benefits included")
-    
+
     # Policy details
     policy_start_date: Optional[str] = Field(None, description="Proposed policy start date")
     policy_duration_months: int = Field(12, description="Policy duration in months")
-    
+
     # Important notices
     assumptions: List[str] = Field(default_factory=list, description="Assumptions made for this quote")
     exclusions: List[str] = Field(default_factory=list, description="Standard exclusions")
     important_notes: List[str] = Field(default_factory=list, description="Important information")
-    
+
     # Download capability
     download_url: Optional[str] = Field(None, description="URL to download quote PDF")
-    
+
     # Validity
     valid_until: Optional[str] = Field(None, description="Quote validity expiration (ISO datetime)")
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat(), description="Quote creation timestamp")
-    
+
     # Metadata
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional quote data")
 
@@ -122,12 +122,12 @@ class FinalQuoteRequest(BaseModel):
     quote_id: str = Field(..., description="Quote ID from preview")
     user_id: str = Field(..., description="User requesting finalization")
     underwriting_assessment_id: str = Field(..., description="Approved underwriting assessment ID")
-    
+
     # Updated details (if any changed during underwriting)
     updated_premium: Optional[float] = Field(None, description="Updated premium if repriced during underwriting")
     additional_exclusions: List[str] = Field(default_factory=list, description="Additional exclusions added during underwriting")
     special_terms: List[str] = Field(default_factory=list, description="Special terms/conditions from underwriting")
-    
+
     # Metadata
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
@@ -138,44 +138,44 @@ class FinalQuoteResponse(BaseModel):
     quote_id: str = Field(..., description="Final quote identifier")
     product_id: str = Field(..., description="Product identifier")
     product_name: str = Field(..., description="Product display name")
-    
+
     # Quote status
     status: str = Field("final", description="Quote status")
     is_binding: bool = Field(True, description="This quote is binding and ready for payment")
-    
+
     # Premium information
     premium: float = Field(..., description="Final premium amount")
     currency: str = Field(..., description="Currency code")
     payment_frequency: str = Field(..., description="Payment frequency")
     breakdown: PremiumBreakdown = Field(..., description="Premium calculation breakdown")
-    
+
     # Coverage information
     sum_assured: float = Field(..., description="Coverage amount")
     benefits: List[BenefitItem] = Field(default_factory=list, description="List of benefits included")
-    
+
     # Policy details
     policy_start_date: str = Field(..., description="Policy start date")
     policy_end_date: str = Field(..., description="Policy end date")
     policy_duration_months: int = Field(..., description="Policy duration in months")
-    
+
     # Terms & conditions
     exclusions: List[str] = Field(default_factory=list, description="All applicable exclusions")
     special_terms: List[str] = Field(default_factory=list, description="Special terms from underwriting")
-    
+
     # Download
     download_url: Optional[str] = Field(None, description="URL to download final quote PDF")
-    
+
     # Underwriting reference
     underwriting_assessment_id: str = Field(..., description="Associated underwriting assessment")
-    
+
     # Validity
     valid_until: str = Field(..., description="Quote validity expiration (ISO datetime)")
     created_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
-    
+
     # Next steps
     payment_required: bool = Field(True, description="Whether payment is required to bind")
     payment_amount: float = Field(..., description="Amount required for payment")
-    
+
     # Metadata
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
