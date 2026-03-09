@@ -21,6 +21,7 @@ class ChatRouter:
         session_id: str,
         user_id: str,
         form_data: Optional[Dict[str, Any]] = None,
+        db=None,
     ) -> Dict:
         """Route message to appropriate mode. form_data is used as user_input in guided flows when set."""
 
@@ -134,9 +135,8 @@ class ChatRouter:
                     ],
                 },
             }
-
-        # Default to conversational mode
-        return await self.conversational.process(message, session_id, user_id, form_data=form_data)
+# Default to conversational mode
+        return await self.conversational.process(message, session_id, user_id, form_data=form_data, db=db)
 
     def _is_guided_trigger(self, message: str) -> bool:
         """Check if message should trigger guided flow"""

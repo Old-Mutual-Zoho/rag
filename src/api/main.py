@@ -416,6 +416,7 @@ async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: Pos
         session_id=session_id,
         user_id=internal_user_id,
         form_data=request.form_data,
+        db=db,
     )
 
     # In escalated mode, hand over to human agent: mirror every user text message to
