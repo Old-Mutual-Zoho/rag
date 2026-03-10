@@ -341,7 +341,6 @@ class MotorPrivateFlow:
                 phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
                 email = validate_email(payload.get("email", ""), errors, field="email")
 
-
                 # If no errors, save and proceed
                 if not errors:
                     data["about_you"] = {
