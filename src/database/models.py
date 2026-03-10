@@ -129,6 +129,7 @@ class PaymentAuditEvent(Base):
 
     transaction: Mapped["PaymentTransaction"] = relationship("PaymentTransaction", back_populates="audit_events")
 
+
 class RAGMetric(Base):
     __tablename__ = "rag_metrics"
 

@@ -125,6 +125,7 @@ def _next_section_offer(action: str, *, is_digital: bool) -> tuple[str | None, s
     }
     return order.get(action, (None, None))
 
+
 # metrics functions
 def _emit_metrics(db, metrics: list[Dict[str, Any]]) -> None:
     if db is None:
@@ -148,12 +149,14 @@ def _emit_metrics(db, metrics: list[Dict[str, Any]]) -> None:
     except Exception as exc:
         logger.warning("[metrics] Failed to record metrics: %s", exc)
 
+
 def _metric_payload(metric_type: str, value: float, conversation_id: Optional[str]) -> Dict[str, Any]:
     return {
         "metric_type": metric_type,
         "value": float(value),
         "conversation_id": conversation_id,
     }
+
 
 class ConversationalMode:
     def __init__(self, rag_system, product_matcher, state_manager):
@@ -177,6 +180,7 @@ class ConversationalMode:
         except Exception:
             # Fallback: no response processor available
             self.response_processor = None
+
     async def process(self, message: str, session_id: str, user_id: str, form_data: Optional[Dict[str, Any]] = None, db=None) -> Dict:
         """Process message in conversational mode"""
         start_time = time.time()
@@ -339,7 +343,7 @@ class ConversationalMode:
 
         # Generate response
         response = await self.rag.generate(query=message, context_docs=retrieval_results, conversation_history=self._get_recent_history(session_id))
-        
+
         # ---- Record RAG metrics ----
         confidence = response.get("confidence", 0.5)
         sources = response.get("sources", [])
@@ -350,7 +354,6 @@ class ConversationalMode:
         if not sources:
             metrics_to_emit.append(_metric_payload("fallbacks", 1.0, conversation_id))
         # ---- End metrics ----
-
 
         # --- Escalation/handover logic ---
         session = self.state_manager.get_session(session_id) or {}

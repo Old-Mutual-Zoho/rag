@@ -341,6 +341,7 @@ class MotorPrivateFlow:
                 phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
                 email = validate_email(payload.get("email", ""), errors, field="email")
 
+
                 # If no errors, save and proceed
                 if not errors:
                     data["about_you"] = {
@@ -361,9 +362,27 @@ class MotorPrivateFlow:
 
         # Define all fields
         all_fields = [
-            {"name": "first_name", "label": "First Name", "type": "text", "required": True, "defaultValue": prefilled.get("first_name", "")},
-            {"name": "middle_name", "label": "Middle Name (Optional)", "type": "text", "required": False, "defaultValue": prefilled.get("middle_name", "")},
-            {"name": "surname", "label": "Surname", "type": "text", "required": True, "defaultValue": prefilled.get("surname", "")},
+            {
+                "name": "first_name",
+                "label": "First Name",
+                "type": "text",
+                "required": True,
+                "defaultValue": prefilled.get("first_name", ""),
+            },
+            {
+                "name": "middle_name",
+                "label": "Middle Name (Optional)",
+                "type": "text",
+                "required": False,
+                "defaultValue": prefilled.get("middle_name", ""),
+            },
+            {
+                "name": "surname",
+                "label": "Surname",
+                "type": "text",
+                "required": True,
+                "defaultValue": prefilled.get("surname", ""),
+            },
             {
                 "name": "phone_number",
                 "label": "Phone Number",
@@ -372,7 +391,13 @@ class MotorPrivateFlow:
                 "maxLength": 12,
                 "defaultValue": prefilled.get("phone_number", ""),
             },
-            {"name": "email", "label": "Email", "type": "email", "required": True, "defaultValue": prefilled.get("email", "")},
+            {
+                "name": "email",
+                "label": "Email",
+                "type": "email",
+                "required": True,
+                "defaultValue": prefilled.get("email", ""),
+            },
         ]
 
         # Filter to show only missing or invalid fields
