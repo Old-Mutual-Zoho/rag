@@ -27,16 +27,43 @@ class ResponseProcessor:
 
     DEFAULT_CONFIDENCE_THRESHOLD = 0.35
 
+    # Valid single-word insurance-related queries that should not be flagged as incomplete
+    VALID_SINGLE_WORDS = {
+        'claims', 'claim', 'investment', 'investments', 'serenicare',
+        'travel', 'motor', 'accident', 'health', 'life', 'funeral',
+        'benefits', 'coverage', 'eligibility', 'premium', 'quote',
+        'exclusions', 'exclusion', 'pricing', 'policy', 'policies',
+        'underwriting', 'payout', 'payouts', 'deductible', 'deductibles',
+        'copay', 'copayment', 'reimbursement', 'hospitalization',
+        'outpatient', 'inpatient', 'maternity', 'dental', 'vision',
+        'disability', 'annuity', 'annuities', 'retirement', 'pension',
+        'savings', 'endowment', 'medical', 'surgical', 'emergency'
+    }
+
+    # Valid two-word phrase patterns
+    VALID_TWO_WORD_PHRASES = [
+        'travel insurance', 'motor insurance', 'personal accident',
+        'life insurance', 'funeral cover', 'get quote', 'buy insurance',
+        'claim process', 'motor private', 'health cover', 'medical cover',
+        'insurance policy', 'insurance quote', 'insurance premium',
+        'travel cover', 'accident cover', 'car insurance', 'vehicle insurance',
+        'insurance products', 'insurance plans', 'policy details',
+        'premium calculator', 'quote calculator', 'cover options'
+    ]
+
     def __init__(self,
                  followup_manager: Optional[FollowUpManager] = None,
                  fallback_handler: Optional[FallbackHandler] = None,
                  error_handler: Optional[ErrorHandler] = None,
-                 state_manager: Optional[Any] = None):
+                 state_manager: Optional[Any] = None,
+                 confidence_threshold: Optional[float] = None):
         self.followup_manager = followup_manager or FollowUpManager()
         self.fallback_handler = fallback_handler or FallbackHandler()
         self.error_handler = error_handler or ErrorHandler()
         # Optional StateManager (provides get_session/update_session for persistent session storage)
         self.state_manager = state_manager
+        # Allow configurable confidence threshold
+        self.confidence_threshold = confidence_threshold or self.DEFAULT_CONFIDENCE_THRESHOLD
 
     def process_response(
         self,
@@ -94,7 +121,7 @@ class ResponseProcessor:
                 }
 
             # Low confidence => fallback
-            if confidence is not None and confidence < self.DEFAULT_CONFIDENCE_THRESHOLD:
+            if confidence is not None and confidence < self.confidence_threshold:
                 logger.info("Low confidence (%.2f) - triggering fallback", confidence)
                 payload = self.fallback_handler.generate_fallback(user_input, confidence=confidence, conversation_state=conversation_state)
                 if self.state_manager and session_id:
@@ -141,8 +168,8 @@ class ResponseProcessor:
                 return True
         return False
 
-    @staticmethod
-    def _is_incomplete_input(user_input: str) -> bool:
+    @classmethod
+    def _is_incomplete_input(cls, user_input: str) -> bool:
         """Check if user input appears too short or vague to process.
 
         Note: This should be used in conjunction with product matching checks,
@@ -150,11 +177,48 @@ class ResponseProcessor:
         """
         if not user_input or not user_input.strip():
             return True
-        # Very short inputs (1-2 tokens) likely need clarification
-        tokens = user_input.strip().split()
-        if len(tokens) <= 2:
+        
+        stripped = user_input.strip()
+        tokens = stripped.split()
+        lowered = stripped.lower()
+        
+        # Single character or very short gibberish (less than 2 chars)
+        if len(stripped) <= 2:
             return True
-        return False
+        
+        # If single word is a known valid insurance term, it's complete
+        if len(tokens) == 1 and lowered in cls.VALID_SINGLE_WORDS:
+            logger.debug("Single word '%s' is a valid insurance term", stripped)
+            return False
+        
+        # Common valid 2-word queries
+        if len(tokens) == 2:
+            if any(phrase in lowered for phrase in cls.VALID_TWO_WORD_PHRASES):
+                logger.debug("Two-word query '%s' matches valid phrase pattern", stripped)
+                return False
+        
+        # If query has 3+ words, it's probably complete enough
+        if len(tokens) >= 3:
+            return False
+        
+        # Check if it contains common insurance keywords even if short
+        if cls._contains_insurance_keywords(lowered):
+            logger.debug("Query '%s' contains insurance keywords", stripped)
+            return False
+        
+        # At this point: 1-2 word query that doesn't match known patterns
+        # Could be incomplete
+        logger.debug("Query '%s' appears incomplete (short and no known patterns)", stripped)
+        return True
+    
+    @staticmethod
+    def _contains_insurance_keywords(text: str) -> bool:
+        """Check if text contains common insurance-related keywords."""
+        insurance_keywords = [
+            'insurance', 'policy', 'cover', 'claim', 'premium',
+            'quote', 'benefit', 'payout', 'deductible', 'plan'
+        ]
+        return any(keyword in text for keyword in insurance_keywords)
 
     @staticmethod
     def _query_matches_product(user_input: str, products_matched: Optional[list]) -> bool:
