@@ -726,25 +726,19 @@ class PersonalAccidentFlow:
             {"name": "nok_id_number", "label": "ID Number", "type": "text", "required": False, "defaultValue": prefilled_nok.get("nok_id_number", "")},
         ]
 
-        # Filter to show only missing or invalid fields
-        filtered_fields = filter_missing_fields(
-            all_fields=all_fields,
-            payload=payload,
-            collected_data=data,
-            validation_errors=errors,
-            data_key="next_of_kin"
-        )
-
-        # Add validation error hints to fields
-        fields_with_hints = add_validation_hints_to_fields(filtered_fields, errors)
-
-        # Add frontend validation rules for real-time validation
-        fields_with_validation = add_frontend_validation_rules(fields_with_hints)
-
-        return {
-            "response": {
-                "type": "form",
-                "message": "👥 Next of kin details" + (" - Please fix the errors below" if errors else ""),
+        # Show all fields on first visit; only filter for missing fields on re-submission with errors
+        if not payload or "_raw" in payload:
+            # First visit to this step - show all fields
+            filtered_fields = all_fields
+        else:
+            # Re-submission with validation errors - show only missing/invalid fields
+            filtered_fields = filter_missing_fields(
+                all_fields=all_fields,
+                payload=payload,
+                collected_data=data,
+                validation_errors=errors,
+                data_key="next_of_kin"
+            )
                 "fields": fields_with_validation,
             },
             "next_step": 4,
