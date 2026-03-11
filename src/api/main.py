@@ -379,9 +379,20 @@ class StartGuidedRequest(BaseModel):
     initial_data: Optional[Dict] = Field(default_factory=dict, description="Optional pre-filled data for the flow")
 
 
+class CSATFeedbackRequest(BaseModel):
+    """Post-conversation CSAT feedback."""
+
+    rating: int = Field(..., ge=1, le=5, description="CSAT rating from 1 to 5")
+    feedback: Optional[str] = Field(default="", description="Optional user feedback text")
+    session_id: Optional[str] = Field(default=None, description="Chat session id")
+    user_id: Optional[str] = Field(default=None, description="External user id (optional)")
+    metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
 # ============================================================================
 # ENDPOINTS
 # ============================================================================
+
+
 @app.get("/", tags=["Health"])
 async def root():
     """Health check endpoint."""
@@ -624,7 +635,9 @@ async def get_ai_performance_metrics(
         responses = len(trend_by_day[day]["confidence_score"])
         fallbacks = len(trend_by_day[day]["fallbacks"])
         fallback_rate = _rate(fallbacks, responses)
-        trend_data.append({"day": day, "accuracy": round(acc, 1), "fallback": round(fallback_rate, 1)})
+        trend_data.append(
+            {"day": day, "accuracy": round(acc, 1), "fallback": round(fallback_rate, 1)}
+        )
 
     # Conversation quality metrics
     msg_stats = db.list_conversation_message_stats(current_start, now)
@@ -640,12 +653,41 @@ async def get_ai_performance_metrics(
     drop_off_rate = current["fallback_rate"]
 
     quality_metrics = [
-        {"label": "Total Handled", "value": _format_count(current["conversations"]), "change": _fmt_delta(_pct_change(current["conversations"], previous["conversations"]), 0)},
+        {
+            "label": "Total Handled",
+            "value": _format_count(current["conversations"]),
+            "change": _fmt_delta(_pct_change(current["conversations"], previous["conversations"]), 0),
+        },
         {"label": "Completion Rate", "value": _fmt_pct(completion_rate), "change": _fmt_delta(_delta(completion_rate, previous["resolution_rate"]))},
         {"label": "Drop-off Rate", "value": _fmt_pct(drop_off_rate), "change": _fmt_delta(_delta(drop_off_rate, previous["fallback_rate"]))},
         {"label": "Avg Length", "value": _fmt_duration(avg_duration), "change": _fmt_delta(0.0, 0)},
-        {"label": "User CSAT", "value": "N/A", "change": "0"},
     ]
+
+    csat_events_current = db.list_conversation_events(
+        start=current_start,
+        end=now,
+        event_type="csat",
+        limit=5000,
+    )
+    csat_events_previous = db.list_conversation_events(
+        start=previous_start,
+        end=current_start,
+        event_type="csat",
+        limit=5000,
+    )
+    csat_current_vals = [float((e.payload or {}).get("rating", 0)) for e in csat_events_current]
+    csat_prev_vals = [float((e.payload or {}).get("rating", 0)) for e in csat_events_previous]
+    csat_current = _avg([v for v in csat_current_vals if v > 0])
+    csat_previous = _avg([v for v in csat_prev_vals if v > 0])
+    csat_delta = round(csat_current - csat_previous, 2)
+
+    quality_metrics.append(
+        {
+            "label": "User CSAT",
+            "value": f"{csat_current:.1f}/5" if csat_current > 0 else "N/A",
+            "change": f"{csat_delta:+.1f}" if csat_current > 0 else "0",
+        }
+    )
 
     # Intent recognition performance
     intent_events = db.list_conversation_events(
@@ -764,7 +806,12 @@ async def get_ai_performance_metrics(
     low_conf_events = [e for e in intent_events if float(e.payload.get("confidence", 1.0)) < 0.4]
     for e in low_conf_events[:6]:
         conf = float(e.payload.get("confidence", 0.0))
-        severity = "high" if conf < 0.3 else "medium" if conf < 0.4 else "low"
+        if conf < 0.3:
+            severity = "high"
+        elif conf < 0.4:
+            severity = "medium"
+        else:
+            severity = "low"
         weakness_rows.append(
             {
                 "category": (e.payload.get("intent") or "Unknown").replace("_", " ").title(),
@@ -804,7 +851,12 @@ async def get_ai_performance_metrics(
     )
     last_hour_requests = len([m for m in last_hour_metrics if m.metric_type == "confidence_score"])
     model_health = [
-        {"label": "AI Service Uptime", "value": "Online" if last_hour_metrics else "N/A", "note": "Last hour status", "status": "Online" if last_hour_metrics else "Unknown"},
+        {
+            "label": "AI Service Uptime",
+            "value": "Online" if last_hour_metrics else "N/A",
+            "note": "Last hour status",
+            "status": "Online" if last_hour_metrics else "Unknown",
+        },
         {"label": "Inference Latency", "value": f"{avg_latency_ms:.0f}ms", "note": "Avg over period", "status": "Online"},
         {"label": "API Request Volume", "value": f"{last_hour_requests}/hr", "note": "Recent demand", "status": "Online"},
         {"label": "AI Error Rate", "value": _fmt_pct(current["fallback_rate"], 1), "note": "Fallbacks as proxy", "status": "Online"},
@@ -821,6 +873,47 @@ async def get_ai_performance_metrics(
         "escalationReasons": escalation_reasons,
         "modelHealth": model_health,
     }
+
+
+@api_router.post("/metrics/csat", tags=["Metrics"])
+async def post_csat_feedback(
+    body: CSATFeedbackRequest,
+    db: PostgresDB = Depends(get_db),
+):
+    session_id = (body.session_id or "").strip() or None
+    user_id = (body.user_id or "").strip() or None
+    conversation_id: Optional[str] = None
+
+    if session_id:
+        session = state_manager.get_session(session_id) or {}
+        conversation_id = session.get("conversation_id") or session_id
+
+    if not conversation_id and user_id:
+        # No active session; store against user id for analytics
+        conversation_id = user_id
+
+    if not conversation_id:
+        raise HTTPException(status_code=400, detail="session_id or user_id is required")
+
+    payload = {
+        "rating": int(body.rating),
+        "feedback": (body.feedback or "").strip(),
+        "session_id": session_id,
+        "user_id": user_id,
+        **(body.metadata or {}),
+    }
+
+    try:
+        db.add_conversation_event(
+            conversation_id=conversation_id,
+            event_type="csat",
+            payload=payload,
+        )
+    except Exception as exc:
+        logger.error("Failed to store CSAT feedback: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to store feedback")
+
+    return {"success": True}
 
 
 async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: PostgresDB) -> ChatResponse:
