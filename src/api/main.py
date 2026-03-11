@@ -1341,15 +1341,6 @@ async def end_session(session_id: str):
 # API versioning: expose routes under /api/v1
 app.include_router(api_router, prefix="/api/v1")
 
-# Register Personal Accident quote forms router
-try:
-    from src.api.pa_quote_forms_router import api as pa_quote_api
-
-    # Expose under versioned prefix
-    app.include_router(pa_quote_api, prefix="/api/v1")
-except Exception:
-    pass
-
 
 def _strip_heading_from_text(text: str, heading: str) -> str:
     """
