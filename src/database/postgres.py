@@ -41,6 +41,15 @@ class Message:
 
 
 @dataclass
+class ConversationEvent:
+    id: str
+    conversation_id: str
+    event_type: str
+    payload: Dict[str, Any]
+    created_at: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
 class RAGMetric:
     id: str
     metric_type: str
@@ -169,6 +178,7 @@ class PostgresDB:
         self._users_by_phone: Dict[str, str] = {}
         self._conversations: Dict[str, Conversation] = {}
         self._messages: List[Message] = []
+        self._conversation_events: List[ConversationEvent] = []
         self._quotes: Dict[str, Quote] = {}
         # Personal Accident applications
         self._pa_applications: Dict[str, PersonalAccidentApplication] = {}
@@ -251,6 +261,104 @@ class PostgresDB:
         # Return newest first, API reverses again where needed
         msgs.sort(key=lambda m: m.timestamp, reverse=True)
         return msgs[:limit]
+
+    def add_conversation_event(
+        self,
+        *,
+        conversation_id: str,
+        event_type: str,
+        payload: Optional[Dict[str, Any]] = None,
+        created_at: Optional[datetime] = None,
+    ) -> ConversationEvent:
+        ev = ConversationEvent(
+            id=str(uuid.uuid4()),
+            conversation_id=str(conversation_id),
+            event_type=str(event_type),
+            payload=payload or {},
+            created_at=created_at or datetime.utcnow(),
+        )
+        self._conversation_events.append(ev)
+        return ev
+
+    def list_conversation_events(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        event_type: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[ConversationEvent]:
+        events = [
+            e
+            for e in self._conversation_events
+            if start <= e.created_at < end and (event_type is None or e.event_type == event_type)
+        ]
+        events.sort(key=lambda e: e.created_at, reverse=True)
+        if limit:
+            events = events[: int(limit)]
+        return events
+
+    # ------------------------------------------------------------------ #
+    # Metrics helpers
+    # ------------------------------------------------------------------ #
+    def count_conversations(self, start: datetime, end: datetime) -> int:
+        return sum(1 for c in self._conversations.values() if start <= c.created_at < end)
+
+    def count_escalations(self, start: datetime, end: datetime) -> int:
+        def _ts(rec: EscalationSession) -> datetime:
+            return rec.escalated_at or rec.created_at
+
+        return sum(1 for rec in self._escalation_sessions.values() if start <= _ts(rec) < end)
+
+    def count_payment_transactions(self, start: datetime, end: datetime, statuses: List[str]) -> int:
+        statuses_upper = {s.upper() for s in (statuses or [])}
+        return sum(
+            1
+            for txn in self._payment_transactions.values()
+            if start <= txn.created_at < end and str(txn.status).upper() in statuses_upper
+        )
+
+    def list_rag_metrics(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        metric_types: Optional[List[str]] = None,
+        limit: Optional[int] = None,
+    ) -> List[RAGMetric]:
+        metrics = [
+            m
+            for m in self._rag_metrics
+            if start <= m.created_at < end and (not metric_types or m.metric_type in metric_types)
+        ]
+        metrics.sort(key=lambda m: m.created_at, reverse=True)
+        if limit:
+            metrics = metrics[: int(limit)]
+        return metrics
+
+    def list_escalations(self, start: datetime, end: datetime) -> List[EscalationSession]:
+        def _ts(rec: EscalationSession) -> datetime:
+            return rec.escalated_at or rec.created_at
+
+        return [rec for rec in self._escalation_sessions.values() if start <= _ts(rec) < end]
+
+    def list_conversation_message_stats(self, start: datetime, end: datetime) -> List[Dict[str, Any]]:
+        grouped: Dict[str, List[Message]] = {}
+        for msg in self._messages:
+            if start <= msg.timestamp < end:
+                grouped.setdefault(msg.conversation_id, []).append(msg)
+        stats: List[Dict[str, Any]] = []
+        for conv_id, msgs in grouped.items():
+            msgs.sort(key=lambda m: m.timestamp)
+            stats.append(
+                {
+                    "conversation_id": conv_id,
+                    "min_ts": msgs[0].timestamp if msgs else None,
+                    "max_ts": msgs[-1].timestamp if msgs else None,
+                    "message_count": len(msgs),
+                }
+            )
+        return stats
 
     # ------------------------------------------------------------------ #
     # RAG metrics

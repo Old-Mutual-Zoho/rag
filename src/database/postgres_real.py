@@ -11,12 +11,13 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from sqlalchemy import create_engine, select
+from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.database.models import (
     Base,
     Conversation,
+    ConversationEvent,
     EscalationSession,
     Message,
     PaymentAuditEvent,
@@ -182,6 +183,132 @@ class PostgresDB:
                 .limit(limit)
             )
             return list(s.execute(stmt).scalars().all())
+
+    def add_conversation_event(
+        self,
+        *,
+        conversation_id: str,
+        event_type: str,
+        payload: Optional[Dict[str, Any]] = None,
+        created_at: Optional[datetime] = None,
+    ) -> ConversationEvent:
+        with self._session() as s:
+            ev = ConversationEvent(
+                id=str(uuid4()),
+                conversation_id=str(conversation_id),
+                event_type=str(event_type),
+                payload=payload or {},
+                created_at=created_at or datetime.utcnow(),
+            )
+            s.add(ev)
+            s.flush()
+            s.refresh(ev)
+            return ev
+
+    def list_conversation_events(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        event_type: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[ConversationEvent]:
+        with self._session() as s:
+            stmt = select(ConversationEvent).where(
+                ConversationEvent.created_at >= start,
+                ConversationEvent.created_at < end,
+            )
+            if event_type:
+                stmt = stmt.where(ConversationEvent.event_type == str(event_type))
+            stmt = stmt.order_by(ConversationEvent.created_at.desc())
+            if limit:
+                stmt = stmt.limit(int(limit))
+            return list(s.execute(stmt).scalars().all())
+
+    # ------------------------------------------------------------------ #
+    # Metrics helpers
+    # ------------------------------------------------------------------ #
+    def count_conversations(self, start: datetime, end: datetime) -> int:
+        with self._session() as s:
+            stmt = (
+                select(func.count())
+                .select_from(Conversation)
+                .where(Conversation.created_at >= start, Conversation.created_at < end)
+            )
+            return int(s.execute(stmt).scalar() or 0)
+
+    def count_escalations(self, start: datetime, end: datetime) -> int:
+        with self._session() as s:
+            ts = func.coalesce(EscalationSession.escalated_at, EscalationSession.created_at)
+            stmt = (
+                select(func.count())
+                .select_from(EscalationSession)
+                .where(ts >= start, ts < end)
+            )
+            return int(s.execute(stmt).scalar() or 0)
+
+    def count_payment_transactions(self, start: datetime, end: datetime, statuses: List[str]) -> int:
+        statuses_upper = [s.upper() for s in (statuses or [])]
+        with self._session() as s:
+            stmt = (
+                select(func.count())
+                .select_from(PaymentTransaction)
+                .where(
+                    PaymentTransaction.created_at >= start,
+                    PaymentTransaction.created_at < end,
+                    func.upper(PaymentTransaction.status).in_(statuses_upper),
+                )
+            )
+            return int(s.execute(stmt).scalar() or 0)
+
+    def list_rag_metrics(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        metric_types: Optional[List[str]] = None,
+        limit: Optional[int] = None,
+    ) -> List[RAGMetric]:
+        with self._session() as s:
+            stmt = select(RAGMetric).where(
+                RAGMetric.created_at >= start,
+                RAGMetric.created_at < end,
+            )
+            if metric_types:
+                stmt = stmt.where(RAGMetric.metric_type.in_(metric_types))
+            stmt = stmt.order_by(RAGMetric.created_at.desc())
+            if limit:
+                stmt = stmt.limit(int(limit))
+            return list(s.execute(stmt).scalars().all())
+
+    def list_escalations(self, start: datetime, end: datetime) -> List[EscalationSession]:
+        with self._session() as s:
+            ts = func.coalesce(EscalationSession.escalated_at, EscalationSession.created_at)
+            stmt = select(EscalationSession).where(ts >= start, ts < end)
+            return list(s.execute(stmt).scalars().all())
+
+    def list_conversation_message_stats(self, start: datetime, end: datetime) -> List[Dict[str, Any]]:
+        with self._session() as s:
+            stmt = (
+                select(
+                    Message.conversation_id,
+                    func.min(Message.timestamp),
+                    func.max(Message.timestamp),
+                    func.count(),
+                )
+                .where(Message.timestamp >= start, Message.timestamp < end)
+                .group_by(Message.conversation_id)
+            )
+            rows = s.execute(stmt).all()
+            return [
+                {
+                    "conversation_id": str(row[0]),
+                    "min_ts": row[1],
+                    "max_ts": row[2],
+                    "message_count": int(row[3] or 0),
+                }
+                for row in rows
+            ]
 
     # ------------------------------------------------------------------ #
     # Quotes

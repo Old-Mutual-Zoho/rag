@@ -37,6 +37,7 @@ class Conversation(Base):
     user: Mapped["User"] = relationship("User", back_populates="conversations")
     messages: Mapped[list["Message"]] = relationship("Message", back_populates="conversation", order_by="Message.timestamp")
     metrics: Mapped[list["RAGMetric"]] = relationship("RAGMetric", back_populates="conversation")
+    events: Mapped[list["ConversationEvent"]] = relationship("ConversationEvent", back_populates="conversation")
 
 
 class EscalationSession(Base):
@@ -71,6 +72,18 @@ class Message(Base):
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
     conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="messages")
+
+
+class ConversationEvent(Base):
+    __tablename__ = "conversation_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    conversation_id: Mapped[str] = mapped_column(String(36), ForeignKey("conversations.id"), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    payload: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, index=True)
+
+    conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="events")
 
 
 class Quote(Base):

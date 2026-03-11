@@ -287,6 +287,22 @@ class ConversationalMode:
                     ],
                 )
 
+                if hasattr(db, "add_conversation_event"):
+                    try:
+                        db.add_conversation_event(
+                            conversation_id=conversation_id or session_id,
+                            event_type="intent",
+                            payload={
+                                "intent": no_ret_kind.lower(),
+                                "intent_type": "NO_RETRIEVAL",
+                                "confidence": 1.0,
+                                "user_message": message,
+                                "response_latency": time.time() - start_time,
+                            },
+                        )
+                    except Exception as exc:
+                        logger.warning("[metrics] Failed to record conversation event: %s", exc)
+
                 return {
                     "mode": "conversational",
                     "response": answer_text,
@@ -507,10 +523,33 @@ class ConversationalMode:
 
         # No product-guide buttons by default; users can reply in free text.
 
+        response_latency = time.time() - start_time
         metrics_to_emit.append(
-            _metric_payload("response_latency", time.time() - start_time, conversation_id)
+            _metric_payload("response_latency", response_latency, conversation_id)
         )
         _emit_metrics(db, metrics_to_emit)
+
+        if hasattr(db, "add_conversation_event"):
+            try:
+                top_product = products[0][2] if products else {}
+                db.add_conversation_event(
+                    conversation_id=conversation_id or session_id,
+                    event_type="intent",
+                    payload={
+                        "intent": intent,
+                        "intent_type": "INFORMATIONAL",
+                        "confidence": response.get("confidence", 0.5),
+                        "user_message": message,
+                        "response_latency": response_latency,
+                        "product_name": top_product.get("name"),
+                        "product_id": top_product.get("product_id"),
+                        "category": top_product.get("category_name"),
+                        "subcategory": top_product.get("sub_category_name"),
+                    },
+                )
+            except Exception as exc:
+                logger.warning("[metrics] Failed to record conversation event: %s", exc)
+
         return {
             "mode": "conversational",
             "response": answer_text,

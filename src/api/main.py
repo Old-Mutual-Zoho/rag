@@ -20,10 +20,11 @@ load_dotenv()
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from typing import Any, Dict, List, Optional
+from collections import defaultdict, Counter
 
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -412,6 +413,413 @@ async def get_rag_metrics(
             }
             for m in metrics
         ],
+    }
+
+
+@api_router.get("/metrics/system-performance", tags=["Metrics"])
+async def get_system_performance_metrics(
+    days: int = Query(7, ge=1, le=90),
+    db: PostgresDB = Depends(get_db),
+):
+    """
+    System performance KPIs for the admin dashboard.
+
+    Computes escalation rate, AI resolution rate, and payment success rate
+    for the last `days` days, with change vs the previous period.
+    """
+    now = datetime.utcnow()
+    current_start = now - timedelta(days=days)
+    previous_start = current_start - timedelta(days=days)
+
+    def _rate(numerator: int, denominator: int) -> float:
+        return round((numerator / denominator) * 100, 2) if denominator > 0 else 0.0
+
+    def _delta(current: float, previous: float) -> float:
+        return round(current - previous, 2)
+
+    # Escalation rate
+    current_conversations = db.count_conversations(current_start, now)
+    previous_conversations = db.count_conversations(previous_start, current_start)
+    current_escalations = db.count_escalations(current_start, now)
+    previous_escalations = db.count_escalations(previous_start, current_start)
+
+    escalation_rate = _rate(current_escalations, current_conversations)
+    escalation_rate_prev = _rate(previous_escalations, previous_conversations)
+    escalation_change = _delta(escalation_rate, escalation_rate_prev)
+
+    # AI resolution rate: proxy as non-escalated share of conversations
+    resolution_rate = _rate(max(current_conversations - current_escalations, 0), current_conversations)
+    resolution_rate_prev = _rate(max(previous_conversations - previous_escalations, 0), previous_conversations)
+    resolution_change = _delta(resolution_rate, resolution_rate_prev)
+
+    # Payment success rate: success / (success + failed) within window
+    current_success = db.count_payment_transactions(current_start, now, ["SUCCESS", "COMPLETED"])
+    current_failed = db.count_payment_transactions(current_start, now, ["FAILED", "ERROR"])
+    previous_success = db.count_payment_transactions(previous_start, current_start, ["SUCCESS", "COMPLETED"])
+    previous_failed = db.count_payment_transactions(previous_start, current_start, ["FAILED", "ERROR"])
+
+    payment_rate = _rate(current_success, current_success + current_failed)
+    payment_rate_prev = _rate(previous_success, previous_success + previous_failed)
+    payment_change = _delta(payment_rate, payment_rate_prev)
+
+    label_suffix = f"vs previous {days} days"
+    return {
+        "kpis": [
+            {
+                "label": "Escalation Rate",
+                "value": f"{escalation_rate:.2f}%",
+                "change": escalation_change,
+                "invertTrend": True,
+                "changeLabel": label_suffix,
+            },
+            {
+                "label": "AI Resolution Rate",
+                "value": f"{resolution_rate:.2f}%",
+                "change": resolution_change,
+                "changeLabel": label_suffix,
+            },
+            {
+                "label": "Payment Success",
+                "value": f"{payment_rate:.2f}%",
+                "change": payment_change,
+                "changeLabel": label_suffix,
+            },
+        ]
+    }
+
+
+@api_router.get("/metrics/ai-performance", tags=["Metrics"])
+async def get_ai_performance_metrics(
+    days: int = Query(30, ge=1, le=180),
+    db: PostgresDB = Depends(get_db),
+):
+    """
+    Aggregated AI performance metrics for the admin dashboard.
+    """
+    now = datetime.utcnow()
+    current_start = now - timedelta(days=days)
+    previous_start = current_start - timedelta(days=days)
+
+    def _avg(values: List[float]) -> float:
+        return round(sum(values) / len(values), 4) if values else 0.0
+
+    def _rate(num: int, denom: int) -> float:
+        return round((num / denom) * 100, 2) if denom > 0 else 0.0
+
+    def _delta(curr: float, prev: float) -> float:
+        return round(curr - prev, 2)
+
+    def _fmt_pct(value: float, digits: int = 1) -> str:
+        return f"{value:.{digits}f}%"
+
+    def _fmt_delta(value: float, digits: int = 1) -> str:
+        sign = "+" if value > 0 else ""
+        return f"{sign}{value:.{digits}f}%"
+
+    def _fmt_seconds(value: float) -> str:
+        return f"{value:.1f}s"
+
+    def _fmt_duration(seconds: float) -> str:
+        if seconds <= 0:
+            return "0s"
+        mins = int(seconds // 60)
+        secs = int(seconds % 60)
+        if mins <= 0:
+            return f"{secs}s"
+        return f"{mins}m {secs}s"
+
+    def _pct_change(curr: float, prev: float) -> float:
+        return round(((curr - prev) / prev) * 100, 2) if prev > 0 else 0.0
+
+    def _format_count(value: int) -> str:
+        return f"{value:,}"
+
+    def _window_metrics(start: datetime, end: datetime) -> Dict[str, Any]:
+        rag = db.list_rag_metrics(
+            start=start,
+            end=end,
+            metric_types=["retrieval_accuracy", "confidence_score", "response_latency", "fallbacks"],
+            limit=50000,
+        )
+        by_type: Dict[str, List[float]] = defaultdict(list)
+        for m in rag:
+            by_type[m.metric_type].append(float(m.value))
+
+        accuracy = _avg(by_type["retrieval_accuracy"]) * 100
+        confidence = _avg(by_type["confidence_score"]) * 100
+        latency = _avg(by_type["response_latency"])
+        fallbacks = len(by_type["fallbacks"])
+
+        conversations = db.count_conversations(start, end)
+        escalations = db.count_escalations(start, end)
+
+        escalation_rate = _rate(escalations, conversations)
+        resolution_rate = _rate(max(conversations - escalations, 0), conversations)
+        fallback_rate = _rate(fallbacks, conversations)
+
+        return {
+            "accuracy": accuracy,
+            "confidence": confidence,
+            "latency": latency,
+            "fallback_rate": fallback_rate,
+            "escalation_rate": escalation_rate,
+            "resolution_rate": resolution_rate,
+            "conversations": conversations,
+        }
+
+    current = _window_metrics(current_start, now)
+    previous = _window_metrics(previous_start, current_start)
+
+    top_metrics = [
+        {
+            "label": "AI Accuracy Score",
+            "value": _fmt_pct(current["accuracy"]),
+            "delta": _fmt_delta(_delta(current["accuracy"], previous["accuracy"])),
+            "tone": "positive" if current["accuracy"] >= previous["accuracy"] else "negative",
+        },
+        {
+            "label": "AI Resolution Rate",
+            "value": _fmt_pct(current["resolution_rate"]),
+            "delta": _fmt_delta(_delta(current["resolution_rate"], previous["resolution_rate"])),
+            "tone": "positive" if current["resolution_rate"] >= previous["resolution_rate"] else "negative",
+        },
+        {
+            "label": "Fallback Rate",
+            "value": _fmt_pct(current["fallback_rate"]),
+            "delta": _fmt_delta(_delta(current["fallback_rate"], previous["fallback_rate"])),
+            "tone": "positive" if current["fallback_rate"] <= previous["fallback_rate"] else "negative",
+        },
+        {
+            "label": "Escalation Rate",
+            "value": _fmt_pct(current["escalation_rate"]),
+            "delta": _fmt_delta(_delta(current["escalation_rate"], previous["escalation_rate"])),
+            "tone": "positive" if current["escalation_rate"] <= previous["escalation_rate"] else "negative",
+        },
+        {
+            "label": "Avg Response Time",
+            "value": _fmt_seconds(current["latency"]),
+            "delta": f"{_delta(current['latency'], previous['latency']):+.1f}s",
+            "tone": "positive" if current["latency"] <= previous["latency"] else "negative",
+        },
+    ]
+
+    # Trend data (accuracy + fallback) for last 7 days
+    trend_days = 7
+    trend_start = now - timedelta(days=trend_days)
+    trend_metrics = db.list_rag_metrics(
+        start=trend_start,
+        end=now,
+        metric_types=["retrieval_accuracy", "fallbacks", "confidence_score"],
+        limit=50000,
+    )
+    trend_by_day: Dict[str, Dict[str, List[float]]] = defaultdict(lambda: defaultdict(list))
+    for m in trend_metrics:
+        label = m.created_at.strftime("%a")
+        trend_by_day[label][m.metric_type].append(float(m.value))
+
+    trend_data = []
+    for i in range(trend_days):
+        day = (trend_start + timedelta(days=i)).strftime("%a")
+        acc = _avg(trend_by_day[day]["retrieval_accuracy"]) * 100
+        responses = len(trend_by_day[day]["confidence_score"])
+        fallbacks = len(trend_by_day[day]["fallbacks"])
+        fallback_rate = _rate(fallbacks, responses)
+        trend_data.append({"day": day, "accuracy": round(acc, 1), "fallback": round(fallback_rate, 1)})
+
+    # Conversation quality metrics
+    msg_stats = db.list_conversation_message_stats(current_start, now)
+    durations = []
+    message_counts = []
+    for row in msg_stats:
+        if row["min_ts"] and row["max_ts"]:
+            durations.append((row["max_ts"] - row["min_ts"]).total_seconds())
+        message_counts.append(row.get("message_count", 0))
+
+    avg_duration = _avg(durations) if durations else 0.0
+    completion_rate = current["resolution_rate"]
+    drop_off_rate = current["fallback_rate"]
+
+    quality_metrics = [
+        {"label": "Total Handled", "value": _format_count(current["conversations"]), "change": _fmt_delta(_pct_change(current["conversations"], previous["conversations"]), 0)},
+        {"label": "Completion Rate", "value": _fmt_pct(completion_rate), "change": _fmt_delta(_delta(completion_rate, previous["resolution_rate"]))},
+        {"label": "Drop-off Rate", "value": _fmt_pct(drop_off_rate), "change": _fmt_delta(_delta(drop_off_rate, previous["fallback_rate"]))},
+        {"label": "Avg Length", "value": _fmt_duration(avg_duration), "change": _fmt_delta(0.0, 0)},
+        {"label": "User CSAT", "value": "N/A", "change": "0"},
+    ]
+
+    # Intent recognition performance
+    intent_events = db.list_conversation_events(
+        start=current_start,
+        end=now,
+        event_type="intent",
+        limit=20000,
+    )
+    intent_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+    for ev in intent_events:
+        payload = ev.payload or {}
+        key = str(payload.get("intent") or "unknown")
+        intent_groups[key].append({"payload": payload, "created_at": ev.created_at})
+
+    def _trend_series(events: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        series = {}
+
+        # Today (4-hour buckets)
+        start_today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        buckets = []
+        for i in range(0, 24, 4):
+            label = f"{i:02d}:00"
+            end_bucket = start_today + timedelta(hours=i + 4)
+            start_bucket = start_today + timedelta(hours=i)
+            count = sum(1 for e in events if start_bucket <= e["created_at"] < end_bucket)
+            buckets.append({"label": label, "inquiries": count})
+        series["today"] = buckets
+
+        # Weekly (last 7 days)
+        weekly = []
+        week_start = now - timedelta(days=6)
+        for i in range(7):
+            day = (week_start + timedelta(days=i))
+            label = day.strftime("%a")
+            day_start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+            day_end = day_start + timedelta(days=1)
+            count = sum(1 for e in events if day_start <= e["created_at"] < day_end)
+            weekly.append({"label": label, "inquiries": count})
+        series["weekly"] = weekly
+
+        # Monthly (last 4 weeks)
+        monthly = []
+        for i in range(4):
+            start_week = now - timedelta(days=(27 - i * 7))
+            end_week = start_week + timedelta(days=7)
+            count = sum(1 for e in events if start_week <= e["created_at"] < end_week)
+            monthly.append({"label": f"Week {i + 1}", "inquiries": count})
+        series["monthly"] = monthly
+
+        # Yearly (last 12 months)
+        yearly = []
+        for i in range(12):
+            month_start = (now.replace(day=1) - timedelta(days=30 * (11 - i))).replace(day=1)
+            month_end = (month_start + timedelta(days=32)).replace(day=1)
+            count = sum(1 for e in events if month_start <= e["created_at"] < month_end)
+            yearly.append({"label": month_start.strftime("%b"), "inquiries": count})
+        series["yearly"] = yearly
+
+        return series
+
+    intent_rows = []
+    for intent_key, events in sorted(intent_groups.items(), key=lambda item: len(item[1]), reverse=True)[:5]:
+        confidences = [float(e["payload"].get("confidence", 0.0)) for e in events]
+        response_latencies = [float(e["payload"].get("response_latency", 0.0)) for e in events if e["payload"].get("response_latency") is not None]
+        top_regions = [str(e["payload"].get("region", "Unknown")) for e in events if e["payload"].get("region")]
+        products = [e["payload"].get("product_name") for e in events if e["payload"].get("product_name")]
+        product_counts = Counter([p for p in products if p])
+        product_breakdown = [
+            {"product": name, "inquiries": count, "share": f"{round((count / len(events)) * 100)}%"}
+            for name, count in product_counts.most_common(4)
+        ]
+
+        hours = [e["created_at"].hour for e in events]
+        peak_hour = max(hours, key=hours.count) if hours else 0
+        peak_window = f"{peak_hour:02d}:00 - {min(peak_hour + 2, 23):02d}:00 UTC"
+
+        intent_rows.append(
+            {
+                "category": intent_key.replace("_", " ").title(),
+                "volume": _format_count(len(events)),
+                "accuracy": round(_avg(confidences) * 100, 1),
+                "details": {
+                    "timeRange": f"Last {days} days",
+                    "peakWindow": peak_window,
+                    "avgHandleTime": _fmt_seconds(_avg(response_latencies)),
+                    "firstResponse": _fmt_seconds(_avg(response_latencies)),
+                    "confidenceBand": f"{round(min(confidences) * 100, 0) if confidences else 0}% - {round(max(confidences) * 100, 0) if confidences else 0}%",
+                    "topRegions": top_regions[:3] or ["Unknown"],
+                    "productBreakdown": product_breakdown,
+                    "trendSeries": _trend_series(events),
+                },
+            }
+        )
+
+    # RAG retrieval performance
+    rag_metrics = db.list_rag_metrics(
+        start=current_start,
+        end=now,
+        metric_types=["retrieval_accuracy", "confidence_score", "response_latency", "fallbacks"],
+        limit=50000,
+    )
+    rag_by_type: Dict[str, List[float]] = defaultdict(list)
+    for m in rag_metrics:
+        rag_by_type[m.metric_type].append(float(m.value))
+    retrieval_success = _avg(rag_by_type["retrieval_accuracy"]) * 100
+    avg_latency_ms = _avg(rag_by_type["response_latency"]) * 1000
+    doc_relevance = _avg(rag_by_type["confidence_score"]) * 10
+
+    rag_context_rows = [
+        {"doc": "Retrieval Accuracy", "accuracy": _fmt_pct(retrieval_success, 1)},
+        {"doc": "Confidence Score", "accuracy": f"{doc_relevance:.1f}/10"},
+        {"doc": "Fallback Rate", "accuracy": _fmt_pct(current["fallback_rate"], 1)},
+    ]
+
+    weakness_rows = []
+    low_conf_events = [e for e in intent_events if float(e.payload.get("confidence", 1.0)) < 0.4]
+    for e in low_conf_events[:6]:
+        conf = float(e.payload.get("confidence", 0.0))
+        severity = "high" if conf < 0.3 else "medium" if conf < 0.4 else "low"
+        weakness_rows.append(
+            {
+                "category": (e.payload.get("intent") or "Unknown").replace("_", " ").title(),
+                "query": (e.payload.get("user_message") or "")[:60],
+                "severity": severity,
+                "frequency": 1,
+            }
+        )
+
+    # Learning opportunities
+    learning_ops = [
+        {"title": "Unanswered Gaps", "note": f"{len(low_conf_events)} low-confidence topics detected."},
+        {"title": "Suggested Intents", "note": "Review high-volume intents for consolidation."},
+        {"title": "Training Needs", "note": "Check confidence band drops in recent intents."},
+    ]
+
+    # Escalation analysis
+    escalations = db.list_escalations(current_start, now)
+    reason_counts = Counter([(e.escalation_reason or "Unspecified") for e in escalations])
+    total_escalations = sum(reason_counts.values()) or 1
+    escalation_reasons = [
+        {
+            "reason": reason,
+            "cases": count,
+            "progress": round((count / total_escalations) * 100),
+            "tone": "good" if count / total_escalations < 0.5 else "bad",
+        }
+        for reason, count in reason_counts.most_common(4)
+    ]
+
+    # Model health
+    last_hour_metrics = db.list_rag_metrics(
+        start=now - timedelta(hours=1),
+        end=now,
+        metric_types=["response_latency", "fallbacks", "confidence_score"],
+        limit=5000,
+    )
+    last_hour_requests = len([m for m in last_hour_metrics if m.metric_type == "confidence_score"])
+    model_health = [
+        {"label": "AI Service Uptime", "value": "Online" if last_hour_metrics else "N/A", "note": "Last hour status", "status": "Online" if last_hour_metrics else "Unknown"},
+        {"label": "Inference Latency", "value": f"{avg_latency_ms:.0f}ms", "note": "Avg over period", "status": "Online"},
+        {"label": "API Request Volume", "value": f"{last_hour_requests}/hr", "note": "Recent demand", "status": "Online"},
+        {"label": "AI Error Rate", "value": _fmt_pct(current["fallback_rate"], 1), "note": "Fallbacks as proxy", "status": "Online"},
+    ]
+
+    return {
+        "topMetrics": top_metrics,
+        "trendData": trend_data,
+        "qualityMetrics": quality_metrics,
+        "intentRows": intent_rows,
+        "ragContextRows": rag_context_rows,
+        "ragWeaknessRows": weakness_rows,
+        "learningOps": learning_ops,
+        "escalationReasons": escalation_reasons,
+        "modelHealth": model_health,
     }
 
 
