@@ -21,10 +21,8 @@ from src.chatbot.validation import (
     validate_phone_ug,
 )
 from src.chatbot.flows.field_filter import (
-    filter_missing_fields,
     add_validation_hints_to_fields,
     add_frontend_validation_rules,
-    filter_already_collected_fields
 )
 from src.integrations.policy.premium import premium_service
 from src.integrations.underwriting import run_quote_preview
@@ -370,14 +368,8 @@ class PersonalAccidentFlow:
             },
         ]
 
-        # Filter to show only missing or invalid fields
-        filtered_fields = filter_missing_fields(
-            all_fields=all_fields,
-            payload=payload,
-            collected_data=data,
-            validation_errors=errors,
-            data_key="quick_quote"
-        )
+        # Show original form fields without filtering
+        filtered_fields = all_fields
 
         # Add validation error hints to fields
         fields_with_hints = add_validation_hints_to_fields(filtered_fields, errors)
@@ -640,24 +632,8 @@ class PersonalAccidentFlow:
             },
         ]
 
-        # Progressive disclosure: If first visit, show only NEW fields (not already collected in quick_quote)
-        # If re-submission with errors, show only missing fields
-        if not payload or "_raw" in payload:
-            # First visit to this step - filter out already-collected fields
-            filtered_fields = filter_already_collected_fields(
-                all_fields=all_fields,
-                collected_data=data,
-                previous_step_keys=["quick_quote"]
-            )
-        else:
-            # Re-submission with validation errors - show only missing fields
-            filtered_fields = filter_missing_fields(
-                all_fields=all_fields,
-                payload=payload,
-                collected_data=data,
-                validation_errors=errors,
-                data_key="personal_details"
-            )
+        # Show original form fields without filtering
+        filtered_fields = all_fields
 
         # Add validation error hints to fields
         fields_with_hints = add_validation_hints_to_fields(filtered_fields, errors)
@@ -726,19 +702,8 @@ class PersonalAccidentFlow:
             {"name": "nok_id_number", "label": "ID Number", "type": "text", "required": False, "defaultValue": prefilled_nok.get("nok_id_number", "")},
         ]
 
-        # Show all fields on first visit; only filter for missing fields on re-submission with errors
-        if not payload or "_raw" in payload:
-            # First visit to this step - show all fields
-            filtered_fields = all_fields
-        else:
-            # Re-submission with validation errors - show only missing/invalid fields
-            filtered_fields = filter_missing_fields(
-                all_fields=all_fields,
-                payload=payload,
-                collected_data=data,
-                validation_errors=errors,
-                data_key="next_of_kin"
-            )
+        # Show original form fields without filtering
+        filtered_fields = all_fields
 
         # Add validation error hints to fields
         fields_with_hints = add_validation_hints_to_fields(filtered_fields, errors)
@@ -845,7 +810,7 @@ class PersonalAccidentFlow:
         return {
             "response": {
                 "type": "file_upload",
-                "message": "📄 Upload your National ID (PDF)",
+                "message": "Upload your National ID (PDF)",
                 "accept": "application/pdf",
                 "field_name": "national_id_file_ref",
                 "max_size_mb": 5,
@@ -889,7 +854,7 @@ class PersonalAccidentFlow:
         return {
             "response": {
                 "type": "confirmation",
-                "message": "✅ Please review your details below",
+                "message": " Please review your details below",
                 "summary": summary,
                 "actions": [
                     {"type": "edit", "label": "Edit Details"},
@@ -941,7 +906,7 @@ class PersonalAccidentFlow:
         return {
             "response": {
                 "type": "proceed_to_payment",
-                "message": "✅ Proceeding to payment. Choose your payment method.",
+                "message": " Proceeding to payment. Choose your payment method.",
                 "quote_id": quote_id,
             },
             "complete": True,
