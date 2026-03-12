@@ -21,6 +21,7 @@ from src.chatbot.flows.field_filter import (
 from src.chatbot.validation import (
     FormValidationError,
     optional_str,
+    parse_date_flexible,
     raise_if_errors,
     require_str,
     validate_date_iso,
@@ -32,70 +33,6 @@ from src.chatbot.validation import (
 from src.integrations.policy.premium import premium_service
 from src.integrations.underwriting import run_quote_preview
 from src.integrations.product_benefits import product_benefits_loader
-
-
-def parse_date_flexible(date_str: Any) -> Optional[date]:
-    """
-    Parse date from multiple formats: YYYY-MM-DD, MM/DD/YYYY, DD/MM/YYYY, ISO datetime.
-    Returns a date object or None if parsing fails.
-    """
-    if isinstance(date_str, date):
-        return date_str
-
-    if not isinstance(date_str, str):
-        return None
-
-    date_str = date_str.strip()
-    if not date_str:
-        return None
-
-    # Try ISO datetime format (YYYY-MM-DDTHH:MM:SS)
-    if "T" in date_str:
-        try:
-            return datetime.fromisoformat(date_str).date()
-        except (ValueError, TypeError):
-            pass
-
-    # Try ISO date format (YYYY-MM-DD)
-    try:
-        return date.fromisoformat(date_str)
-    except (ValueError, TypeError):
-        pass
-
-    # Try MM/DD/YYYY or DD/MM/YYYY format
-    if "/" in date_str:
-        parts = date_str.split("/")
-        if len(parts) == 3:
-            try:
-                # Try MM/DD/YYYY first
-                month, day, year = int(parts[0]), int(parts[1]), int(parts[2])
-                return date(year, month, day)
-            except (ValueError, TypeError):
-                try:
-                    # Try DD/MM/YYYY as fallback
-                    day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
-                    return date(year, month, day)
-                except (ValueError, TypeError):
-                    pass
-
-    # Try DD-MM-YYYY or MM-DD-YYYY format
-    if "-" in date_str and "T" not in date_str:
-        parts = date_str.split("-")
-        if len(parts) == 3:
-            try:
-                # For non-ISO format with dashes
-                part1, part2, part3 = int(parts[0]), int(parts[1]), int(parts[2])
-                # Assume format is MM-DD-YYYY if parts[2] looks like a year
-                if part3 > 31:  # Likely a year
-                    return date(part3, part1, part2)
-                else:
-                    # Could be DD-MM-YY or similar, try to determine
-                    if part1 > 12:  # First part must be day
-                        return date(part3 if part3 > 999 else 2000 + part3, part2, part1)
-            except (ValueError, TypeError):
-                pass
-
-    return None
 
 
 # Risky activities for the checkbox step (per product requirements)
