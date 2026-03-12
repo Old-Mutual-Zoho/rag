@@ -12,6 +12,7 @@ from datetime import datetime, date
 
 from src.chatbot.field_validator import (
     FieldDecorator,
+    StepValidator,
     filter_collected_fields,
 )
 from src.chatbot.validation import (
