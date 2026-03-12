@@ -186,11 +186,65 @@ def validate_nin_ug(value: str, errors: Dict[str, str], field: str = "national_i
     return raw
 
 
-def parse_iso_date(value: str) -> Optional[date]:
-    s = _strip(value)
-    if not s:
+def parse_date_flexible(value: Any) -> Optional[date]:
+    """Parse a date from common frontend/backend formats.
+
+    Supports YYYY-MM-DD, ISO datetime strings, MM/DD/YYYY, DD/MM/YYYY,
+    MM-DD-YYYY, and DD-MM-YYYY.
+    """
+    if isinstance(value, date):
+        return value
+
+    if not isinstance(value, str):
         return None
-    return date.fromisoformat(s)
+
+    raw = value.strip()
+    if not raw:
+        return None
+
+    normalized = raw.replace("Z", "+00:00") if raw.endswith("Z") else raw
+
+    if "T" in normalized:
+        try:
+            return datetime.fromisoformat(normalized).date()
+        except (ValueError, TypeError):
+            pass
+
+    try:
+        return date.fromisoformat(normalized)
+    except (ValueError, TypeError):
+        pass
+
+    if "/" in raw:
+        parts = raw.split("/")
+        if len(parts) == 3:
+            try:
+                month, day, year = int(parts[0]), int(parts[1]), int(parts[2])
+                return date(year, month, day)
+            except (ValueError, TypeError):
+                try:
+                    day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+                    return date(year, month, day)
+                except (ValueError, TypeError):
+                    pass
+
+    if "-" in raw and "T" not in raw:
+        parts = raw.split("-")
+        if len(parts) == 3:
+            try:
+                part1, part2, part3 = int(parts[0]), int(parts[1]), int(parts[2])
+                if part3 > 31:
+                    return date(part3, part1, part2)
+                if part1 > 12:
+                    return date(part3 if part3 > 999 else 2000 + part3, part2, part1)
+            except (ValueError, TypeError):
+                pass
+
+    return None
+
+
+def parse_iso_date(value: str) -> Optional[date]:
+    return parse_date_flexible(value)
 
 
 def validate_date_iso(value: str, errors: Dict[str, str], field: str, *, required: bool = True, not_future: bool = False) -> str:
@@ -200,27 +254,10 @@ def validate_date_iso(value: str, errors: Dict[str, str], field: str, *, require
             add_error(errors, field, f"{field} is required")
         return raw
 
-    d: Optional[date] = None
-    try:
-        if "T" in raw:
-            d = datetime.fromisoformat(raw).date()
-        else:
-            d = date.fromisoformat(raw)
-    except Exception:
-        d = None
-
-    if d is None and "/" in raw:
-        parts = raw.split("/")
-        if len(parts) == 3:
-            try:
-                # MM/DD/YYYY
-                month, day, year = int(parts[0]), int(parts[1]), int(parts[2])
-                d = date(year, month, day)
-            except Exception:
-                d = None
+    d = parse_date_flexible(raw)
 
     if d is None:
-        add_error(errors, field, f"{field} must be a valid date (YYYY-MM-DD or MM/DD/YYYY)")
+        add_error(errors, field, f"{field} must be a valid date (YYYY-MM-DD, ISO datetime, or MM/DD/YYYY)")
         return raw
 
     if not_future and d > date.today():
@@ -373,9 +410,8 @@ def validate_cover_start_date_range(
     if not raw:
         add_error(errors, field, "Cover start date must be within the next 90 days.")
         return raw
-    try:
-        d = date.fromisoformat(raw)
-    except Exception:
+    d = parse_date_flexible(raw)
+    if d is None:
         add_error(errors, field, "Cover start date must be within the next 90 days.")
         return raw
 
