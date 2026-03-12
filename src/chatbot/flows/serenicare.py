@@ -14,6 +14,7 @@ from src.chatbot.validation import (
     validate_length_range,
     validate_motor_email_frontend,
     validate_uganda_mobile_frontend,
+    validate_enum,
 )
 from src.integrations.policy.premium import premium_service
 
@@ -135,6 +136,106 @@ class SerenicareFlow:
         except Exception:
             self.controller = None
 
+    # -------------------------------------------------------------------------
+    # VALIDATION METHODS – Pure logic, reusable by guided flows & APIs
+    # -------------------------------------------------------------------------
+
+    def _validate_about_you(self, payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
+        """Validate 'about you' fields. Returns (validated_data, errors)."""
+        errors: Dict[str, str] = {}
+        validated = {}
+
+        validated["first_name"] = validate_length_range(
+            payload.get("first_name", ""),
+            field="first_name",
+            errors=errors,
+            label="First Name",
+            min_len=2,
+            max_len=50,
+            required=True,
+        )
+        validated["middle_name"] = validate_length_range(
+            payload.get("middle_name", ""),
+            field="middle_name",
+            errors=errors,
+            label="Middle Name",
+            min_len=0,
+            max_len=50,
+            required=False,
+        )
+        validated["surname"] = validate_length_range(
+            payload.get("surname", ""),
+            field="surname",
+            errors=errors,
+            label="Surname",
+            min_len=2,
+            max_len=50,
+            required=True,
+        )
+        _, validated["phone_number"] = validate_uganda_mobile_frontend(
+            payload.get("phone_number", ""), errors, field="phone_number"
+        )
+        validated["email"] = validate_motor_email_frontend(payload.get("email", ""), errors, field="email")
+
+        return validated, errors
+
+    def _validate_plan_selection(self, payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
+        """Validate plan selection. Returns (validated_data, errors)."""
+        errors: Dict[str, str] = {}
+        validated = {}
+
+        plan_id = (payload.get("plan_option") or payload.get("_raw") or "").strip()
+        if not plan_id:
+            errors["plan_option"] = "Plan selection is required."
+
+        allowed_ids = [p["id"] for p in SERENICARE_PLANS]
+        if plan_id and plan_id not in allowed_ids:
+            errors["plan_option"] = f"Invalid plan. Allowed: {', '.join(allowed_ids)}"
+
+        validated["plan_option"] = {"id": plan_id} if plan_id else {}
+        return validated, errors
+
+    def _validate_optional_benefits(self, payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
+        """Validate optional benefits selection. Returns (validated_data, errors)."""
+        errors: Dict[str, str] = {}
+        validated = {}
+
+        selected = payload.get("optional_benefits") or []
+        if isinstance(selected, str):
+            selected = [s.strip() for s in selected.split(",") if s.strip()]
+
+        allowed_benefits = ["outpatient", "maternity", "dental", "optical", "covid19"]
+        invalid = [s for s in selected if s not in allowed_benefits]
+        if invalid:
+            errors["optional_benefits"] = f"Invalid benefits: {', '.join(invalid)}"
+
+        validated["selected_benefits"] = [s for s in selected if s not in invalid]
+        return validated, errors
+
+    def _validate_medical_conditions(self, payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
+        """Validate medical conditions declaration. Returns (validated_data, errors)."""
+        errors: Dict[str, str] = {}
+        validated = {}
+
+        has_condition = payload.get("has_condition") in (True, "yes", "true", "1", 1)
+        validated["has_condition"] = has_condition
+
+        return validated, errors
+
+    def _validate_cover_personalization(self, payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
+        """Validate cover personalization (DOB, family members). Returns (validated_data, errors)."""
+        errors: Dict[str, str] = {}
+        validated = {}
+
+        dob = validate_date_iso(payload.get("date_of_birth", ""), errors, "date_of_birth", required=True, not_future=True)
+        validated["date_of_birth"] = dob
+
+        validated["include_spouse"] = payload.get("include_spouse", False) in (True, "yes", "true", "1")
+        validated["include_children"] = payload.get("include_children", False) in (True, "yes", "true", "1")
+        validated["add_another_main_member"] = payload.get("add_another_main_member", False) in (True, "yes", "true", "1")
+
+        return validated, errors
+
     def process_serenicare_form(self, app_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process and validate the full Serenicare form using the controller's validation logic.
@@ -144,7 +245,7 @@ class SerenicareFlow:
         return self.controller.update_serenicare_form(app_id, payload)
 
     # -------------------------------------------------------------------------
-    # PREMIUM CALCULATION (Added to fix failing tests)
+    # PREMIUM CALCULATION
     # -------------------------------------------------------------------------
     def _calculate_serenicare_premium(self, data: Dict, plan: Dict) -> Dict:
         """

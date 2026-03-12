@@ -95,6 +95,142 @@ class MotorPrivateFlow:
         self.db = db
 
     # ------------------------------------------------------------------
+    # Validation Methods – Pure logic, reusable by both guided flows & APIs
+    # ------------------------------------------------------------------
+
+    def _validate_about_you(self, payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
+        """Validate 'about you' fields. Returns (validated_data, errors)."""
+        errors: Dict[str, str] = {}
+        validated = {}
+
+        validated["first_name"] = validate_length_range(
+            payload.get("first_name", ""),
+            field="first_name",
+            errors=errors,
+            label="First name",
+            min_len=2,
+            max_len=50,
+            required=True,
+        )
+        validated["middle_name"] = validate_length_range(
+            payload.get("middle_name", ""),
+            field="middle_name",
+            errors=errors,
+            label="Middle name",
+            min_len=0,
+            max_len=50,
+            required=False,
+        )
+        validated["surname"] = validate_length_range(
+            payload.get("surname", ""),
+            field="surname",
+            errors=errors,
+            label="Surname",
+            min_len=2,
+            max_len=50,
+            required=True,
+        )
+        validated["phone_number"] = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
+        validated["email"] = validate_email(payload.get("email", ""), errors, field="email")
+
+        return validated, errors
+
+    def _validate_vehicle_details(self, payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
+        """Validate vehicle details. Returns (validated_data, errors)."""
+        errors: Dict[str, str] = {}
+        validated = {}
+
+        validated["cover_type"] = validate_enum(
+            payload.get("cover_type", ""),
+            field="cover_type",
+            errors=errors,
+            allowed=["comprehensive", "third_party"],
+            required=True,
+        )
+        validated["vehicle_make"] = validate_enum(
+            payload.get("vehicle_make", ""),
+            field="vehicle_make",
+            errors=errors,
+            allowed=["Toyota", "Nissan", "Honda", "Subaru", "Suzuki", "Mazda", "Mitsubishi", "Isuzu", "Ford", "Hyundai", "Kia", "Volkswagen", "Mercedes-Benz", "BMW", "Peugeot", "Renault", "Other"],
+            required=True,
+        )
+
+        year_val = payload.get("year_of_manufacture", "")
+        try:
+            validated["year_of_manufacture"] = int(year_val)
+            current_year = date.today().year
+            if not (1980 <= validated["year_of_manufacture"] <= current_year + 1):
+                errors["year_of_manufacture"] = "Year must be between 1980 and next year."
+        except (ValueError, TypeError):
+            errors["year_of_manufacture"] = "Year must be a valid integer."
+            validated["year_of_manufacture"] = None
+
+        validated["cover_start_date"] = validate_cover_start_date_range(
+            payload.get("cover_start_date", ""),
+            errors,
+            field="cover_start_date",
+            required=True
+        )
+
+        validated["is_rare_model"] = validate_enum(
+            payload.get("is_rare_model", ""),
+            field="is_rare_model",
+            errors=errors,
+            allowed=["yes", "no"],
+            required=True,
+        )
+        validated["has_undergone_valuation"] = validate_enum(
+            payload.get("has_undergone_valuation", ""),
+            field="has_undergone_valuation",
+            errors=errors,
+            allowed=["yes", "no"],
+            required=True,
+        )
+
+        vehicle_value = payload.get("vehicle_value_ugx", "")
+        try:
+            validated["vehicle_value_ugx"] = float(vehicle_value)
+            if validated["vehicle_value_ugx"] <= 0:
+                errors["vehicle_value_ugx"] = "Vehicle value must be positive."
+        except (ValueError, TypeError):
+            errors["vehicle_value_ugx"] = "Vehicle value must be a positive number."
+            validated["vehicle_value_ugx"] = None
+
+        return validated, errors
+
+    def _validate_excess_parameters(self, payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
+        """Validate excess parameters. Returns (validated_data, errors)."""
+        errors: Dict[str, str] = {}
+        validated = {}
+
+        validated["excess_choice"] = validate_enum(
+            payload.get("excess_choice", ""),
+            field="excess_choice",
+            errors=errors,
+            allowed=[p["id"] for p in MOTOR_PRIVATE_EXCESS_PARAMETERS],
+            required=True,
+        )
+
+        return validated, errors
+
+    def _validate_additional_benefits(self, payload: Dict[str, Any]) -> tuple[Dict[str, Any], Dict[str, str]]:
+        """Validate additional benefits. Returns (validated_data, errors)."""
+        errors: Dict[str, str] = {}
+        validated = {}
+
+        selected = payload.get("additional_benefits") or []
+        if isinstance(selected, str):
+            selected = [s.strip() for s in selected.split(",") if s.strip()]
+
+        allowed_ids = [b["id"] for b in MOTOR_PRIVATE_ADDITIONAL_BENEFITS]
+        invalid = [s for s in selected if s not in allowed_ids]
+        if invalid:
+            errors["additional_benefits"] = f"Invalid selections: {', '.join(invalid)}"
+
+        validated["selected_benefits"] = [s for s in selected if s not in invalid]
+        return validated, errors
+
+    # ------------------------------------------------------------------
     # complete_flow – convenience helper (skips step-by-step UI)
     # ------------------------------------------------------------------
 
@@ -305,56 +441,23 @@ class MotorPrivateFlow:
     # ------------------------------------------------------------------
 
     async def _step_about_you(self, payload: Dict, data: Dict, user_id: str) -> Dict:
-        errors: Dict[str, str] = {}
         try:
             if payload and "_raw" not in payload:
-                first_name = validate_length_range(
-                    payload.get("first_name", ""),
-                    field="first_name",
-                    errors=errors,
-                    label="First name",
-                    min_len=2,
-                    max_len=50,
-                    required=True,
-                    message="First name must be 2–50 characters.",
-                )
-                middle_name = validate_length_range(
-                    payload.get("middle_name", ""),
-                    field="middle_name",
-                    errors=errors,
-                    label="Middle name",
-                    min_len=0,
-                    max_len=50,
-                    required=False,
-                    message="Middle name must be up to 50 characters.",
-                )
-                surname = validate_length_range(
-                    payload.get("surname", ""),
-                    field="surname",
-                    errors=errors,
-                    label="Surname",
-                    min_len=2,
-                    max_len=50,
-                    required=True,
-                    message="Surname must be 2–50 characters.",
-                )
-                phone_number = validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
-                email = validate_email(payload.get("email", ""), errors, field="email")
+                validated, errors = self._validate_about_you(payload)
+                raise_if_errors(errors)
 
                 # If no errors, save and proceed
-                if not errors:
-                    data["about_you"] = {
-                        "first_name": first_name,
-                        "middle_name": middle_name,
-                        "surname": surname,
-                        "phone_number": phone_number,
-                        "email": email,
-                    }
-                    out = await self._step_vehicle_details({}, data, user_id)
-                    out["next_step"] = 1
-                    return out
+                data["about_you"] = validated
+                out = await self._step_vehicle_details({}, data, user_id)
+                out["next_step"] = 1
+                return out
         except Exception as e:
+            if "Please correct" in str(e):  # FormValidationError
+                raise
             return {"error": f"Exception in about_you: {str(e)}", "step": "about_you"}
+
+        errors = {}
+        validated, _ = self._validate_about_you(payload)
 
         # Pre-fill from existing data
         prefilled = data.get("about_you", {})
