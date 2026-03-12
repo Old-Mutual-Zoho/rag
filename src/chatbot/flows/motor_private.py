@@ -713,9 +713,15 @@ class MotorPrivateFlow:
     async def _step_excess_parameters(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         try:
             if payload and "_raw" not in payload:
-                selected = payload.get("excess_parameters") or []
+                selected = (
+                    payload.get("excess_parameters")
+                    or payload.get("excess_choice")
+                    or payload.get("risky_activities")
+                    or []
+                )
                 if isinstance(selected, str):
                     selected = [s.strip() for s in selected.split(",") if s.strip()]
+                selected = [str(item).strip() for item in selected if str(item).strip()]
                 if not selected:
                     raise_if_errors({"excess_choice": "Please select an excess parameter."})
                 data["excess_parameters"] = selected
@@ -730,8 +736,10 @@ class MotorPrivateFlow:
         return {
             "response": {
                 "type": "checkbox",
+                "name": "excess_parameters",
                 "message": "Excess Parameters",
                 "options": MOTOR_PRIVATE_EXCESS_PARAMETERS,
+                "defaultValue": data.get("excess_parameters", []),
             },
             "next_step": 3,          # ✅ Correct
             "collected_data": data,
@@ -747,6 +755,7 @@ class MotorPrivateFlow:
                 selected = payload.get("additional_benefits") or []
                 if isinstance(selected, str):
                     selected = [s.strip() for s in selected.split(",") if s.strip()]
+                selected = [str(item).strip() for item in selected if str(item).strip()]
                 if not selected:
                     raise_if_errors({"additional_benefits": "Please select at least one additional benefit."})
                 data["additional_benefits"] = selected
@@ -761,8 +770,10 @@ class MotorPrivateFlow:
         return {
             "response": {
                 "type": "checkbox",
+                "name": "additional_benefits",
                 "message": "Additional Benefits",
                 "options": MOTOR_PRIVATE_ADDITIONAL_BENEFITS,
+                "defaultValue": data.get("additional_benefits", []),
             },
             "next_step": 4,          # ✅ Correct
             "collected_data": data,

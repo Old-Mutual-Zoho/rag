@@ -219,3 +219,27 @@ async def test_vehicle_details_form_exposes_backend_validation_metadata(motor_fl
     assert "validation" in by_name["cover_start_date"]
     assert by_name["vehicle_value"]["backendValidation"] is True
     assert by_name["year_of_manufacture"]["backendValidation"] is False
+
+
+@pytest.mark.asyncio
+async def test_excess_parameters_step_accepts_frontend_checkbox_alias(motor_flow):
+    """Motor private should tolerate the legacy checkbox key currently sent by the frontend."""
+
+    result = await motor_flow._step_excess_parameters(
+        {"risky_activities": ["excess_3", "excess_1"]},
+        {},
+        user_id="user123",
+    )
+
+    assert result["next_step"] == 3
+    assert result["collected_data"]["excess_parameters"] == ["excess_3", "excess_1"]
+
+
+@pytest.mark.asyncio
+async def test_excess_parameters_response_exposes_field_name(motor_flow):
+    """Checkbox response should tell the frontend which field name to submit."""
+
+    result = await motor_flow._step_excess_parameters({}, {}, user_id="user123")
+
+    assert result["response"]["name"] == "excess_parameters"
+    assert result["response"]["defaultValue"] == []
