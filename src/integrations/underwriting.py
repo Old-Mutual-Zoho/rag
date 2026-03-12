@@ -19,18 +19,7 @@ from src.integrations.policy.response_wrappers import (
 from src.integrations.policy.underwriting_service import UnderwritingService
 
 
-def _should_use_real_integrations() -> bool:
-    """Determine if real integrations should be used based on environment config."""
-    mode = os.getenv("INTEGRATIONS_MODE", "").strip().lower()
-    if mode in {"real", "live"}:
-        return True
-    if mode in {"mock", "test"}:
-        return False
-    return bool(
-        os.getenv("PARTNER_UNDERWRITING_API_URL")
-        or os.getenv("PARTNER_QUOTATION_API_URL")
-        or os.getenv("PARTNER_POLICY_API_URL")
-    )
+from src.integrations.config import should_use_real_integrations as _should_use_real_integrations
 
 
 async def run_quote_preview(
