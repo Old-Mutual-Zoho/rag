@@ -75,18 +75,7 @@ class BuyNowFlowStepRequest(BaseModel):
     collected_data: Dict[str, Any] = Field(default_factory=dict, description="Flow state returned from previous step")
 
 
-def _should_use_real_integrations() -> bool:
-    mode = os.getenv("INTEGRATIONS_MODE", "").strip().lower()
-    if mode in {"real", "live"}:
-        return True
-    if mode in {"mock", "test"}:
-        return False
-    return bool(
-        os.getenv("PARTNER_UNDERWRITING_API_URL")
-        or os.getenv("PARTNER_QUOTATION_API_URL")
-        or os.getenv("PARTNER_POLICY_API_URL")
-        or os.getenv("PARTNER_PAYMENT_API_URL")
-    )
+from src.integrations.config import should_use_real_integrations as _should_use_real_integrations
 
 
 def _normalize_status(value: Optional[str]) -> str:
