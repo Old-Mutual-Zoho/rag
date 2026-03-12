@@ -316,6 +316,63 @@ def get_router():
     return chat_router
 
 
+GENERAL_INFO_ALIASES: Dict[str, str] = {
+    "motor_private": "motor-insurance",
+    "motor_vehicle": "motor-insurance",
+    "motor": "motor-insurance",
+    "travel": "travel-sure-plus-insurance",
+    "travel_insurance": "travel-sure-plus-insurance",
+}
+
+
+def _normalize_general_info_key(value: str) -> str:
+    key = (value or "").strip().lower()
+    if not key:
+        return ""
+
+    key = key.replace("\\", "/")
+    key = key.split("?", 1)[0].split("#", 1)[0]
+
+    prefix = "website:product:"
+    if key.startswith(prefix):
+        key = key[len(prefix):]
+
+    key = key.strip("/")
+    if "/" in key:
+        key = key.split("/")[-1]
+
+    return key.strip()
+
+
+def _general_info_candidate_paths(product: str, product_dir: Path) -> List[Path]:
+    normalized = _normalize_general_info_key(product)
+
+    candidate_ids: List[str] = []
+
+    alias_target = GENERAL_INFO_ALIASES.get(normalized)
+    if alias_target:
+        candidate_ids.append(alias_target)
+
+    candidate_ids.extend(
+        [
+            normalized,
+            normalized.replace("_", "-"),
+            normalized.replace("-", "_"),
+        ]
+    )
+
+    deduped_ids: List[str] = []
+    seen: set[str] = set()
+    for candidate in candidate_ids:
+        clean_candidate = (candidate or "").strip()
+        if not clean_candidate or clean_candidate in seen:
+            continue
+        seen.add(clean_candidate)
+        deduped_ids.append(clean_candidate)
+
+    return [product_dir / f"{candidate_id}.json" for candidate_id in deduped_ids]
+
+
 # ============================================================================
 # REQUEST/RESPONSE MODELS
 # ============================================================================
@@ -1119,13 +1176,18 @@ async def get_general_information(
         # --- Resolve product JSON path safely ---
         BASE_DIR = Path(__file__).resolve().parents[2]  # D:\ZOHO\rag
         PRODUCT_DIR = BASE_DIR / "general_information" / "product_json"
-        product_file = PRODUCT_DIR / f"{product}.json"
 
-        logger.info(f"Resolved product file path: {product_file}")
+        product_file: Optional[Path] = None
+        for candidate in _general_info_candidate_paths(product, PRODUCT_DIR):
+            if candidate.exists():
+                product_file = candidate
+                break
 
-        if not product_file.exists():
+        if product_file is None:
             logger.error(f"Product file not found: {product_file}")
             raise HTTPException(status_code=404, detail="Product information not found")
+
+        logger.info(f"Resolved product file path: {product_file}")
 
         # --- Load JSON ---
         try:
