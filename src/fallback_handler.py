@@ -22,7 +22,7 @@ class FallbackHandler:
     - Escalating to a human agent queue
     """
 
-    def __init__(self, offer_human_threshold: float = 0.15, escalation_service=None):
+    def __init__(self, offer_human_threshold: float = 0.35, escalation_service=None):
         self.offer_human_threshold = offer_human_threshold
         self.escalation_service = escalation_service or EscalationService()
 
@@ -37,10 +37,11 @@ class FallbackHandler:
     ) -> Dict[str, Any]:
         logger.info("Generating fallback: reason=%s, confidence=%s", reason, confidence)
 
-        # Simple policy: if confidence is very low, offer human help and escalate.
-        if confidence is not None and confidence < self.offer_human_threshold:
+        # Low confidence: offer human help and escalate the session.
+        if reason == "low_confidence" or (confidence is not None and confidence < self.offer_human_threshold):
             message = (
-                "I'm not confident enough to answer that. Would you like me to connect you to a human agent or try another query?"
+                "I may not have enough information to answer that. Have I replied to all your questions, "
+                "or would you like to talk to an agent?"
             )
             offer_human = True
             # Escalate to human agent queue

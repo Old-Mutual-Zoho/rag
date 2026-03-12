@@ -151,6 +151,28 @@ class APIRAGAdapter:
         Use the configured generation backend (Gemini by default) to
         produce an answer grounded in the retrieved context.
         """
+        def _retrieval_stats() -> Dict[str, float]:
+            if not context_docs:
+                return {"avg_score": 0.0, "coverage": 0.0}
+            scores = [float(h.get("score") or 0.0) for h in context_docs]
+            avg_score = sum(scores) / len(scores) if scores else 0.0
+            coverage = min(len(context_docs) / 5.0, 1.0)
+            return {"avg_score": avg_score, "coverage": coverage}
+
+        def _compute_confidence() -> float:
+            stats = _retrieval_stats()
+            avg_score = stats["avg_score"]
+            coverage = stats["coverage"]
+            min_score = 0.55
+            # Normalize avg_score into 0..1 confidence band.
+            if avg_score <= 0:
+                score_norm = 0.0
+            else:
+                score_norm = (avg_score - min_score) / max(1.0 - min_score, 0.01)
+                score_norm = max(0.0, min(1.0, score_norm))
+            conf = (0.7 * score_norm) + (0.3 * coverage)
+            return float(max(0.0, min(1.0, round(conf, 3))))
+
         def _extractive_answer() -> Dict[str, Any]:
             """
             Fallback: build an answer directly from known product chunks when
@@ -162,6 +184,7 @@ class APIRAGAdapter:
               and stitch together overview + benefits for that product.
             - As a last resort, resolve individual chunk IDs from website_chunks.jsonl.
             """
+            confidence = _compute_confidence()
             snippets: List[str] = []
 
             # 1) Use any text already present on the hits.
@@ -237,10 +260,15 @@ class APIRAGAdapter:
                     logger.warning("Chunk-id extractive fallback failed: %s", e)
 
             answer_text = "\n\n".join(snippets).strip() or "I'm not sure based on the available information."
-            return {"answer": answer_text, "confidence": 0.5, "sources": context_docs}
+            return {"answer": answer_text, "confidence": confidence, "sources": context_docs}
 
         # If generation is globally disabled, always fall back to extractive mode.
         if not self.cfg.generation.enabled:
+            return _extractive_answer()
+
+        stats = _retrieval_stats()
+        # If retrieval is weak or empty, avoid LLM and fall back to extractive mode.
+        if not context_docs or stats["avg_score"] < 0.55:
             return _extractive_answer()
 
         if self.cfg.generation.backend == "gemini":
@@ -259,7 +287,7 @@ class APIRAGAdapter:
                 # LLM unavailable / failed -> use extractive context instead.
                 return _extractive_answer()
 
-            return {"answer": answer, "confidence": 0.7, "sources": context_docs}
+            return {"answer": answer, "confidence": _compute_confidence(), "sources": context_docs}
 
         # Unsupported backend -> degrade gracefully to extractive answer.
         return _extractive_answer()

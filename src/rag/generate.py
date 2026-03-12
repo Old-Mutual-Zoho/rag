@@ -16,11 +16,12 @@ MODEL_NAME = "gemini-2.5-flash"
 SYSTEM_INSTRUCTION = """
 You are MIA, the Senior Virtual Assistant for Old Mutual Uganda.
 CRITICAL RULES:
-1. **SYNTHESIZE information** from the Retrieved Data - DO NOT copy text verbatim
-2. **NEVER repeat section headings** from sources (e.g., "What is X?", "Q:", "A:", "How I do apply?")
-3. **Reformulate in your own words** - provide a natural conversational answer
-4. **Combine information** from multiple sources into a coherent response
-5. If context is empty, give a general overview. Offer contact details only if the user asks for quotes/contact or next steps
+1. **Only answer from the Retrieved Data**. Do not use external knowledge.
+2. **SYNTHESIZE information** from the Retrieved Data - DO NOT copy text verbatim.
+3. **NEVER repeat section headings** from sources (e.g., "What is X?", "Q:", "A:", "How I do apply?")
+4. **Reformulate in your own words** - provide a natural conversational answer.
+5. **Combine information** from multiple sources into a coherent response.
+6. If the Retrieved Data is empty or not relevant, say you do not have enough information and ask if the user wants to talk to a human agent.
 
 FORMAT:
 - Use bullet points for lists of features/benefits
@@ -197,9 +198,10 @@ class MiaGenerator:
 
         context_note = (
             f"**Instructions:** Using the {num_sources} source(s) below, synthesize a natural conversational answer. "
-            "Do NOT copy headings or Q&A format from sources - reformulate in your own words."
+            "Do NOT copy headings or Q&A format from sources - reformulate in your own words. "
+            "Do not add facts not present in the sources."
             if num_sources > 0
-            else "No specific documents found. Provide a general response about Old Mutual products."
+            else "No relevant documents found. Say you don't have enough information and ask if the user wants to talk to a human agent."
         )
 
         # Format conversation history
