@@ -42,7 +42,7 @@ def test_followup_detected_from_model(state_manager):
     raw = "We can help with that. Do you want to know about benefits?"
     out = rp.process_response(raw_response=raw, user_input="benefits", confidence=0.9, conversation_state=session, session_id="s1")
     assert out["follow_up"] is True
-    assert "provide more details" in out["message"].lower() or "clarify" in out["message"].lower()
+    assert "do you want to know about benefits" in out["message"].lower()
 
 
 def test_error_handler_on_exception(monkeypatch):

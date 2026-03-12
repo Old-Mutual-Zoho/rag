@@ -8,7 +8,11 @@ from src.database.redis import RedisCache
 
 
 class DummyRAG:
+    def __init__(self):
+        self.retrieve_calls = []
+
     async def retrieve(self, query: str, filters=None, top_k=None):
+        self.retrieve_calls.append({"query": query, "filters": filters, "top_k": top_k})
         return [{"payload": {"text": "stub"}}]
 
     async def generate(self, query: str, context_docs, conversation_history):
@@ -80,6 +84,13 @@ class DummyMatcher:
                 },
             )
         ][:top_k]
+
+
+class FollowUpMatcher:
+    def match_products(self, query: str, top_k: int = 3):
+        if "travel insurance" not in (query or "").lower():
+            return []
+        return DummyMatcher().match_products(query, top_k=top_k)
 
 
 @pytest.mark.asyncio
@@ -234,3 +245,41 @@ async def test_quote_confirmation_no_keeps_chat_mode_and_does_not_start_guided()
     assert out["mode"] == "conversational"
     assert "stay in chat" in out["response"].lower()
     assert guided.calls == []
+
+
+@pytest.mark.asyncio
+async def test_pricing_question_stays_conversational_without_guided_prompt():
+    db = PostgresDB()
+    redis = RedisCache()
+    sm = StateManager(redis, db)
+
+    user = db.get_or_create_user(phone_number="256700000004")
+    session_id = sm.create_session(str(user.id))
+
+    conv = ConversationalMode(DummyRAG(), DummyMatcher(), sm)
+    router = ChatRouter(conv, DummyGuided(), sm, DummyMatcher())
+
+    out = await router.route("How much is travel insurance?", session_id, str(user.id))
+
+    assert out["mode"] == "conversational"
+    assert out.get("suggested_action") is None
+
+
+@pytest.mark.asyncio
+async def test_followup_reuses_session_product_topic_for_ambiguous_question():
+    db = PostgresDB()
+    redis = RedisCache()
+    sm = StateManager(redis, db)
+
+    user = db.get_or_create_user(phone_number="256700000005")
+    session_id = sm.create_session(str(user.id))
+
+    rag = DummyRAG()
+    conv = ConversationalMode(rag, FollowUpMatcher(), sm)
+
+    await conv.process("tell me about travel insurance", session_id, str(user.id))
+    await conv.process("is it expensive?", session_id, str(user.id))
+
+    second_call = rag.retrieve_calls[-1]
+    assert second_call["filters"] == {"products": ["website:product:travel/travel-insurance"]}
+    assert "travel insurance" in second_call["query"].lower()
