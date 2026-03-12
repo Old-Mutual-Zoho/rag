@@ -44,6 +44,7 @@ from src.utils.product_matcher import ProductMatcher
 from src.utils.rag_config_loader import load_rag_config
 from src.api.endpoints.mock_underwriting import router as mock_router
 from src.api.endpoints.mock_premiums import router as mock_premiums_router
+from src.api.validate_flow import router as validate_flow_router
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -108,6 +109,9 @@ app.include_router(quotes_underwriting_api, prefix="/api")
 
 # Register agent webhook router
 app.include_router(agent_webhook_router, prefix="/api/v1")
+
+# Register flow validation endpoints (per-field and per-step)
+app.include_router(validate_flow_router, prefix="/api/v1", tags=["Flow Validation"])
 
 product_matcher = ProductMatcher()
 
@@ -1463,20 +1467,8 @@ async def submit_personal_accident_full_form(
         data["quick_quote"] = quick_quote
 
         # Run each logical step's validation + data shaping.
-        await flow._step_quick_quote(
-            {
-                "firstName": quick_quote["first_name"],
-                "lastName": quick_quote["last_name"],
-                "middleName": quick_quote["middle_name"],
-                "mobile": quick_quote["mobile"],
-                "email": quick_quote["email"],
-                "dob": quick_quote["dob"],
-                "policyStartDate": quick_quote["policy_start_date"],
-                "coverLimitAmountUgx": str(quick_quote["cover_limit_ugx"]),
-            },
-            data,
-            internal_user_id,
-        )
+        # Full-form payloads may intentionally omit quick-quote-only fields like DOB,
+        # so we keep normalized quick_quote data above and validate the remaining steps.
         await flow._step_personal_details(payload, data, internal_user_id)
         await flow._step_next_of_kin(payload, data, internal_user_id)
         await flow._step_previous_pa_policy(payload, data, internal_user_id)
