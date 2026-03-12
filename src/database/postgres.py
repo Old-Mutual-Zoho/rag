@@ -280,6 +280,13 @@ class PostgresDB:
         self._conversation_events.append(ev)
         return ev
 
+    def end_conversation(self, conversation_id: str, ended_at: Optional[datetime] = None) -> Optional[Conversation]:
+        conv = self._conversations.get(str(conversation_id))
+        if not conv:
+            return None
+        conv.ended_at = ended_at or datetime.utcnow()
+        return conv
+
     def list_conversation_events(
         self,
         *,

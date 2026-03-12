@@ -576,11 +576,25 @@ async def get_system_performance_metrics(
     def _delta(current: float, previous: float) -> float:
         return round(current - previous, 2)
 
-    # Escalation rate
+    # Escalation rate (user-confirmed)
     current_conversations = db.count_conversations(current_start, now)
     previous_conversations = db.count_conversations(previous_start, current_start)
-    current_escalations = db.count_escalations(current_start, now)
-    previous_escalations = db.count_escalations(previous_start, current_start)
+    current_escalations = len(
+        db.list_conversation_events(
+            start=current_start,
+            end=now,
+            event_type="escalation_confirmed",
+            limit=50000,
+        )
+    )
+    previous_escalations = len(
+        db.list_conversation_events(
+            start=previous_start,
+            end=current_start,
+            event_type="escalation_confirmed",
+            limit=50000,
+        )
+    )
 
     escalation_rate = _rate(current_escalations, current_conversations)
     escalation_rate_prev = _rate(previous_escalations, previous_conversations)
@@ -690,9 +704,26 @@ async def get_ai_performance_metrics(
         fallbacks = len(by_type["fallbacks"])
 
         conversations = db.count_conversations(start, end)
-        escalations = db.count_escalations(start, end)
+        escalations = len(
+            db.list_conversation_events(
+                start=start,
+                end=end,
+                event_type="escalation_confirmed",
+                limit=50000,
+            )
+        )
+        agent_joins = len(
+            db.list_conversation_events(
+                start=start,
+                end=end,
+                event_type="agent_joined",
+                limit=50000,
+            )
+        )
 
         escalation_rate = _rate(escalations, conversations)
+
+        # Resolution rate: proxy as non-escalated share of conversations.
         resolution_rate = _rate(max(conversations - escalations, 0), conversations)
         fallback_rate = _rate(fallbacks, conversations)
 
@@ -703,6 +734,7 @@ async def get_ai_performance_metrics(
             "fallback_rate": fallback_rate,
             "escalation_rate": escalation_rate,
             "resolution_rate": resolution_rate,
+            "agent_join_rate": _rate(agent_joins, conversations),
             "conversations": conversations,
         }
 
@@ -758,10 +790,10 @@ async def get_ai_performance_metrics(
             "tone": "positive" if current["fallback_rate"] <= previous["fallback_rate"] else "negative",
         },
         {
-            "label": "Escalation Rate",
-            "value": _fmt_pct(current["escalation_rate"]),
-            "delta": _fmt_delta(_delta(current["escalation_rate"], previous["escalation_rate"])),
-            "tone": "positive" if current["escalation_rate"] <= previous["escalation_rate"] else "negative",
+            "label": "Agent Pickup Rate",
+            "value": _fmt_pct(current["agent_join_rate"]),
+            "delta": _fmt_delta(_delta(current["agent_join_rate"], previous["agent_join_rate"])),
+            "tone": "positive" if current["agent_join_rate"] >= previous["agent_join_rate"] else "negative",
         },
         {
             "label": "Avg Response Time",
@@ -826,6 +858,11 @@ async def get_ai_performance_metrics(
                 "label": "User CSAT",
                 "value": f"{csat_current:.1f}/5" if csat_current > 0 else "N/A",
                 "change": f"{csat_delta:+.1f}" if csat_current > 0 else "0",
+            },
+            {
+                "label": "Agent Join Rate",
+                "value": _fmt_pct(current["agent_join_rate"]),
+                "change": _fmt_delta(_delta(current["agent_join_rate"], previous.get("agent_join_rate", 0.0))),
             },
             {
                 "label": "Accuracy Coverage",
@@ -1905,10 +1942,10 @@ async def get_conversation_history(session_id: str, limit: int = 50):
 
 
 @api_router.delete("/sessions/{session_id}", tags=["Sessions"])
-async def end_session(session_id: str):
+async def end_session(session_id: str, ended_by: str = "user"):
     """End a chatbot session."""
     try:
-        state_manager.end_session(session_id)
+        state_manager.end_session(session_id, ended_by=ended_by)
         return {"message": "Session ended successfully"}
 
     except Exception as e:

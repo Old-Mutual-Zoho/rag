@@ -98,6 +98,17 @@ class StateManager:
     def mark_agent_joined(self, session_id: str, agent_id: str) -> Dict[str, Any]:
         """Mark that an agent has joined this escalated session."""
         self.update_session(session_id, {"escalated": True, "agent_id": agent_id})
+        session = self.get_session(session_id) or {}
+        conversation_id = session.get("conversation_id")
+        if conversation_id and hasattr(self.db, "add_conversation_event"):
+            try:
+                self.db.add_conversation_event(
+                    conversation_id=conversation_id,
+                    event_type="agent_joined",
+                    payload={"agent_id": str(agent_id)},
+                )
+            except Exception:
+                pass
         if hasattr(self.db, "mark_agent_joined"):
             try:
                 self.db.mark_agent_joined(session_id=session_id, agent_id=agent_id)
@@ -144,17 +155,31 @@ class StateManager:
         """Clear collected data"""
         self.update_session(session_id, {"collected_data": {}})
 
-    def end_session(self, session_id: str):
-        """End session and clean up"""
+    def end_session(self, session_id: str, ended_by: str = "user"):
+        """End session and clean up."""
         session = self.get_session(session_id)
-        if session:
-            # Update conversation end time in PostgreSQL
-            # conversation = self.db.get_conversation(session['conversation_id'])
-            # conversation.ended_at = datetime.utcnow()
-            # self.db.save(conversation)
+        if not session:
+            return
 
-            # Delete from Redis
-            self.redis.delete_session(session_id)
+        conversation_id = session.get("conversation_id")
+        if conversation_id and hasattr(self.db, "end_conversation"):
+            try:
+                self.db.end_conversation(conversation_id)
+            except Exception:
+                pass
+
+        if conversation_id and hasattr(self.db, "add_conversation_event"):
+            try:
+                self.db.add_conversation_event(
+                    conversation_id=conversation_id,
+                    event_type="session_end",
+                    payload={"ended_by": str(ended_by or "user")},
+                )
+            except Exception:
+                pass
+
+        # Delete from Redis
+        self.redis.delete_session(session_id)
 
     # --- Form drafts ---------------------------------------------------------
 
