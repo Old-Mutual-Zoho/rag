@@ -644,6 +644,35 @@ async def get_ai_performance_metrics(
     current = _window_metrics(current_start, now)
     previous = _window_metrics(previous_start, current_start)
 
+    csat_events_current = db.list_conversation_events(
+        start=current_start,
+        end=now,
+        event_type="csat",
+        limit=5000,
+    )
+    csat_events_previous = db.list_conversation_events(
+        start=previous_start,
+        end=current_start,
+        event_type="csat",
+        limit=5000,
+    )
+    csat_current_vals = [float((e.payload or {}).get("rating", 0)) for e in csat_events_current]
+    csat_prev_vals = [float((e.payload or {}).get("rating", 0)) for e in csat_events_previous]
+    csat_current = _avg([v for v in csat_current_vals if v > 0])
+    csat_previous = _avg([v for v in csat_prev_vals if v > 0])
+    csat_delta = round(csat_current - csat_previous, 2)
+
+    # Rated accuracy (proxy): ratings 4-5 are treated as "accurate"
+    rated_threshold = 4
+    rated_current = [v for v in csat_current_vals if v > 0]
+    rated_prev = [v for v in csat_prev_vals if v > 0]
+    rated_current_correct = len([v for v in rated_current if v >= rated_threshold])
+    rated_prev_correct = len([v for v in rated_prev if v >= rated_threshold])
+    rated_accuracy_current = _rate(rated_current_correct, len(rated_current))
+    rated_accuracy_prev = _rate(rated_prev_correct, len(rated_prev))
+    rated_accuracy_delta = _delta(rated_accuracy_current, rated_accuracy_prev)
+    rated_coverage = _rate(len(rated_current), current["conversations"])
+
     top_metrics = [
         {
             "label": "AI Accuracy (Rated)",
@@ -725,35 +754,6 @@ async def get_ai_performance_metrics(
         {"label": "Drop-off Rate", "value": _fmt_pct(drop_off_rate), "change": _fmt_delta(_delta(drop_off_rate, previous["fallback_rate"]))},
         {"label": "Avg Length", "value": _fmt_duration(avg_duration), "change": _fmt_delta(0.0, 0)},
     ]
-
-    csat_events_current = db.list_conversation_events(
-        start=current_start,
-        end=now,
-        event_type="csat",
-        limit=5000,
-    )
-    csat_events_previous = db.list_conversation_events(
-        start=previous_start,
-        end=current_start,
-        event_type="csat",
-        limit=5000,
-    )
-    csat_current_vals = [float((e.payload or {}).get("rating", 0)) for e in csat_events_current]
-    csat_prev_vals = [float((e.payload or {}).get("rating", 0)) for e in csat_events_previous]
-    csat_current = _avg([v for v in csat_current_vals if v > 0])
-    csat_previous = _avg([v for v in csat_prev_vals if v > 0])
-    csat_delta = round(csat_current - csat_previous, 2)
-
-    # Rated accuracy (proxy): ratings 4-5 are treated as "accurate"
-    rated_threshold = 4
-    rated_current = [v for v in csat_current_vals if v > 0]
-    rated_prev = [v for v in csat_prev_vals if v > 0]
-    rated_current_correct = len([v for v in rated_current if v >= rated_threshold])
-    rated_prev_correct = len([v for v in rated_prev if v >= rated_threshold])
-    rated_accuracy_current = _rate(rated_current_correct, len(rated_current))
-    rated_accuracy_prev = _rate(rated_prev_correct, len(rated_prev))
-    rated_accuracy_delta = _delta(rated_accuracy_current, rated_accuracy_prev)
-    rated_coverage = _rate(len(rated_current), current["conversations"])
 
     quality_metrics.extend(
         [

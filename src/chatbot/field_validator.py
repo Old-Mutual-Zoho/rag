@@ -19,6 +19,7 @@ Adding a new product:
   2. Register step handlers in StepValidator._REGISTRY
   3. Everything else (endpoint, decorator) works automatically
 
+
 Usage in a flow step:
     from src.chatbot.field_validator import FieldValidator, StepValidator, FieldDecorator
 

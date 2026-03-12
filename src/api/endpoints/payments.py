@@ -17,6 +17,7 @@ from src.integrations.policy.response_wrappers import (
     normalize_underwriting_response,
 )
 from src.integrations.policy.underwriting_service import UnderwritingService
+from src.integrations.config import should_use_real_integrations as _should_use_real_integrations
 
 api = APIRouter()
 payments_api = api
@@ -73,9 +74,6 @@ class BuyNowFlowStepRequest(BaseModel):
     current_step: int = Field(..., ge=0, description="Current flow step index")
     user_input: Dict[str, Any] = Field(default_factory=dict, description="Client submission payload for current step")
     collected_data: Dict[str, Any] = Field(default_factory=dict, description="Flow state returned from previous step")
-
-
-from src.integrations.config import should_use_real_integrations as _should_use_real_integrations
 
 
 def _normalize_status(value: Optional[str]) -> str:

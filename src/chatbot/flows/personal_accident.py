@@ -6,17 +6,13 @@ coverage selection, ID upload, premium calculation, then proceed to payment.
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from datetime import datetime, date
 
 from src.chatbot.field_validator import (
     FieldDecorator,
-    StepValidator,
     filter_collected_fields,
-)
-from src.chatbot.flows.field_filter import (
-    filter_already_collected_fields,
 )
 from src.chatbot.validation import (
     FormValidationError,

@@ -8,7 +8,7 @@ Two endpoints:
 
 from fastapi import APIRouter
 from pydantic import BaseModel
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from src.chatbot.field_validator import FieldValidator, StepValidator
 

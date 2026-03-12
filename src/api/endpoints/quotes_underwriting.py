@@ -46,6 +46,7 @@ from src.integrations.product_benefits import product_benefits_loader
 from src.integrations.underwriting import run_quote_preview
 from src.integrations.clients.mocks.underwriting import mock_underwriting_client
 from src.integrations.policy.underwriting_service import UnderwritingService
+from src.integrations.config import should_use_real_integrations as _should_use_real_integrations
 
 logger = logging.getLogger(__name__)
 
@@ -56,9 +57,6 @@ api = APIRouter(prefix="/v1/products", tags=["Product Quotes & Underwriting"])
 _quotes_store: Dict[str, Dict[str, Any]] = {}
 _assessments_store: Dict[str, Dict[str, Any]] = {}
 _pdf_store: Dict[str, bytes] = {}
-
-
-from src.integrations.config import should_use_real_integrations as _should_use_real_integrations
 
 
 def _get_trace_id(x_trace_id: Optional[str] = Header(None)) -> str:

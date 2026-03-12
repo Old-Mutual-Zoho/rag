@@ -166,8 +166,12 @@ class ChatRouter:
             logger.info("[Router] Explicit guided trigger matched: %s", message[:100])
             return True
 
-        wants_quote = any(word in message_lower for word in ["want", "need", "get"]) and any(word in message_lower for word in ["quote", "quotation"])
-        wants_purchase = any(word in message_lower for word in ["want", "need", "help me", "can i"]) and any(word in message_lower for word in ["apply", "buy", "purchase"])
+        wants_quote = any(word in message_lower for word in ["want", "need", "get"]) and any(
+            word in message_lower for word in ["quote", "quotation"]
+        )
+        wants_purchase = any(word in message_lower for word in ["want", "need", "help me", "can i"]) and any(
+            word in message_lower for word in ["apply", "buy", "purchase"]
+        )
         if wants_quote or wants_purchase:
             logger.info("[Router] Explicit guided trigger matched by intent words: %s", message[:100])
             return True

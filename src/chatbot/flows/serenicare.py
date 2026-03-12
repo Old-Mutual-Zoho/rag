@@ -14,7 +14,6 @@ from src.chatbot.validation import (
     validate_length_range,
     validate_motor_email_frontend,
     validate_uganda_mobile_frontend,
-    validate_enum,
 )
 from src.integrations.policy.premium import premium_service
 
