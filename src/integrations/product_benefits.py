@@ -26,12 +26,17 @@ class ProductBenefitsLoader:
 
     def __init__(self, config_dir: Optional[Path] = None):
         if config_dir is None:
-            # Default to project_root/product_json
+            # Default search roots:
+            # - project_root/product_json
+            # - project_root/general_information/product_json
             # __file__ = .../rag/src/integrations/product_benefits.py
             # parents[2] = .../rag (project root)
-            self.config_dir = Path(__file__).resolve().parents[2] / "product_json"
+            project_root = Path(__file__).resolve().parents[2]
+            self.config_dir = project_root / "product_json"
+            self._fallback_config_dir = project_root / "general_information" / "product_json"
         else:
             self.config_dir = Path(config_dir)
+            self._fallback_config_dir = self.config_dir
 
         self._cache: Dict[str, Dict[str, Any]] = {}
 
@@ -40,10 +45,16 @@ class ProductBenefitsLoader:
         if product_id in self._cache:
             return self._cache[product_id]
 
-        config_file = self.config_dir / f"{product_id}_config.json"
+        candidate_files = [
+            self.config_dir / f"{product_id}_config.json",
+            self.config_dir / f"{product_id}.json",
+            self._fallback_config_dir / f"{product_id}_config.json",
+            self._fallback_config_dir / f"{product_id}.json",
+        ]
+        config_file = next((p for p in candidate_files if p.exists()), None)
 
-        if not config_file.exists():
-            logger.warning(f"Product config file not found: {config_file}")
+        if not config_file:
+            logger.warning("Product config file not found for '%s'. Checked: %s", product_id, ", ".join(str(p) for p in candidate_files))
             return self._get_default_config(product_id)
 
         try:
@@ -71,6 +82,12 @@ class ProductBenefitsLoader:
             # Sort by sum_assured and find closest
             sorted_tiers = sorted(tiers, key=lambda t: abs(t.get("sum_assured", 0) - sum_assured))
             return sorted_tiers[0].get("benefits", [])
+
+        # Backward-compatible schema used by product JSON files that expose
+        # top-level "benefits" as an array of strings.
+        top_level_benefits = config.get("benefits", [])
+        if isinstance(top_level_benefits, list):
+            return top_level_benefits
 
         return []
 
@@ -101,6 +118,9 @@ class ProductBenefitsLoader:
 
     def format_benefit_description(self, benefit: Dict[str, Any]) -> str:
         """Format a benefit into a human-readable string."""
+        if isinstance(benefit, str):
+            return benefit
+
         desc = benefit.get("description", "")
         amount = benefit.get("amount")
         unit = benefit.get("unit", "")
@@ -128,6 +148,10 @@ class ProductBenefitsLoader:
         benefits = self.get_benefits_for_tier(product_id, sum_assured)
         result = []
         for benefit in benefits:
+            if isinstance(benefit, str):
+                result.append({"label": benefit, "value": "Included"})
+                continue
+
             desc = benefit.get("description", "")
             amount = benefit.get("amount")
             unit = benefit.get("unit", "")
