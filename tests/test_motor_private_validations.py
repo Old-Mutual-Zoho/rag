@@ -243,3 +243,28 @@ async def test_excess_parameters_response_exposes_field_name(motor_flow):
 
     assert result["response"]["name"] == "excess_parameters"
     assert result["response"]["defaultValue"] == []
+
+
+@pytest.mark.asyncio
+async def test_additional_benefits_accepts_alias_and_filters_mixed_ids(motor_flow):
+    """Additional benefits should accept legacy alias and keep only valid benefit IDs."""
+
+    result = await motor_flow._step_additional_benefits(
+        {
+            "risky_activities": [
+                "excess_1",
+                "excess_2",
+                "political_violence",
+                "political_violence",
+                "alternative_accommodation",
+            ]
+        },
+        {},
+        user_id="user123",
+    )
+
+    assert result["next_step"] == 4
+    assert result["collected_data"]["additional_benefits"] == [
+        "political_violence",
+        "alternative_accommodation",
+    ]
