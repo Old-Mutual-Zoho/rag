@@ -562,7 +562,11 @@ class PersonalAccidentFlow:
                 "name": "gender",
                 "label": "Gender",
                 "type": "select",
-                "options": ["Male", "Female", "Other"],
+                "options": [
+                    {"value": "Male", "label": "Male"},
+                    {"value": "Female", "label": "Female"},
+                    {"value": "Other", "label": "Other"},
+                ],
                 "required": True,
                 "defaultValue": prefilled_personal.get("gender", ""),
             },
@@ -599,7 +603,7 @@ class PersonalAccidentFlow:
                 "message": "📋 Additional personal details" + (" - Please complete the missing fields" if errors else ""),
                 "fields": fields_with_validation,
             },
-            "next_step": 2 if errors else 3,
+            "next_step": 2,
             "collected_data": data,
         }
 
@@ -633,6 +637,7 @@ class PersonalAccidentFlow:
                     "nok_address": address,
                     "nok_id_number": id_number,
                 }
+                return await self._step_previous_pa_policy({}, data, user_id)
 
         # Pre-fill from quick quote if available
         quick_quote = data.get("quick_quote", {})
@@ -662,7 +667,7 @@ class PersonalAccidentFlow:
                 "message": "👥 Next of kin details" + (" - Please fix the errors below" if errors else ""),
                 "fields": fields_with_validation,
             },
-            "next_step": 3 if errors else 4,
+            "next_step": 3,
             "collected_data": data,
         }
 
@@ -678,6 +683,7 @@ class PersonalAccidentFlow:
                 "had_policy": had,
                 "insurer_name": payload.get("previous_insurer_name", ""),
             }
+            return await self._step_physical_disability({}, data, user_id)
 
         return {
             "response": {
@@ -691,7 +697,7 @@ class PersonalAccidentFlow:
                     "show_when": "yes",
                 },
             },
-            "next_step": 5,
+            "next_step": 4,
             "collected_data": data,
         }
 
@@ -703,6 +709,7 @@ class PersonalAccidentFlow:
                 "free_from_disability": free,
                 "details": payload.get("disability_details", ""),
             }
+            return await self._step_risky_activities({}, data, user_id)
 
         return {
             "response": {
@@ -716,7 +723,7 @@ class PersonalAccidentFlow:
                     "show_when": "no",
                 },
             },
-            "next_step": 6,
+            "next_step": 5,
             "collected_data": data,
         }
 
@@ -729,6 +736,7 @@ class PersonalAccidentFlow:
                 "selected": activities,
                 "other_description": payload.get("risky_activity_other", ""),
             }
+            return await self._step_upload_national_id({}, data, user_id)
 
         return {
             "response": {
@@ -738,19 +746,26 @@ class PersonalAccidentFlow:
                 "allow_other": True,
                 "other_field": {"name": "risky_activity_other", "label": "Other (please specify)"},
             },
-            "next_step": 7,
+            "next_step": 6,
             "collected_data": data,
         }
 
     async def _step_upload_national_id(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         if payload and "_raw" not in payload:
-            file_ref = payload.get("file_ref") or payload.get("national_id_file_ref", "")
+            file_ref = (
+                payload.get("file_ref")
+                or payload.get("national_id_file_ref")
+                or payload.get("ref_value")
+                or payload.get("ref_vale")
+                or ""
+            )
             if not str(file_ref or "").strip():
                 raise_if_errors({"national_id_file_ref": "National ID file is required"})
             data["national_id_upload"] = {
                 "file_ref": file_ref,
                 "uploaded_at": datetime.utcnow().isoformat(),
             }
+            return await self._step_final_confirmation({}, data, user_id)
 
         return {
             "response": {
@@ -761,7 +776,7 @@ class PersonalAccidentFlow:
                 "max_size_mb": 5,
                 "help": "Upload a clear PDF of your National ID.",
             },
-            "next_step": 8,
+            "next_step": 7,
             "collected_data": data,
         }
 
@@ -770,6 +785,10 @@ class PersonalAccidentFlow:
         Step 8: Final Confirmation & Review
         Show all collected data, calculated premium, and ask for confirmation before payment.
         """
+        action = str(payload.get("action") or payload.get("_raw") or "").strip().lower() if payload else ""
+        if any(token in action for token in ("confirm", "proceed_to_payment", "proceed", "pay")):
+            return await self._step_choose_plan_and_pay(payload, data, user_id)
+
         quick_quote = data.get("quick_quote", {})
         cover_limit = quick_quote.get("cover_limit_ugx", 5000000)
 
@@ -806,7 +825,7 @@ class PersonalAccidentFlow:
                     {"type": "confirm", "label": "Confirm & Proceed to Payment"},
                 ],
             },
-            "next_step": 9,
+            "next_step": 8,
             "collected_data": data,
         }
 

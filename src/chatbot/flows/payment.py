@@ -52,10 +52,10 @@ class PaymentFlow:
         """Process payment flow"""
 
         quote = collected_data.get("quote")
+        if quote and not hasattr(quote, "premium_amount"):
+            quote = None
         if not quote and collected_data.get("quote_id"):
             quote = self.db.get_quote(collected_data["quote_id"])
-        if quote:
-            collected_data["quote"] = quote
         premium_amount = float(quote.premium_amount) if quote else 0
 
         if current_step == 0:  # Identifier collection + validation
@@ -86,7 +86,6 @@ class PaymentFlow:
                     }
 
                 collected_data["policy_or_quote_id"] = identifier
-                collected_data["quote"] = quote
                 collected_data["quote_id"] = str(getattr(quote, "id", identifier))
                 collected_data["validation"] = validation
                 premium_amount = float(getattr(quote, "premium_amount", 0) or 0)
@@ -485,6 +484,10 @@ class PaymentFlow:
 
     def _extract_default_phone(self, collected_data: Dict[str, Any]) -> str:
         quote = collected_data.get("quote")
+        if quote and not hasattr(quote, "underwriting_data"):
+            quote = None
+        if not quote and collected_data.get("quote_id"):
+            quote = self.db.get_quote(collected_data["quote_id"])
         underwriting_data = getattr(quote, "underwriting_data", {}) or {}
         quick_quote = underwriting_data.get("quick_quote", {}) if isinstance(underwriting_data, dict) else {}
 
