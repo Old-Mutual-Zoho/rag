@@ -95,6 +95,44 @@ class MotorPrivateFlow:
         self.catalog = product_catalog
         self.db = db
 
+    @staticmethod
+    def _extract_checkbox_ids(payload: Dict[str, Any], *keys: str) -> list[str]:
+        """Normalize checkbox payload values into a list of string ids.
+
+        Handles arrays of strings, comma-separated strings, and arrays of objects
+        shaped like {id: ...} or {value: ...}.
+        """
+        raw_value: Any = None
+        for key in keys:
+            candidate = payload.get(key)
+            if candidate:
+                raw_value = candidate
+                break
+
+        if raw_value is None:
+            return []
+
+        if isinstance(raw_value, str):
+            items: list[Any] = [s.strip() for s in raw_value.split(",") if s.strip()]
+        elif isinstance(raw_value, list):
+            items = raw_value
+        else:
+            items = [raw_value]
+
+        normalized: list[str] = []
+        for item in items:
+            if isinstance(item, dict):
+                value = item.get("id") or item.get("value") or item.get("key") or item.get("name")
+                if value is None:
+                    continue
+                text = str(value).strip()
+            else:
+                text = str(item).strip()
+            if text:
+                normalized.append(text)
+
+        return normalized
+
     # ------------------------------------------------------------------
     # Validation Methods – Pure logic, reusable by both guided flows & APIs
     # ------------------------------------------------------------------
@@ -147,6 +185,7 @@ class MotorPrivateFlow:
             errors=errors,
             allowed=["comprehensive", "third_party"],
             required=True,
+            message="Please select a cover type.",
         )
         validated["vehicle_make"] = validate_enum(
             payload.get("vehicle_make", ""),
@@ -154,6 +193,7 @@ class MotorPrivateFlow:
             errors=errors,
             allowed=["Toyota", "Nissan", "Honda", "Subaru", "Suzuki", "Mazda", "Mitsubishi", "Isuzu", "Ford", "Hyundai", "Kia", "Volkswagen", "Mercedes-Benz", "BMW", "Peugeot", "Renault", "Other"],
             required=True,
+            message="Please select a valid vehicle make.",
         )
 
         year_val = payload.get("year_of_manufacture", "")
@@ -170,7 +210,6 @@ class MotorPrivateFlow:
             payload.get("cover_start_date", ""),
             errors,
             field="cover_start_date",
-            required=True
         )
 
         validated["is_rare_model"] = validate_enum(
@@ -179,6 +218,7 @@ class MotorPrivateFlow:
             errors=errors,
             allowed=["yes", "no"],
             required=True,
+            message="Please select if the vehicle is a rare model.",
         )
         validated["has_undergone_valuation"] = validate_enum(
             payload.get("has_undergone_valuation", ""),
@@ -186,6 +226,7 @@ class MotorPrivateFlow:
             errors=errors,
             allowed=["yes", "no"],
             required=True,
+            message="Please indicate if the vehicle has undergone valuation.",
         )
 
         vehicle_value = payload.get("vehicle_value_ugx", "")
@@ -204,13 +245,19 @@ class MotorPrivateFlow:
         errors: Dict[str, str] = {}
         validated = {}
 
-        validated["excess_choice"] = validate_enum(
-            payload.get("excess_choice", ""),
-            field="excess_choice",
-            errors=errors,
-            allowed=[p["id"] for p in MOTOR_PRIVATE_EXCESS_PARAMETERS],
-            required=True,
-        )
+        allowed_ids = {p["id"] for p in MOTOR_PRIVATE_EXCESS_PARAMETERS}
+        selected = self._extract_checkbox_ids(payload, "excess_parameters", "excess_choice", "risky_activities")
+        cleaned = []
+        seen = set()
+        for item in selected:
+            if item in allowed_ids and item not in seen:
+                cleaned.append(item)
+                seen.add(item)
+
+        if not cleaned:
+            errors["excess_choice"] = "Please select an excess parameter."
+
+        validated["excess_choice"] = cleaned
 
         return validated, errors
 
@@ -219,17 +266,38 @@ class MotorPrivateFlow:
         errors: Dict[str, str] = {}
         validated = {}
 
-        selected = payload.get("additional_benefits") or []
-        if isinstance(selected, str):
-            selected = [s.strip() for s in selected.split(",") if s.strip()]
+        selected = self._extract_checkbox_ids(payload, "additional_benefits", "risky_activities")
+        allowed_ids = {b["id"] for b in MOTOR_PRIVATE_ADDITIONAL_BENEFITS}
+        cleaned = []
+        seen = set()
+        invalid = []
+        for item in selected:
+            if item in allowed_ids:
+                if item not in seen:
+                    cleaned.append(item)
+                    seen.add(item)
+            else:
+                invalid.append(item)
 
-        allowed_ids = [b["id"] for b in MOTOR_PRIVATE_ADDITIONAL_BENEFITS]
-        invalid = [s for s in selected if s not in allowed_ids]
         if invalid:
             errors["additional_benefits"] = f"Invalid selections: {', '.join(invalid)}"
 
-        validated["selected_benefits"] = [s for s in selected if s not in invalid]
+        validated["selected_benefits"] = cleaned
         return validated, errors
+
+    def _build_motor_runtime_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Merge full-form and guided-step state into one runtime view for preview/quoting."""
+        runtime = dict(data.get("motor_frontend", {}) or {})
+        vehicle_details = data.get("vehicle_details", {}) or {}
+
+        runtime.setdefault("vehicle_make", vehicle_details.get("vehicle_make", ""))
+        runtime.setdefault("year_of_manufacture", vehicle_details.get("year_of_manufacture", ""))
+        runtime.setdefault("cover_start_date", vehicle_details.get("cover_start_date", ""))
+        runtime.setdefault("rare_model", vehicle_details.get("rare_model", "no"))
+        runtime.setdefault("valuation_done", vehicle_details.get("valuation_done", "no"))
+        runtime.setdefault("vehicle_value", vehicle_details.get("vehicle_value", 0))
+
+        return runtime
 
     # ------------------------------------------------------------------
     # complete_flow – convenience helper (skips step-by-step UI)
@@ -589,7 +657,7 @@ class MotorPrivateFlow:
                     required=True,
                 )
                 raise_if_errors(errors)
-                data["vehicle_details"] = {
+                vehicle_details = {
                     "vehicle_make": vehicle_make,
                     "year_of_manufacture": str(year),
                     "cover_start_date": cover_start_date,
@@ -601,6 +669,18 @@ class MotorPrivateFlow:
                     "tracking_system_installed": tracking_system_installed,
                     "car_usage_region": car_usage_region,
                 }
+                data["vehicle_details"] = vehicle_details
+                motor_frontend = data.setdefault("motor_frontend", {})
+                motor_frontend.update(
+                    {
+                        "vehicle_make": vehicle_details["vehicle_make"],
+                        "year_of_manufacture": vehicle_details["year_of_manufacture"],
+                        "cover_start_date": vehicle_details["cover_start_date"],
+                        "rare_model": vehicle_details["rare_model"],
+                        "valuation_done": vehicle_details["valuation_done"],
+                        "vehicle_value": vehicle_details["vehicle_value"],
+                    }
+                )
                 out = await self._step_excess_parameters({}, data, user_id)
                 out["next_step"] = 2
                 return out
@@ -713,18 +793,23 @@ class MotorPrivateFlow:
     async def _step_excess_parameters(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         try:
             if payload and "_raw" not in payload:
-                selected = (
-                    payload.get("excess_parameters")
-                    or payload.get("excess_choice")
-                    or payload.get("risky_activities")
-                    or []
+                selected = self._extract_checkbox_ids(
+                    payload,
+                    "excess_parameters",
+                    "excess_choice",
+                    "risky_activities",
                 )
-                if isinstance(selected, str):
-                    selected = [s.strip() for s in selected.split(",") if s.strip()]
-                selected = [str(item).strip() for item in selected if str(item).strip()]
-                if not selected:
+                allowed_ids = {p["id"] for p in MOTOR_PRIVATE_EXCESS_PARAMETERS}
+                cleaned = []
+                seen = set()
+                for item in selected:
+                    if item in allowed_ids and item not in seen:
+                        cleaned.append(item)
+                        seen.add(item)
+
+                if not cleaned:
                     raise_if_errors({"excess_choice": "Please select an excess parameter."})
-                data["excess_parameters"] = selected
+                data["excess_parameters"] = cleaned
                 out = await self._step_additional_benefits({}, data, user_id)
                 out["next_step"] = 3
                 return out
@@ -752,14 +837,11 @@ class MotorPrivateFlow:
     async def _step_additional_benefits(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         try:
             if payload and "_raw" not in payload:
-                selected = (
-                    payload.get("additional_benefits")
-                    or payload.get("risky_activities")
-                    or []
+                selected = self._extract_checkbox_ids(
+                    payload,
+                    "additional_benefits",
+                    "risky_activities",
                 )
-                if isinstance(selected, str):
-                    selected = [s.strip() for s in selected.split(",") if s.strip()]
-                selected = [str(item).strip() for item in selected if str(item).strip()]
 
                 allowed_ids = {b["id"] for b in MOTOR_PRIVATE_ADDITIONAL_BENEFITS}
                 # Frontend may send mixed checkbox payloads; keep only valid benefit IDs.
@@ -852,7 +934,7 @@ class MotorPrivateFlow:
         # the flow continues to collect remaining details before payment
         quotation_preview = None
         try:
-            motor_data = data.get("motor_frontend", {})
+            motor_data = self._build_motor_runtime_data(data)
             vehicle_value = motor_data.get("vehicle_value", 0)
             cover_start = motor_data.get("cover_start_date", "")
             cover_type = motor_data.get("cover_type", "comprehensive")

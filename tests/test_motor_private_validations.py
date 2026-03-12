@@ -9,6 +9,7 @@ These tests focus on MotorPrivateFlow.complete_flow, ensuring that:
 
 import pytest
 from datetime import date, timedelta
+from types import SimpleNamespace
 
 from src.chatbot.flows.motor_private import MotorPrivateFlow
 from src.chatbot.validation import FormValidationError
@@ -235,6 +236,35 @@ async def test_excess_parameters_step_accepts_frontend_checkbox_alias(motor_flow
     assert result["collected_data"]["excess_parameters"] == ["excess_3", "excess_1"]
 
 
+def test_pure_vehicle_details_validator_is_callable(motor_flow):
+    """The extracted validator should work directly for future API reuse."""
+
+    validated, errors = motor_flow._validate_vehicle_details(
+        {
+            "cover_type": "comprehensive",
+            "vehicle_make": "Toyota",
+            "year_of_manufacture": str(date.today().year),
+            "cover_start_date": (date.today() + timedelta(days=1)).isoformat(),
+            "is_rare_model": "no",
+            "has_undergone_valuation": "yes",
+            "vehicle_value_ugx": "15000000",
+        }
+    )
+
+    assert errors == {}
+    assert validated["cover_type"] == "comprehensive"
+    assert validated["vehicle_make"] == "toyota"
+
+
+def test_pure_excess_validator_filters_invalid_values(motor_flow):
+    validated, errors = motor_flow._validate_excess_parameters(
+        {"risky_activities": ["excess_1", "political_violence", "excess_1"]}
+    )
+
+    assert errors == {}
+    assert validated["excess_choice"] == ["excess_1"]
+
+
 @pytest.mark.asyncio
 async def test_excess_parameters_response_exposes_field_name(motor_flow):
     """Checkbox response should tell the frontend which field name to submit."""
@@ -268,3 +298,58 @@ async def test_additional_benefits_accepts_alias_and_filters_mixed_ids(motor_flo
         "political_violence",
         "alternative_accommodation",
     ]
+
+
+@pytest.mark.asyncio
+async def test_additional_benefits_accepts_object_checkbox_values(motor_flow):
+    """Frontend may submit checkbox options as objects; step should still advance."""
+
+    result = await motor_flow._step_additional_benefits(
+        {
+            "risky_activities": [
+                {"id": "political_violence"},
+                {"value": "alternative_accommodation"},
+                {"id": "excess_2"},
+            ]
+        },
+        {},
+        user_id="user123",
+    )
+
+    assert result["next_step"] == 4
+    assert result["collected_data"]["additional_benefits"] == [
+        "political_violence",
+        "alternative_accommodation",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_guided_premium_preview_uses_vehicle_details_state(motor_flow, monkeypatch):
+    """Step-by-step guided flow should preview quotes from vehicle_details, not only motor_frontend."""
+
+    captured = {}
+
+    async def fake_preview(**kwargs):
+        captured.update(kwargs)
+        return {"quotation": {"payable_amount": 12345}}
+
+    monkeypatch.setattr("src.chatbot.flows.motor_private.run_quote_preview", fake_preview)
+
+    result = await motor_flow._step_premium_calculation(
+        {},
+        {
+            "vehicle_details": {
+                "vehicle_make": "Toyota",
+                "year_of_manufacture": "2024",
+                "cover_start_date": (date.today() + timedelta(days=2)).isoformat(),
+                "rare_model": "No",
+                "valuation_done": "Yes",
+                "vehicle_value": "15000000",
+            }
+        },
+        user_id="user123",
+    )
+
+    assert captured["underwriting_data"]["vehicleMake"] == "Toyota"
+    assert captured["underwriting_data"]["policyStartDate"] == (date.today() + timedelta(days=2)).isoformat()
+    assert result["response"]["payable_amount"] == 12345
