@@ -246,47 +246,27 @@ def _estimate_response_confidence(
     filters: Dict[str, Any],
 ) -> float:
     answer = (response.get("answer") or "").strip()
-    sources = response.get("sources") if isinstance(response.get("sources"), list) else []
-    evidence_count = len(sources) or len(retrieval_results)
-    top_hit_score = 0.0
-    if retrieval_results:
-        try:
-            top_hit_score = float(retrieval_results[0].get("score") or 0.0)
-        except Exception:
-            top_hit_score = 0.0
+    response_conf = response.get("confidence")
 
-    confidence = 0.15
-    if answer:
-        confidence += 0.2
+    if isinstance(response_conf, (int, float)):
+        confidence = float(response_conf)
+    else:
+        if retrieval_results:
+            scores = [float(h.get("score") or 0.0) for h in retrieval_results]
+            avg_score = sum(scores) / len(scores) if scores else 0.0
+            coverage = min(len(retrieval_results) / 5.0, 1.0)
+        else:
+            avg_score = 0.0
+            coverage = 0.0
 
-    confidence += min(evidence_count, 5) / 5.0 * 0.25
+        min_score = 0.55
+        if avg_score <= 0:
+            score_norm = 0.0
+        else:
+            score_norm = (avg_score - min_score) / max(1.0 - min_score, 0.01)
+            score_norm = max(0.0, min(1.0, score_norm))
 
-    if top_hit_score >= 0.9:
-        confidence += 0.2
-    elif top_hit_score >= 0.7:
-        confidence += 0.15
-    elif top_hit_score >= 0.5:
-        confidence += 0.1
-    elif top_hit_score >= 0.25:
-        confidence += 0.05
-
-    if filters.get("products"):
-        confidence += 0.1
-
-    if products:
-        try:
-            top_product_score = float(products[0][0] or 0.0)
-        except Exception:
-            top_product_score = 0.0
-
-        if top_product_score >= 1.5:
-            confidence += 0.15
-        elif top_product_score >= 1.2:
-            confidence += 0.12
-        elif top_product_score >= 0.9:
-            confidence += 0.08
-        elif top_product_score >= 0.5:
-            confidence += 0.04
+        confidence = (0.7 * score_norm) + (0.3 * coverage)
 
     if _is_fallback_like_answer(answer):
         confidence = min(confidence, 0.25)
@@ -408,6 +388,46 @@ class ConversationalMode:
         # handle it, but we no longer *emit* buttons/actions as the primary UX.
         if form_data and isinstance(form_data, dict) and form_data.get("action"):
             return await self._process_product_guide_action(form_data, session_id)
+
+        # Handle pending agent handoff confirmation (ask -> wait for yes/no).
+        pending_ctx = dict((session_for_id.get("context") or {}))
+        if pending_ctx.get("pending_agent_offer"):
+            if _is_affirmative(message):
+                pending_ctx.pop("pending_agent_offer", None)
+                self.state_manager.update_session(session_id, {"context": pending_ctx})
+                try:
+                    from src.integrations.policy.escalation_service import EscalationService
+
+                    EscalationService(state_manager=self.state_manager).escalate_to_human(
+                        session_id=session_id,
+                        reason="user_requested_agent",
+                        user_id=user_id,
+                        metadata={"conversation_id": conversation_id},
+                    )
+                except Exception:
+                    self.state_manager.mark_escalated(
+                        session_id,
+                        reason="user_requested_agent",
+                        metadata={"conversation_id": conversation_id},
+                    )
+                return {
+                    "mode": "escalated",
+                    "response": "Message sent to human agent.",
+                    "escalated": True,
+                    "agent_id": None,
+                }
+            if _is_negative(message):
+                pending_ctx.pop("pending_agent_offer", None)
+                self.state_manager.update_session(session_id, {"context": pending_ctx})
+                return {
+                    "mode": "conversational",
+                    "response": "No problem. Any other question you would like me to help you with?",
+                    "confidence": 1.0,
+                }
+            # If user says something else, clear the pending offer and continue normally.
+            if (message or "").strip():
+                pending_ctx.pop("pending_agent_offer", None)
+                self.state_manager.update_session(session_id, {"context": pending_ctx})
 
         escalation_state = self.state_manager.get_escalation_state(session_id)
         if escalation_state.get("escalated"):
@@ -627,13 +647,18 @@ class ConversationalMode:
                 confidence=confidence,
                 conversation_state=session,
                 session_id=session_id,
-                # When confidence is low, ResponseProcessor escalates if session_id is provided.
+                # Low confidence triggers a human-offer prompt; escalation waits for user confirmation.
                 user_id=user_id,
                 products_matched=products_matched_names,
             )
             answer_text = processed.get("message")
             follow_up_flag = processed.get("follow_up", False)
             processed_reason = (processed.get("metadata") or {}).get("reason")
+            if processed.get("offer_human"):
+                sess = self.state_manager.get_session(session_id) or {}
+                ctx = dict(sess.get("context") or {})
+                ctx["pending_agent_offer"] = True
+                self.state_manager.update_session(session_id, {"context": ctx})
         else:
             answer_text = response["answer"]
             follow_up_flag = False

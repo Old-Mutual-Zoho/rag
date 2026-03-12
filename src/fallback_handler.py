@@ -37,21 +37,13 @@ class FallbackHandler:
     ) -> Dict[str, Any]:
         logger.info("Generating fallback: reason=%s, confidence=%s", reason, confidence)
 
-        # Low confidence: offer human help and escalate the session.
+        # Low confidence: offer human help (wait for user confirmation before escalating).
         if reason == "low_confidence" or (confidence is not None and confidence < self.offer_human_threshold):
             message = (
                 "I may not have enough information to answer that. Have I replied to all your questions, "
                 "or would you like to talk to an agent?"
             )
             offer_human = True
-            # Escalate to human agent queue
-            if self.escalation_service and session_id:
-                self.escalation_service.escalate_to_human(
-                    session_id=session_id,
-                    reason=reason or "low_confidence",
-                    user_id=user_id,
-                    metadata={"confidence": confidence, "user_input": user_input}
-                )
         else:
             message = (
                 "I didn't fully understand. Could you please rephrase or provide more details?"
