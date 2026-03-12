@@ -135,7 +135,7 @@ class ChatRouter:
                     ],
                 },
             }
-# Default to conversational mode
+        # Default to conversational mode
         return await self.conversational.process(message, session_id, user_id, form_data=form_data, db=db)
 
     def _is_guided_trigger(self, message: str) -> bool:
@@ -166,22 +166,13 @@ class ChatRouter:
             logger.info("[Router] Explicit guided trigger matched: %s", message[:100])
             return True
 
-        # General keywords that might indicate quotation intent
-        general_triggers = [
-            "quote",
-            "quotation",
-            "buy",
-            "apply",
-            "purchase",
-            "how much",
-            "price",
-            "cost",
-            "premium",
-        ]
-        matched = any(trigger in message_lower for trigger in general_triggers)
-        if matched:
-            logger.info("[Router] General guided trigger matched: %s", message[:100])
-        return matched
+        wants_quote = any(word in message_lower for word in ["want", "need", "get"]) and any(word in message_lower for word in ["quote", "quotation"])
+        wants_purchase = any(word in message_lower for word in ["want", "need", "help me", "can i"]) and any(word in message_lower for word in ["apply", "buy", "purchase"])
+        if wants_quote or wants_purchase:
+            logger.info("[Router] Explicit guided trigger matched by intent words: %s", message[:100])
+            return True
+
+        return False
 
     def _detect_flow_type(self, message: str) -> str:
         """Detect which guided flow to start"""
