@@ -247,9 +247,8 @@ class MiaGenerator:
                 if not text:
                     logger.warning("GenAI returned empty text response.")
                     return "I'm having trouble retrieving those details right now. Please try again in a moment."
-
-                    logger.info("Successfully generated response from Gemini API")
-                    return text
+                logger.info("Successfully generated response from Gemini API")
+                return text
             except Exception as e:
                 if attempt >= max_attempts:
                     logger.error(f"GenAI error when generating response: {type(e).__name__}: {e}", exc_info=True)
@@ -263,7 +262,7 @@ class MiaGenerator:
                     backoff,
                 )
                 await asyncio.sleep(backoff)
-            return text
+
         return "I'm having trouble retrieving those details right now. Please try again in a moment."
 
 
