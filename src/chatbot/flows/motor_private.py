@@ -25,7 +25,8 @@ from src.chatbot.validation import (
     validate_cover_start_date_range,
     validate_positive_number_field,
 )
-from src.chatbot.flows.field_filter import filter_missing_fields, add_validation_hints_to_fields, add_frontend_validation_rules
+from src.chatbot.flows.field_filter import filter_missing_fields
+from src.chatbot.field_validator import FieldDecorator
 from src.integrations.policy.premium import premium_service
 from src.integrations.product_benefits import product_benefits_loader
 from src.integrations.underwriting import run_quote_preview
@@ -511,11 +512,8 @@ class MotorPrivateFlow:
             data_key="about_you"
         )
 
-        # Add validation error hints to fields
-        fields_with_hints = add_validation_hints_to_fields(filtered_fields, errors)
-
-        # Add frontend validation rules for real-time validation
-        fields_with_validation = add_frontend_validation_rules(fields_with_hints)
+        # Add validation hints and frontend rules
+        fields_with_validation = FieldDecorator.decorate(filtered_fields, errors=errors)
 
         return {
             "response": {

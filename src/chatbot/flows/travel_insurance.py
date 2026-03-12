@@ -25,7 +25,8 @@ from src.chatbot.validation import (
     validate_in,
     validate_phone_ug,
 )
-from src.chatbot.flows.field_filter import filter_missing_fields, add_validation_hints_to_fields, add_frontend_validation_rules
+from src.chatbot.flows.field_filter import filter_missing_fields
+from src.chatbot.field_validator import FieldDecorator
 from src.integrations.policy.premium import premium_service
 
 # Travel insurance product cards (from product selection screen)
@@ -267,6 +268,9 @@ class TravelInsuranceFlow:
             validate_phone_ug(payload.get("phone_number", ""), errors, field="phone_number")
             validate_email(payload.get("email", ""), errors, field="email")
 
+            if errors:
+                raise_if_errors(errors)
+
             # If no errors, save and proceed
             if not errors:
                 data["about_you"] = {
@@ -318,11 +322,8 @@ class TravelInsuranceFlow:
             data_key="about_you"
         )
 
-        # Add validation error hints to fields
-        fields_with_hints = add_validation_hints_to_fields(filtered_fields, errors)
-
-        # Add frontend validation rules for real-time validation
-        fields_with_validation = add_frontend_validation_rules(fields_with_hints)
+        # Add validation hints and frontend rules
+        fields_with_validation = FieldDecorator.decorate(filtered_fields, errors=errors)
 
         return {
             "response": {

@@ -10,19 +10,24 @@ from typing import Any, Dict, Optional
 
 from datetime import datetime, date
 
+from src.chatbot.field_validator import (
+    FieldDecorator,
+    StepValidator,
+    filter_collected_fields,
+)
+from src.chatbot.flows.field_filter import (
+    filter_already_collected_fields,
+)
 from src.chatbot.validation import (
+    FormValidationError,
+    optional_str,
     raise_if_errors,
     require_str,
-    optional_str,
     validate_date_iso,
     validate_email,
     validate_in,
     validate_nin_ug,
     validate_phone_ug,
-)
-from src.chatbot.flows.field_filter import (
-    add_validation_hints_to_fields,
-    add_frontend_validation_rules,
 )
 from src.integrations.policy.premium import premium_service
 from src.integrations.underwriting import run_quote_preview
@@ -249,6 +254,9 @@ class PersonalAccidentFlow:
             if cover_limit_str not in allowed_limits:
                 errors["coverLimitAmountUgx"] = f"Cover limit must be one of: {', '.join(allowed_limits)}"
 
+            if errors:
+                raise FormValidationError(field_errors=errors)
+
             # If no errors, calculate premium and save data
             if not errors:
                 # Calculate premium
@@ -368,14 +376,10 @@ class PersonalAccidentFlow:
             },
         ]
 
-        # Show original form fields without filtering
+        # Show original quick quote form fields without filtering
         filtered_fields = all_fields
 
-        # Add validation error hints to fields
-        fields_with_hints = add_validation_hints_to_fields(filtered_fields, errors)
-
-        # Add frontend validation rules for real-time validation
-        fields_with_validation = add_frontend_validation_rules(fields_with_hints)
+        fields_with_validation = FieldDecorator.decorate(filtered_fields, errors=errors)
 
         return {
             "response": {
@@ -383,7 +387,7 @@ class PersonalAccidentFlow:
                 "message": "Get your Personal Accident quote in seconds" + (" - Please fix the errors below" if errors else ""),
                 "fields": fields_with_validation,
             },
-            "next_step": 1,
+            "next_step": 0 if errors else 1,
             "collected_data": data,
         }
 
@@ -468,7 +472,7 @@ class PersonalAccidentFlow:
 
     async def _step_personal_details(self, payload: Dict, data: Dict, user_id: str) -> Dict:
         """
-        Step 2: Full Personal Details
+        Step 2: Full Remaining Details
         Collects additional personal information: surname, occupation, nationality, gender, address, etc.
         Pre-fills from quick quote where applicable.
         Uses progressive disclosure - only shows NEW fields not collected in quick quote.
@@ -512,6 +516,9 @@ class PersonalAccidentFlow:
             tax_identification_number = optional_str(payload, "tax_identification_number")
             country_of_residence = require_str(payload, "country_of_residence", errors, label="Country of Residence")
             physical_address = require_str(payload, "physical_address", errors, label="Physical Address")
+
+            if errors:
+                raise FormValidationError(field_errors=errors)
 
             # If no errors, save all data (including auto-filled from quick quote) and proceed
             if not errors:
@@ -632,14 +639,14 @@ class PersonalAccidentFlow:
             },
         ]
 
-        # Show original form fields without filtering
-        filtered_fields = all_fields
+        # Step 2 should show only remaining fields not already collected in quick quote
+        filtered_fields = filter_collected_fields(
+            all_fields=all_fields,
+            collected_data=data,
+            previous_step_keys=["quick_quote"],
+        )
 
-        # Add validation error hints to fields
-        fields_with_hints = add_validation_hints_to_fields(filtered_fields, errors)
-
-        # Add frontend validation rules for real-time validation
-        fields_with_validation = add_frontend_validation_rules(fields_with_hints)
+        fields_with_validation = FieldDecorator.decorate(filtered_fields, errors=errors)
 
         return {
             "response": {
@@ -647,7 +654,7 @@ class PersonalAccidentFlow:
                 "message": "📋 Additional personal details" + (" - Please complete the missing fields" if errors else ""),
                 "fields": fields_with_validation,
             },
-            "next_step": 3,
+            "next_step": 2 if errors else 3,
             "collected_data": data,
         }
 
@@ -682,8 +689,6 @@ class PersonalAccidentFlow:
                     "nok_address": address,
                     "nok_id_number": id_number,
                 }
-                # Proceed to next step
-                return await self._step_previous_pa_policy({}, data, user_id)
 
         # Pre-fill from quick quote if available
         quick_quote = data.get("quick_quote", {})
@@ -705,11 +710,7 @@ class PersonalAccidentFlow:
         # Show original form fields without filtering
         filtered_fields = all_fields
 
-        # Add validation error hints to fields
-        fields_with_hints = add_validation_hints_to_fields(filtered_fields, errors)
-
-        # Add frontend validation rules for real-time validation
-        fields_with_validation = add_frontend_validation_rules(fields_with_hints)
+        fields_with_validation = FieldDecorator.decorate(filtered_fields, errors=errors)
 
         return {
             "response": {
@@ -717,7 +718,7 @@ class PersonalAccidentFlow:
                 "message": "👥 Next of kin details" + (" - Please fix the errors below" if errors else ""),
                 "fields": fields_with_validation,
             },
-            "next_step": 4,
+            "next_step": 3 if errors else 4,
             "collected_data": data,
         }
 
