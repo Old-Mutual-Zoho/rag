@@ -205,6 +205,17 @@ class PostgresDB:
             s.refresh(ev)
             return ev
 
+    def end_conversation(self, conversation_id: str, ended_at: Optional[datetime] = None) -> Optional[Conversation]:
+        with self._session() as s:
+            stmt = select(Conversation).where(Conversation.id == str(conversation_id))
+            rec = s.execute(stmt).scalar_one_or_none()
+            if not rec:
+                return None
+            rec.ended_at = ended_at or datetime.utcnow()
+            s.add(rec)
+            s.flush()
+            return rec
+
     def list_conversation_events(
         self,
         *,

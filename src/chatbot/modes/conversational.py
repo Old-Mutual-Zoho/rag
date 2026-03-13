@@ -503,6 +503,15 @@ class ConversationalMode:
                         reason="user_requested_agent",
                         metadata={"conversation_id": conversation_id},
                     )
+                if conversation_id and hasattr(self.state_manager.db, "add_conversation_event"):
+                    try:
+                        self.state_manager.db.add_conversation_event(
+                            conversation_id=conversation_id,
+                            event_type="escalation_confirmed",
+                            payload={"source": "user", "reason": "user_requested_agent"},
+                        )
+                    except Exception:
+                        pass
                 return {
                     "mode": "escalated",
                     "response": "Message sent to human agent.",
@@ -630,7 +639,7 @@ class ConversationalMode:
                     except Exception as exc:
                         logger.warning("[metrics] Failed to record conversation event: %s", exc)
 
-                return {
+                payload = {
                     "mode": "conversational",
                     "response": answer_text,
                     "sources": [],
@@ -640,6 +649,11 @@ class ConversationalMode:
                     "suggested_action": None,
                     "confidence": 1.0,
                 }
+
+                if no_ret_kind == "GOODBYE":
+                    self.state_manager.end_session(session_id, ended_by="bot")
+
+                return payload
 
         # Detect coarse intent (quote/buy/learn/etc.)
         broad_query = _is_broad_product_query(message)
@@ -761,6 +775,8 @@ class ConversationalMode:
             answer_text = processed.get("message")
             follow_up_flag = processed.get("follow_up", False)
             processed_reason = (processed.get("metadata") or {}).get("reason")
+            if processed.get("fallback"):
+                metrics_to_emit.append(_metric_payload("fallbacks", 1.0, conversation_id))
             if processed.get("offer_human"):
                 sess = self.state_manager.get_session(session_id) or {}
                 ctx = dict(sess.get("context") or {})
