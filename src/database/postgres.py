@@ -262,6 +262,24 @@ class PostgresDB:
         msgs.sort(key=lambda m: m.timestamp, reverse=True)
         return msgs[:limit]
 
+    def list_messages(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        role: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[Message]:
+        messages = [
+            m
+            for m in self._messages
+            if start <= m.timestamp < end and (role is None or m.role == role)
+        ]
+        messages.sort(key=lambda m: m.timestamp, reverse=True)
+        if limit:
+            messages = messages[: int(limit)]
+        return messages
+
     def add_conversation_event(
         self,
         *,

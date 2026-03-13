@@ -857,12 +857,85 @@ async def get_ai_performance_metrics(
     )
 
     # Intent recognition performance
+    def _infer_intent_from_message(message: str) -> str:
+        message_lower = (message or "").strip().lower()
+        if not message_lower:
+            return "unknown"
+
+        if any(word in message_lower for word in ["quote", "how much", "price", "cost", "premium"]):
+            return "quote"
+        if any(word in message_lower for word in ["buy", "purchase", "apply", "get insurance"]):
+            return "buy"
+        if any(word in message_lower for word in ["what is", "tell me about", "explain", "how does"]):
+            return "learn"
+        if any(word in message_lower for word in ["compare", "difference", "vs", "versus"]):
+            return "compare"
+        if any(word in message_lower for word in ["need", "looking for", "want", "recommend"]):
+            return "discover"
+        if any(word in message_lower for word in ["claim", "file", "submit"]):
+            return "claim"
+        return "general"
+
+    def _looks_like_structured_payload(content: str) -> bool:
+        normalized = (content or "").strip()
+        if not normalized:
+            return True
+        if normalized.startswith("{") and normalized.endswith("}"):
+            return True
+        if normalized.startswith("[") and normalized.endswith("]"):
+            return True
+        return False
+
     intent_events = db.list_conversation_events(
         start=current_start,
         end=now,
         event_type="intent",
         limit=20000,
     )
+
+    if not intent_events and hasattr(db, "list_messages"):
+        try:
+            fallback_user_messages = db.list_messages(
+                start=current_start,
+                end=now,
+                role="user",
+                limit=50000,
+            )
+            inferred_events = []
+            for msg in fallback_user_messages:
+                text = str(getattr(msg, "content", "") or "").strip()
+                if _looks_like_structured_payload(text):
+                    continue
+                inferred_events.append(
+                    {
+                        "payload": {
+                            "intent": _infer_intent_from_message(text),
+                            "intent_type": "INFERRED_FROM_MESSAGE",
+                            "confidence": 0.6,
+                            "user_message": text,
+                        },
+                        "created_at": getattr(msg, "timestamp", now),
+                    }
+                )
+
+            if inferred_events:
+                logger.info(
+                    "AI metrics intent fallback used inferred messages count=%s",
+                    len(inferred_events),
+                )
+
+                class _SyntheticIntentEvent:
+                    def __init__(self, payload: Dict[str, Any], created_at: datetime) -> None:
+                        self.payload = payload
+                        self.created_at = created_at
+
+                intent_events = [
+                    _SyntheticIntentEvent(payload=e["payload"], created_at=e["created_at"])
+                    for e in inferred_events
+                ]
+        except Exception as exc:
+            logger.warning("Failed to infer intent events from messages: %s", exc)
+
     intent_groups: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
     for ev in intent_events:
         payload = ev.payload or {}

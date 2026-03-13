@@ -184,6 +184,26 @@ class PostgresDB:
             )
             return list(s.execute(stmt).scalars().all())
 
+    def list_messages(
+        self,
+        *,
+        start: datetime,
+        end: datetime,
+        role: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> List[Message]:
+        with self._session() as s:
+            stmt = select(Message).where(
+                Message.timestamp >= start,
+                Message.timestamp < end,
+            )
+            if role:
+                stmt = stmt.where(Message.role == str(role))
+            stmt = stmt.order_by(Message.timestamp.desc())
+            if limit:
+                stmt = stmt.limit(int(limit))
+            return list(s.execute(stmt).scalars().all())
+
     def add_conversation_event(
         self,
         *,
