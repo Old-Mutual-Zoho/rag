@@ -61,6 +61,7 @@ MOTOR_PRIVATE_ADDITIONAL_BENEFITS = [
     }
 ]
 
+
 class MotorPrivateFlow:
     """
     Guided flow for Motor Private.

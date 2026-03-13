@@ -782,13 +782,13 @@ class TravelInsuranceFlow:
         # 1. Get the total number of travellers we need to collect
         trip_info = data.get("travel_party_and_trip") or {}
         total_needed = trip_info.get("total_travellers") or 1
-        
+
         # Initialize travellers list if it doesn't exist
         if "travellers" not in data:
             data["travellers"] = []
-            
+
         current_travellers = data["travellers"]
-        current_index = len(current_travellers) + 1 # e.g., Traveller 1, Traveller 2...
+        current_index = len(current_travellers) + 1  # e.g., Traveller 1, Traveller 2...
 
         # 2. Process submission if payload exists
         if payload and "_raw" not in payload:
@@ -838,7 +838,7 @@ class TravelInsuranceFlow:
 
             # Append the new traveller to our list
             data["travellers"].append(new_traveller)
-            
+
             # Persist via controller if available
             app_id = data.get("application_id")
             if self.controller and app_id:
@@ -868,9 +868,27 @@ class TravelInsuranceFlow:
                 "type": "form",
                 "message": msg,
                 "fields": [
-                    {"name": "first_name", "label": "First Name", "type": "text", "required": True, "defaultValue": prefill.get("first_name", "")},
-                    {"name": "middle_name", "label": "Middle Name (Optional)", "type": "text", "required": False, "defaultValue": prefill.get("middle_name", "")},
-                    {"name": "surname", "label": "Surname", "type": "text", "required": True, "defaultValue": prefill.get("surname", "")},
+                    {
+                        "name": "first_name",
+                        "label": "First Name",
+                        "type": "text",
+                        "required": True,
+                        "defaultValue": prefill.get("first_name", ""),
+                    },
+                    {
+                        "name": "middle_name",
+                        "label": "Middle Name (Optional)",
+                        "type": "text",
+                        "required": False,
+                        "defaultValue": prefill.get("middle_name", ""),
+                    },
+                    {
+                        "name": "surname",
+                        "label": "Surname",
+                        "type": "text",
+                        "required": True,
+                        "defaultValue": prefill.get("surname", ""),
+                    },
                     {
                         "name": "nationality_type",
                         "label": "Nationality Type",
@@ -883,11 +901,13 @@ class TravelInsuranceFlow:
                     },
                     {"name": "passport_number", "label": "Passport Number", "type": "text", "required": True},
                     {
-                        "name": "date_of_birth", 
-                        "label": "Date of Birth", 
-                        "type": "date", 
+                        "name": "date_of_birth",
+                        "label": "Date of Birth",
+                        "type": "date",
                         "required": True,
-                        "defaultValue": prefill.get("traveller_1_date_of_birth", "") # If captured in trip step
+                        "defaultValue": prefill.get(
+                            "traveller_1_date_of_birth", ""
+                        ),  # If captured in trip step
                     },
                     {"name": "occupation", "label": "Profession/Occupation", "type": "text", "required": True},
                     {"name": "phone_number", "label": "Phone Number", "type": "tel", "required": True, "defaultValue": prefill.get("phone_number", "")},
@@ -896,7 +916,7 @@ class TravelInsuranceFlow:
                     {"name": "town_city", "label": "Town/City", "type": "text", "required": True},
                 ],
             },
-            "next_step": 4, # Stay on this step until total_needed is met
+            "next_step": 4,  # Stay on this step until total_needed is met
             "collected_data": data,
         }
         if payload and "_raw" not in payload:
