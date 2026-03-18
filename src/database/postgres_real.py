@@ -184,6 +184,21 @@ class PostgresDB:
             )
             return list(s.execute(stmt).scalars().all())
 
+    def get_conversation(self, conversation_id: str) -> Optional[Conversation]:
+        with self._session() as s:
+            stmt = select(Conversation).where(Conversation.id == str(conversation_id))
+            return s.execute(stmt).scalar_one_or_none()
+
+    def get_conversation_events(self, conversation_id: str, limit: int = 100) -> List[ConversationEvent]:
+        with self._session() as s:
+            stmt = (
+                select(ConversationEvent)
+                .where(ConversationEvent.conversation_id == str(conversation_id))
+                .order_by(ConversationEvent.created_at.desc())
+                .limit(int(limit))
+            )
+            return list(s.execute(stmt).scalars().all())
+
     def list_messages(
         self,
         *,
@@ -348,6 +363,18 @@ class PostgresDB:
         with self._session() as s:
             ts = func.coalesce(EscalationSession.escalated_at, EscalationSession.created_at)
             stmt = select(EscalationSession).where(ts >= start, ts < end)
+            return list(s.execute(stmt).scalars().all())
+
+    def list_escalation_sessions(self, limit: int = 100) -> List[EscalationSession]:
+        with self._session() as s:
+            stmt = select(EscalationSession).order_by(
+                func.coalesce(
+                    EscalationSession.updated_at,
+                    EscalationSession.agent_joined_at,
+                    EscalationSession.escalated_at,
+                    EscalationSession.created_at,
+                ).desc()
+            ).limit(int(limit))
             return list(s.execute(stmt).scalars().all())
 
     def list_conversation_message_stats(self, start: datetime, end: datetime) -> List[Dict[str, Any]]:

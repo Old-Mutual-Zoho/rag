@@ -262,6 +262,14 @@ class PostgresDB:
         msgs.sort(key=lambda m: m.timestamp, reverse=True)
         return msgs[:limit]
 
+    def get_conversation(self, conversation_id: str) -> Optional[Conversation]:
+        return self._conversations.get(str(conversation_id))
+
+    def get_conversation_events(self, conversation_id: str, limit: int = 100) -> List[ConversationEvent]:
+        events = [e for e in self._conversation_events if e.conversation_id == str(conversation_id)]
+        events.sort(key=lambda e: e.created_at, reverse=True)
+        return events[: int(limit)]
+
     def list_messages(
         self,
         *,
@@ -366,6 +374,19 @@ class PostgresDB:
             return rec.escalated_at or rec.created_at
 
         return [rec for rec in self._escalation_sessions.values() if start <= _ts(rec) < end]
+
+    def list_escalation_sessions(self, limit: int = 100) -> List[EscalationSession]:
+        sessions = list(self._escalation_sessions.values())
+        sessions.sort(
+            key=lambda rec: (
+                rec.updated_at
+                or rec.agent_joined_at
+                or rec.escalated_at
+                or rec.created_at
+            ),
+            reverse=True,
+        )
+        return sessions[: int(limit)]
 
     def list_conversation_message_stats(self, start: datetime, end: datetime) -> List[Dict[str, Any]]:
         grouped: Dict[str, List[Message]] = {}

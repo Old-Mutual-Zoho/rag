@@ -3,7 +3,6 @@ from src.api.endpoints.payments import payments_api
 from src.api.endpoints.policies import policies_api
 from src.api.endpoints.premiums import premiums_api
 from src.api.endpoints.quotes_underwriting import api as quotes_underwriting_api
-from src.api.endpoints.agent_webhook import router as agent_webhook_router, slack_service
 import src.api.escalation as escalation_module
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
@@ -108,9 +107,6 @@ app.include_router(premiums_api, prefix="/api/v1/premiums", tags=["Premiums"])
 
 # Register quotes and underwriting API router
 app.include_router(quotes_underwriting_api, prefix="/api")
-
-# Register agent webhook router
-app.include_router(agent_webhook_router, prefix="/api/v1")
 
 # Register flow validation endpoints (per-field and per-step)
 app.include_router(validate_flow_router, prefix="/api/v1", tags=["Flow Validation"])
@@ -545,6 +541,12 @@ class CSATFeedbackRequest(BaseModel):
     session_id: Optional[str] = Field(default=None, description="Chat session id")
     user_id: Optional[str] = Field(default=None, description="External user id (optional)")
     metadata: Optional[Dict[str, Any]] = Field(default_factory=dict)
+
+
+class ChatConsoleReplyRequest(BaseModel):
+    message: str = Field(..., min_length=1, description="Agent reply text")
+    agent_id: Optional[str] = Field(default="agent", description="Agent identifier")
+    sender: Optional[str] = Field(default="agent", description="Reply sender type")
 
 # ============================================================================
 # ENDPOINTS
@@ -1314,34 +1316,7 @@ async def _handle_chat_message(request: ChatMessage, router: ChatRouter, db: Pos
     )
 
     if response.get("mode") == "escalated" and (request.message or "").strip():
-        try:
-            session_for_thread = state_manager.get_session(session_id) or {}
-            already_seeded = bool(session_for_thread.get("agent_thread_seeded"))
-
-            if not already_seeded:
-                conv_id = session_for_thread.get("conversation_id")
-                if conv_id:
-                    history = db.get_conversation_history(conv_id, limit=12)
-                    if history:
-                        if not slack_service.thread_exists(session_id):
-                            slack_service.send_history_message(session_id, "Context before human-agent handoff:")
-                        for msg in reversed(history):
-                            role = (getattr(msg, "role", "") or "").lower()
-                            content = (getattr(msg, "content", "") or "").strip()
-                            if not content:
-                                continue
-                            if role == "assistant" and content.startswith("Message sent to human agent"):
-                                continue
-                            who = "User" if role == "user" else "Bot"
-                            slack_service.send_history_message(session_id, f"{who}: {content}")
-                state_manager.update_session(session_id, {"agent_thread_seeded": True})
-
-            slack_service.send_message(chat_id=session_id, message=(request.message or "").strip(), sender="client")
-            response["forwarded_to_agent"] = True
-        except Exception as e:
-            logger.warning("Failed to mirror client message to Slack for session %s: %s", session_id, e)
-            response["forwarded_to_agent"] = False
-            response["forward_error"] = str(e)
+        response["queued_for_agent"] = True
 
     session = state_manager.get_session(session_id)
     if session:
@@ -1920,6 +1895,212 @@ async def get_quote(quote_id: str, db: PostgresDB = Depends(get_db)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _iso_or_none(value: Optional[datetime]) -> Optional[str]:
+    return value.isoformat() if value else None
+
+
+def _safe_datetime_sort_key(value: Optional[datetime]) -> datetime:
+    return value or datetime.min.replace(tzinfo=None)
+
+
+def _slack_ts_to_iso(ts: Optional[str]) -> Optional[str]:
+    if not ts:
+        return None
+    try:
+        return datetime.fromtimestamp(float(ts), tz=timezone.utc).isoformat()
+    except Exception:
+        return None
+
+
+def _extract_customer_name(metadata: Dict[str, Any], phone_number: str, user_id: str) -> str:
+    candidates = [
+        metadata.get("customer_name"),
+        metadata.get("name"),
+        metadata.get("full_name"),
+        metadata.get("user_name"),
+    ]
+    for candidate in candidates:
+        value = str(candidate or "").strip()
+        if value:
+            return value
+    if phone_number:
+        return phone_number
+    return f"User {str(user_id or '')[:8]}".strip()
+
+
+def _avatar_from_name(name: str) -> str:
+    parts = [part for part in re.split(r"\s+", (name or "").strip()) if part]
+    if not parts:
+        return "CU"
+    if len(parts) == 1:
+        return parts[0][:2].upper()
+    return f"{parts[0][0]}{parts[1][0]}".upper()
+
+
+def _summarize_preview(messages: List[Dict[str, Any]], fallback_reason: Optional[str]) -> str:
+    for message in reversed(messages):
+        body = str(message.get("body") or "").strip()
+        if body:
+            return body
+    return str(fallback_reason or "Escalated conversation awaiting review.")
+
+
+def _build_event_message(event_type: str, payload: Dict[str, Any], created_at: Optional[datetime]) -> Optional[Dict[str, Any]]:
+    event_type = str(event_type or "").strip()
+    payload = payload or {}
+    body: Optional[str] = None
+
+    if event_type == "escalation_confirmed":
+        reason = payload.get("reason") or payload.get("source")
+        body = "Conversation escalated to a human agent."
+        if reason:
+            body = f"{body} Reason: {reason}."
+    elif event_type == "agent_joined":
+        agent_id = payload.get("agent_id")
+        body = f"Agent {agent_id} joined the conversation." if agent_id else "Agent joined the conversation."
+    elif event_type == "session_end":
+        ended_by = payload.get("ended_by")
+        body = f"Conversation ended by {ended_by}." if ended_by else "Conversation ended."
+
+    if not body:
+        return None
+
+    return {
+        "id": f"event-{event_type}-{int(created_at.timestamp() * 1000) if created_at else '0'}",
+        "sender": "event",
+        "body": body,
+        "timestamp": _iso_or_none(created_at),
+        "meta": event_type,
+        "source": "conversation_event",
+    }
+
+
+def _merge_chat_console_messages(session_id: str, conversation_id: Optional[str], db: PostgresDB) -> List[Dict[str, Any]]:
+    merged: List[Dict[str, Any]] = []
+
+    if conversation_id:
+        try:
+            history = list(reversed(db.get_conversation_history(conversation_id, limit=200)))
+            for msg in history:
+                role = str(getattr(msg, "role", "") or "").lower()
+                sender = "customer" if role == "user" else "ai" if role == "assistant" else "agent" if role == "agent" else role or "event"
+                merged.append(
+                    {
+                        "id": f"db-{getattr(msg, 'id', '')}",
+                        "sender": sender,
+                        "body": getattr(msg, "content", ""),
+                        "timestamp": _iso_or_none(getattr(msg, "timestamp", None)),
+                        "meta": role if role not in {"user", "assistant", "agent"} else None,
+                        "source": "database_message",
+                    }
+                )
+        except Exception as exc:
+            logger.warning("Failed to load DB history for chat console session %s: %s", session_id, exc)
+
+        try:
+            events = list(reversed(db.get_conversation_events(conversation_id, limit=100)))
+            for event in events:
+                event_message = _build_event_message(
+                    getattr(event, "event_type", ""),
+                    getattr(event, "payload", {}) or {},
+                    getattr(event, "created_at", None),
+                )
+                if event_message:
+                    merged.append(event_message)
+        except Exception as exc:
+            logger.warning("Failed to load conversation events for chat console session %s: %s", session_id, exc)
+
+    merged.sort(key=lambda item: item.get("timestamp") or "")
+    return merged
+
+
+def _derive_queue_status(escalation: Any) -> str:
+    escalated = bool(getattr(escalation, "escalated", False))
+    ended_at = getattr(escalation, "ended_at", None)
+    agent_id = getattr(escalation, "agent_id", None)
+
+    if ended_at or not escalated:
+        return "resolved"
+    if agent_id:
+        return "active"
+    return "escalated"
+
+
+def _build_chat_console_queue_item(escalation: Any, db: PostgresDB, prior_counts: Dict[str, int]) -> Dict[str, Any]:
+    session_id = str(getattr(escalation, "session_id", "") or "")
+    conversation_id = getattr(escalation, "conversation_id", None)
+    user_id = str(getattr(escalation, "user_id", "") or "")
+    metadata = dict(getattr(escalation, "escalation_metadata", {}) or {})
+
+    conversation = db.get_conversation(conversation_id) if conversation_id and hasattr(db, "get_conversation") else None
+    user = db.get_user_by_id(user_id) if user_id else None
+    phone_number = str(getattr(user, "phone_number", "") or metadata.get("phone_number") or metadata.get("phone") or "")
+    customer_name = _extract_customer_name(metadata, phone_number, user_id)
+    customer_email = str(metadata.get("email") or metadata.get("customer_email") or "")
+    channel = str(metadata.get("channel") or metadata.get("source") or "Chat")
+
+    messages = _merge_chat_console_messages(session_id, conversation_id, db)
+    latest_message_at = None
+    if messages:
+        latest_message_at = max((message.get("timestamp") for message in messages if message.get("timestamp")), default=None)
+    latest_timestamp = (
+        datetime.fromisoformat(latest_message_at) if latest_message_at else None
+        or getattr(conversation, "ended_at", None)
+        or getattr(escalation, "updated_at", None)
+        or getattr(escalation, "agent_joined_at", None)
+        or getattr(escalation, "escalated_at", None)
+        or getattr(conversation, "created_at", None)
+        or getattr(escalation, "created_at", None)
+    )
+
+    return {
+        "sessionId": session_id,
+        "conversationId": conversation_id,
+        "userId": user_id,
+        "name": customer_name,
+        "avatar": _avatar_from_name(customer_name),
+        "status": _derive_queue_status(escalation),
+        "assignee": str(getattr(escalation, "agent_id", None) or "Unassigned"),
+        "memberTier": str(metadata.get("member_tier") or "Customer"),
+        "channel": channel,
+        "phone": phone_number,
+        "email": customer_email,
+        "journey": ["Waiting", "Escalated", "Active", "Resolved", "Closed"],
+        "summary": {
+            "escalationReason": str(getattr(escalation, "escalation_reason", None) or metadata.get("reason") or "Unspecified"),
+            "context": str(metadata.get("context") or metadata.get("summary") or ""),
+            "priorEscalations": f"{max(prior_counts.get(user_id, 1) - 1, 0)} cases" if user_id else "0 cases",
+            "sentiment": str(metadata.get("sentiment") or "Unknown"),
+        },
+        "preview": _summarize_preview(messages, getattr(escalation, "escalation_reason", None)),
+        "messageCount": len(messages),
+        "slackThreadExists": False,
+        "createdAt": _iso_or_none(getattr(escalation, "created_at", None)),
+        "updatedAt": _iso_or_none(getattr(escalation, "updated_at", None)),
+        "escalatedAt": _iso_or_none(getattr(escalation, "escalated_at", None)),
+        "agentJoinedAt": _iso_or_none(getattr(escalation, "agent_joined_at", None)),
+        "endedAt": _iso_or_none(getattr(escalation, "ended_at", None)),
+        "conversationCreatedAt": _iso_or_none(getattr(conversation, "created_at", None)),
+        "lastActivityAt": _iso_or_none(latest_timestamp),
+    }
+
+
+def _load_chat_console_queue(db: PostgresDB, limit: int = 100) -> List[Dict[str, Any]]:
+    if not hasattr(db, "list_escalation_sessions"):
+        return []
+
+    escalations = db.list_escalation_sessions(limit=limit)
+    prior_counts: Dict[str, int] = defaultdict(int)
+    for escalation in escalations:
+        user_id = str(getattr(escalation, "user_id", "") or "")
+        if user_id:
+            prior_counts[user_id] += 1
+
+    queue = [_build_chat_console_queue_item(escalation, db, prior_counts) for escalation in escalations]
+    queue.sort(key=lambda item: item.get("lastActivityAt") or "", reverse=True)
+    return queue
+
+
 @api_router.get("/sessions/{session_id}/history", tags=["Sessions"])
 async def get_conversation_history(session_id: str, limit: int = 50):
     try:
@@ -1933,6 +2114,71 @@ async def get_conversation_history(session_id: str, limit: int = 50):
         raise
     except Exception as e:
         logger.error(f"Error getting history: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/admin/chat-console/queue", tags=["Admin"])
+async def get_chat_console_queue(
+    status: Optional[str] = Query(default=None, description="Filter by waiting, escalated, active, or resolved"),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: PostgresDB = Depends(get_db),
+):
+    try:
+        queue = _load_chat_console_queue(db, limit=limit)
+        if status:
+            queue = [item for item in queue if item.get("status") == status]
+        return {"items": queue, "count": len(queue)}
+    except Exception as e:
+        logger.error(f"Error loading chat console queue: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.get("/admin/chat-console/conversations/{session_id}", tags=["Admin"])
+async def get_chat_console_conversation(session_id: str, db: PostgresDB = Depends(get_db)):
+    try:
+        queue = _load_chat_console_queue(db, limit=500)
+        conversation = next((item for item in queue if item["sessionId"] == session_id), None)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        messages = _merge_chat_console_messages(session_id, conversation.get("conversationId"), db)
+        return {"conversation": conversation, "messages": messages}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error loading chat console conversation: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/admin/chat-console/conversations/{session_id}/reply", tags=["Admin"])
+async def send_chat_console_reply(session_id: str, body: ChatConsoleReplyRequest, db: PostgresDB = Depends(get_db)):
+    try:
+        queue = _load_chat_console_queue(db, limit=500)
+        conversation = next((item for item in queue if item["sessionId"] == session_id), None)
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        agent_id = (body.agent_id or "agent").strip() or "agent"
+        sender = (body.sender or "agent").strip() or "agent"
+        message_text = body.message.strip()
+
+        state_manager.mark_agent_joined(session_id, agent_id)
+
+        conversation_id = conversation.get("conversationId")
+        if conversation_id:
+            db.add_message(
+                conversation_id=conversation_id,
+                role="agent" if sender == "agent" else sender,
+                content=message_text,
+                metadata={"agent_id": agent_id, "source": "chat_console"},
+            )
+
+        messages = _merge_chat_console_messages(session_id, conversation_id, db)
+        return {"success": True, "response": {"sender": sender, "agent_id": agent_id, "message": message_text}, "messages": messages}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending chat console reply: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
