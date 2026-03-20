@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterable, List
+from typing import List
 from uuid import uuid4
 
 from PyPDF2 import PdfReader

@@ -20,6 +20,7 @@ def _auth_bypass():
 
 def test_salesiq_webhook_returns_salesiq_reply(monkeypatch):
     monkeypatch.setenv("ZOHO_WEBHOOK_SECRET", "test-secret")
+
     async def _fake_handle_chat_message(request, router, db):
         return SimpleNamespace(
             response={
