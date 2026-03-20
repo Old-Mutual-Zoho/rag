@@ -58,6 +58,7 @@ alembic==1.14.0
 psycopg2-binary==2.9.9
 pgvector==0.2.4
 redis==5.0.1
+cryptography==45.0.4
 
 # Monitoring & Logging
 loguru==0.7.2

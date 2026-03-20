@@ -72,6 +72,47 @@ class ZohoChatService:
             logger.error(f"Failed to create Zoho chat: {e}")
             return {"success": False, "error": str(e)}
 
+    def sync_lead_to_crm(
+        self,
+        *,
+        phone: str,
+        name: str,
+        product: str,
+        quote_amount: float,
+        email: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        url = f"{self.api_base_url}/Leads"
+        lead = {
+            "Last_Name": name or "Chatbot Lead",
+            "Phone": phone,
+            "Lead_Source": "Chatbot",
+            "Description": f"Interested in {product}. Quoted: {quote_amount}",
+        }
+        if email:
+            lead["Email"] = email
+        if metadata:
+            lead["Chatbot_Metadata"] = str(metadata)
+        payload = {"data": [lead]}
+        try:
+            resp = requests.post(url, json=payload, headers=self._headers(), timeout=15)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.error("Failed to sync lead to Zoho CRM: %s", e)
+            return {"success": False, "error": str(e)}
+
+    def forward_chat(self, chat_id: str, note: str) -> Dict[str, Any]:
+        url = f"{self.api_base_url}/chats/{chat_id}/forward"
+        payload = {"message": note}
+        try:
+            resp = requests.post(url, json=payload, headers=self._headers(), timeout=10)
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:
+            logger.error("Failed to forward chat %s to agent: %s", chat_id, e)
+            return {"success": False, "error": str(e)}
+
     def mock_send_message(self, chat_id: str, message: str, sender: str = "bot") -> Dict[str, Any]:
         """
         Mock sending a message (for testing without hitting Zoho API).

@@ -9,6 +9,8 @@ from uuid import uuid4
 from sqlalchemy import JSON, Boolean, DateTime, Float, String, Text, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from src.database.security import EncryptedJSON, EncryptedString
+
 
 class Base(DeclarativeBase):
     pass
@@ -18,7 +20,8 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
-    phone_number: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
+    phone_number: Mapped[str] = mapped_column(EncryptedString(255), nullable=False)
+    phone_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     kyc_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
@@ -95,7 +98,7 @@ class Quote(Base):
     product_name: Mapped[str] = mapped_column(String(256), nullable=False)
     premium_amount: Mapped[float] = mapped_column(Float, nullable=False)
     sum_assured: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
-    underwriting_data: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
+    underwriting_data: Mapped[Dict[str, Any]] = mapped_column(EncryptedJSON, default=dict, nullable=False)
     pricing_breakdown: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="pending")
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
@@ -108,7 +111,7 @@ class PaymentTransaction(Base):
     reference: Mapped[str] = mapped_column(String(128), primary_key=True)
     provider: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
     provider_reference: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
-    phone_number: Mapped[str] = mapped_column(String(32), nullable=False)
+    phone_number: Mapped[str] = mapped_column(EncryptedString(255), nullable=False)
     amount: Mapped[float] = mapped_column(Float, nullable=False)
     currency: Mapped[str] = mapped_column(String(8), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, index=True, default="PENDING")

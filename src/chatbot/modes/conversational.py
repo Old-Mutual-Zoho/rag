@@ -362,6 +362,22 @@ def _augment_query_with_history(message: str, conversation_history: List[Dict[st
     return f"Context from previous question: {previous_user_turn}. Follow-up question: {message}"
 
 
+def _quote_memory_message(session: Dict[str, Any]) -> Optional[Dict[str, str]]:
+    context = (session or {}).get("context") or {}
+    recent_quotes = context.get("recent_quotes") or []
+    if not recent_quotes:
+        return None
+
+    snippets = []
+    for quote in recent_quotes[:3]:
+        snippets.append(
+            f"{quote.get('product_name') or quote.get('product_id')} "
+            f"(quote {quote.get('quote_id')}, premium {quote.get('premium_amount')}, status {quote.get('status')})"
+        )
+    summary = "; ".join(snippets)
+    return {"role": "system", "content": f"Returning customer context: recent quotes include {summary}."}
+
+
 def _is_fallback_like_answer(answer: str) -> bool:
     lowered = (answer or "").strip().lower()
     if not lowered:
@@ -871,6 +887,9 @@ class ConversationalMode:
 
         should_reuse_topic = _should_reuse_product_topic(message, topic)
         recent_history = self._get_recent_history(session_id)
+        quote_memory = _quote_memory_message(session)
+        if quote_memory and not any(msg.get("content") == quote_memory["content"] for msg in recent_history):
+            recent_history = [quote_memory, *recent_history]
         query_with_topic = _augment_query_with_topic(
             message,
             topic.get("name"),

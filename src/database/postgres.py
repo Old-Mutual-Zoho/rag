@@ -13,11 +13,14 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 import uuid
 
+from src.database.security import hash_phone_number, normalize_phone_number
+
 
 @dataclass
 class User:
     id: str
     phone_number: str
+    phone_hash: str
     kyc_completed: bool = False
 
 
@@ -176,6 +179,7 @@ class PostgresDB:
     def __init__(self) -> None:
         self._users: Dict[str, User] = {}
         self._users_by_phone: Dict[str, str] = {}
+        self._users_by_phone_hash: Dict[str, str] = {}
         self._conversations: Dict[str, Conversation] = {}
         self._messages: List[Message] = []
         self._conversation_events: List[ConversationEvent] = []
@@ -208,17 +212,27 @@ class PostgresDB:
     # Users
     # ------------------------------------------------------------------ #
     def get_or_create_user(self, phone_number: str) -> User:
-        if phone_number in self._users_by_phone:
-            return self._users[self._users_by_phone[phone_number]]
+        normalized = normalize_phone_number(phone_number)
+        phone_hash = hash_phone_number(normalized)
+        if phone_hash and phone_hash in self._users_by_phone_hash:
+            return self._users[self._users_by_phone_hash[phone_hash]]
+        if normalized in self._users_by_phone:
+            return self._users[self._users_by_phone[normalized]]
 
         user_id = str(uuid.uuid4())
-        user = User(id=user_id, phone_number=phone_number, kyc_completed=False)
+        user = User(id=user_id, phone_number=normalized, phone_hash=phone_hash, kyc_completed=False)
         self._users[user_id] = user
-        self._users_by_phone[phone_number] = user_id
+        self._users_by_phone[normalized] = user_id
+        if phone_hash:
+            self._users_by_phone_hash[phone_hash] = user_id
         return user
 
     def get_user_by_phone(self, phone_number: str) -> Optional[User]:
-        user_id = self._users_by_phone.get(phone_number)
+        normalized = normalize_phone_number(phone_number)
+        phone_hash = hash_phone_number(normalized)
+        user_id = self._users_by_phone_hash.get(phone_hash) if phone_hash else None
+        if not user_id:
+            user_id = self._users_by_phone.get(normalized)
         if not user_id:
             return None
         return self._users.get(user_id)
@@ -482,6 +496,11 @@ class PostgresDB:
 
     def get_quote(self, quote_id: str) -> Optional[Quote]:
         return self._quotes.get(str(quote_id))
+
+    def get_recent_quotes_for_user(self, user_id: str, limit: int = 3) -> List[Quote]:
+        quotes = [q for q in self._quotes.values() if str(q.user_id) == str(user_id)]
+        quotes.sort(key=lambda q: q.generated_at, reverse=True)
+        return quotes[: int(limit)]
 
     # ------------------------------------------------------------------ #
     # Payments

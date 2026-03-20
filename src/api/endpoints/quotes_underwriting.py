@@ -47,6 +47,7 @@ from src.integrations.underwriting import run_quote_preview
 from src.integrations.clients.mocks.underwriting import mock_underwriting_client
 from src.integrations.policy.underwriting_service import UnderwritingService
 from src.integrations.config import should_use_real_integrations as _should_use_real_integrations
+from src.integrations.zoho.zoho_chat_service import ZohoChatService
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,27 @@ api = APIRouter(prefix="/v1/products", tags=["Product Quotes & Underwriting"])
 _quotes_store: Dict[str, Dict[str, Any]] = {}
 _assessments_store: Dict[str, Dict[str, Any]] = {}
 _pdf_store: Dict[str, bytes] = {}
+
+
+def _maybe_sync_quote_lead(request_user_id: str, product_name: str, premium: float, metadata: Optional[Dict[str, Any]] = None) -> None:
+    base_url = (os.getenv("ZOHO_CRM_API_BASE_URL") or "").strip()
+    token = (os.getenv("ZOHO_CRM_ACCESS_TOKEN") or "").strip()
+    if not base_url or not token:
+        return
+
+    meta = metadata or {}
+    ZohoChatService(
+        api_base_url=base_url,
+        access_token=token,
+        org_id=(os.getenv("ZOHO_ORG_ID") or "").strip() or None,
+    ).sync_lead_to_crm(
+        phone=str(meta.get("phone_number") or request_user_id),
+        name=str(meta.get("name") or "Chatbot Lead"),
+        product=product_name,
+        quote_amount=float(premium or 0.0),
+        email=meta.get("email"),
+        metadata=meta,
+    )
 
 
 def _get_trace_id(x_trace_id: Optional[str] = Header(None)) -> str:
@@ -197,6 +219,12 @@ async def preview_quote(
 
         # Store quote
         _quotes_store[quote_id] = response.dict()
+        _maybe_sync_quote_lead(
+            request.user_id,
+            response.product_name,
+            float(response.premium),
+            request.metadata,
+        )
 
         logger.info(f"[{trace_id}] Quote preview generated: {quote_id}")
         return response
@@ -379,6 +407,12 @@ async def finalize_quote(
 
         # Store final quote
         _quotes_store[final_quote_id] = response.dict()
+        _maybe_sync_quote_lead(
+            request.user_id,
+            response.product_name,
+            float(response.premium),
+            request.metadata,
+        )
 
         logger.info(f"[{trace_id}] Final quote created: {final_quote_id}")
         return response

@@ -18,10 +18,12 @@ from src.integrations.policy.response_wrappers import (
 )
 from src.integrations.policy.underwriting_service import UnderwritingService
 from src.integrations.config import should_use_real_integrations as _should_use_real_integrations
+from src.integrations.notifications import NotificationService
 
 api = APIRouter()
 payments_api = api
 payment_service = PaymentService()
+notification_service = NotificationService()
 
 
 class PaymentInitiateRequest(BaseModel):
@@ -508,6 +510,14 @@ async def run_underwrite_quote_policy_payment(
         result["payment"] = payment_response_dict
     else:
         result["next_action"] = "collect_payment_details_and_initiate_payment"
+
+    if payment_status in {"SUCCESS", "COMPLETED"} or str(policy.get("status") or "").upper() in {"ISSUED", "ACTIVE"}:
+        notification_service.send_policy_notifications(
+            user_email=metadata.get("email"),
+            phone_number=phone_number or metadata.get("phone_number"),
+            policy_data=policy,
+            pdf_path=metadata.get("pdf_path"),
+        )
 
     return result
 

@@ -46,6 +46,14 @@ from src.utils.rag_config_loader import load_rag_config
 from src.api.endpoints.mock_underwriting import router as mock_router
 from src.api.endpoints.mock_premiums import router as mock_premiums_router
 from src.api.validate_flow import router as validate_flow_router
+from src.api.routers.admin import router as admin_router
+from src.integrations.notifications import NotificationService
+from src.integrations.zoho.salesiq_adapter import (
+    extract_salesiq_message,
+    transform_internal_to_salesiq,
+    verify_salesiq_signature,
+)
+from src.integrations.zoho.zoho_chat_service import ZohoChatService
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -110,8 +118,10 @@ app.include_router(quotes_underwriting_api, prefix="/api")
 
 # Register flow validation endpoints (per-field and per-step)
 app.include_router(validate_flow_router, prefix="/api/v1", tags=["Flow Validation"])
+app.include_router(admin_router, prefix="/api/v1")
 
 product_matcher = ProductMatcher()
+notification_service = NotificationService()
 
 # Load RAG configuration once per process
 rag_cfg = load_rag_config()
@@ -296,6 +306,43 @@ def get_redis():
 def get_router():
     """Dependency for chat router"""
     return chat_router
+
+
+def _zoho_crm_service() -> Optional[ZohoChatService]:
+    crm_base_url = (os.getenv("ZOHO_CRM_API_BASE_URL") or "").strip()
+    access_token = (os.getenv("ZOHO_CRM_ACCESS_TOKEN") or "").strip()
+    org_id = (os.getenv("ZOHO_ORG_ID") or "").strip() or None
+    if not crm_base_url or not access_token:
+        return None
+    return ZohoChatService(api_base_url=crm_base_url, access_token=access_token, org_id=org_id)
+
+
+def _sync_quote_lead_to_crm(
+    *,
+    db: PostgresDB,
+    user_id: str,
+    product: str,
+    quote_amount: float,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    service = _zoho_crm_service()
+    if service is None:
+        return
+
+    user = db.get_user_by_id(user_id) if hasattr(db, "get_user_by_id") else None
+    fallback_phone = (metadata or {}).get("phone_number")
+    phone = str(getattr(user, "phone_number", "") or fallback_phone or "")
+    if not phone:
+        return
+
+    service.sync_lead_to_crm(
+        phone=phone,
+        name=str((metadata or {}).get("name") or "Chatbot Lead"),
+        product=product,
+        quote_amount=float(quote_amount or 0.0),
+        email=(metadata or {}).get("email"),
+        metadata=metadata,
+    )
 
 
 GENERAL_INFO_ALIASES: Dict[str, str] = {}
@@ -1520,6 +1567,42 @@ async def api_send_message(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@api_router.post("/webhook/salesiq", tags=["SalesIQ"])
+async def salesiq_webhook(
+    request: Request,
+    router: ChatRouter = Depends(get_router),
+    db: PostgresDB = Depends(get_db),
+):
+    raw_body = await request.body()
+    signature = request.headers.get("X-ZOHO-SIGNATURE")
+    if not verify_salesiq_signature(raw_body, signature):
+        raise HTTPException(status_code=403, detail="Invalid Zoho webhook signature")
+
+    try:
+        payload = json.loads(raw_body.decode("utf-8") or "{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload") from exc
+
+    extracted = extract_salesiq_message(payload)
+    visitor_id = extracted.get("visitor_id")
+    message_text = extracted.get("message_text")
+    session_id = extracted.get("session_id")
+    if not visitor_id or not message_text:
+        raise HTTPException(status_code=400, detail="Missing visitor id or message text")
+
+    internal = await _handle_chat_message(
+        ChatMessage(
+            message=message_text,
+            session_id=session_id,
+            user_id=visitor_id,
+            metadata={"source": "salesiq", "payload": payload},
+        ),
+        router,
+        db,
+    )
+    return transform_internal_to_salesiq(internal.response)
+
+
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
     from src.chatbot.dependencies import get_api_keys
@@ -1859,6 +1942,13 @@ async def generate_quote(request: QuoteRequest, db: PostgresDB = Depends(get_db)
             sum_assured=quote_data["sum_assured"],
             underwriting_data=request.underwriting_data,
             pricing_breakdown=quote_data["breakdown"],
+        )
+        _sync_quote_lead_to_crm(
+            db=db,
+            user_id=request.user_id,
+            product=quote_data["product_name"],
+            quote_amount=float(quote_data["monthly_premium"]),
+            metadata=request.underwriting_data,
         )
         return QuoteResponse(
             quote_id=str(quote.id),

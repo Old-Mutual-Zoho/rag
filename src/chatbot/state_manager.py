@@ -28,7 +28,7 @@ class StateManager:
             "current_flow": None,
             "current_step": 0,
             "collected_data": {},
-            "context": {},
+            "context": {"recent_quotes": self.get_recent_quotes_for_user(user_id)},
             "created_at": datetime.utcnow().isoformat(),
         }
 
@@ -150,6 +150,30 @@ class StateManager:
         """Get all collected data from current flow"""
         session = self.get_session(session_id)
         return session.get("collected_data", {}) if session else {}
+
+    def get_recent_quotes_for_user(self, user_id: str, limit: int = 3) -> list[Dict[str, Any]]:
+        if not hasattr(self.db, "get_recent_quotes_for_user"):
+            return []
+        try:
+            quotes = self.db.get_recent_quotes_for_user(user_id, limit=limit) or []
+        except Exception:
+            return []
+
+        payloads: list[Dict[str, Any]] = []
+        for quote in quotes:
+            payloads.append(
+                {
+                    "quote_id": str(getattr(quote, "id", "")),
+                    "product_id": getattr(quote, "product_id", ""),
+                    "product_name": getattr(quote, "product_name", ""),
+                    "premium_amount": float(getattr(quote, "premium_amount", 0.0) or 0.0),
+                    "status": getattr(quote, "status", ""),
+                    "generated_at": getattr(quote, "generated_at", None).isoformat()
+                    if getattr(quote, "generated_at", None)
+                    else None,
+                }
+            )
+        return payloads
 
     def clear_collected_data(self, session_id: str):
         """Clear collected data"""

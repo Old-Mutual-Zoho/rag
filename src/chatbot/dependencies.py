@@ -17,6 +17,7 @@ _ALLOWLIST_PATHS = {
     "/openapi.json",
     "/redoc",
     "/api/v1/agent/slack/events",
+    "/api/v1/webhook/salesiq",
 }
 
 

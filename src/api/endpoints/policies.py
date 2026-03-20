@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Any, Dict, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
+from src.integrations.notifications import NotificationService
 from src.integrations.policy.policy_service import PolicyService
 from src.integrations.policy.response_wrappers import (
     IntegrationResponseError,
@@ -13,6 +14,7 @@ from src.integrations.policy.response_wrappers import (
 
 api = APIRouter()
 policies_api = api
+notification_service = NotificationService()
 
 
 class PolicyIssueRequest(BaseModel):
@@ -36,7 +38,7 @@ class PolicyCancelRequest(BaseModel):
 
 
 @api.post("/issue", tags=["Policies"])
-async def issue_policy(request: PolicyIssueRequest):
+async def issue_policy(request: PolicyIssueRequest, background_tasks: BackgroundTasks):
     try:
         payload: Dict[str, Any] = {
             "user_id": request.user_id,
@@ -56,6 +58,16 @@ async def issue_policy(request: PolicyIssueRequest):
             fallback_quote_id=request.quote_id,
             fallback_currency=request.currency,
         )
+        email = request.metadata.get("email")
+        phone_number = request.metadata.get("phone_number")
+        if policy.status in {"ISSUED", "ACTIVE", "PENDING"} and (email or phone_number):
+            background_tasks.add_task(
+                notification_service.send_policy_notifications,
+                user_email=email,
+                phone_number=phone_number,
+                policy_data=policy.model_dump(),
+                pdf_path=request.metadata.get("pdf_path"),
+            )
         return policy.model_dump()
     except IntegrationResponseError as e:
         raise HTTPException(

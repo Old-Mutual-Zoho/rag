@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from sqlalchemy import create_engine, select, func
+from sqlalchemy import create_engine, select, func, or_
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.database.models import (
@@ -29,6 +29,7 @@ from src.database.models import (
     TravelInsuranceApplication,
     SerenicareApplication,
 )
+from src.database.security import hash_phone_number, normalize_phone_number
 
 
 def _normalize_connection_string(s: str) -> str:
@@ -71,21 +72,44 @@ class PostgresDB:
     # Users
     # ------------------------------------------------------------------ #
     def get_or_create_user(self, phone_number: str) -> User:
+        normalized = normalize_phone_number(phone_number)
+        phone_hash = hash_phone_number(normalized)
         with self._session() as s:
-            stmt = select(User).where(User.phone_number == phone_number)
+            stmt = select(User).where(
+                or_(
+                    User.phone_hash == phone_hash,
+                    User.phone_number == normalized,
+                )
+            )
             u = s.execute(stmt).scalar_one_or_none()
             if u:
+                if not getattr(u, "phone_hash", None) and phone_hash:
+                    u.phone_hash = phone_hash
+                    s.add(u)
+                    s.flush()
                 return u
-            u = User(id=str(uuid4()), phone_number=phone_number, kyc_completed=False)
+            u = User(id=str(uuid4()), phone_number=normalized, phone_hash=phone_hash, kyc_completed=False)
             s.add(u)
             s.flush()
             s.refresh(u)
             return u
 
     def get_user_by_phone(self, phone_number: str) -> Optional[User]:
+        normalized = normalize_phone_number(phone_number)
+        phone_hash = hash_phone_number(normalized)
         with self._session() as s:
-            stmt = select(User).where(User.phone_number == phone_number)
-            return s.execute(stmt).scalar_one_or_none()
+            stmt = select(User).where(
+                or_(
+                    User.phone_hash == phone_hash,
+                    User.phone_number == normalized,
+                )
+            )
+            user = s.execute(stmt).scalar_one_or_none()
+            if user and not getattr(user, "phone_hash", None) and phone_hash:
+                user.phone_hash = phone_hash
+                s.add(user)
+                s.flush()
+            return user
 
     def get_user_by_id(self, user_id: str) -> Optional[User]:
         with self._session() as s:
@@ -436,6 +460,16 @@ class PostgresDB:
         with self._session() as s:
             stmt = select(Quote).where(Quote.id == str(quote_id))
             return s.execute(stmt).scalar_one_or_none()
+
+    def get_recent_quotes_for_user(self, user_id: str, limit: int = 3) -> List[Quote]:
+        with self._session() as s:
+            stmt = (
+                select(Quote)
+                .where(Quote.user_id == str(user_id))
+                .order_by(Quote.generated_at.desc())
+                .limit(int(limit))
+            )
+            return list(s.execute(stmt).scalars().all())
 
     # ------------------------------------------------------------------ #
     # Payments
