@@ -28,15 +28,20 @@ def upgrade() -> None:
     rows = connection.execute(sa.text("SELECT id, phone_number FROM users")).fetchall()
     for row in rows:
         phone = str(row.phone_number or "").strip()
-        normalized = "".join(ch for ch in phone if ch.isdigit() or ch == "+")
-        phone_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest() if normalized else ""
+        normalized = "".join(ch for ch in phone if ch.isdigit())
+        phone_hash = hashlib.sha256(normalized.encode("utf-8")).hexdigest() if normalized else None
         connection.execute(
             sa.text("UPDATE users SET phone_hash = :phone_hash WHERE id = :user_id"),
             {"phone_hash": phone_hash, "user_id": row.id},
         )
 
-    op.alter_column("users", "phone_hash", nullable=False)
-    op.create_index(op.f("ix_users_phone_hash"), "users", ["phone_hash"], unique=True)
+    op.create_index(
+        op.f("ix_users_phone_hash"),
+        "users",
+        ["phone_hash"],
+        unique=True,
+        postgresql_where=sa.text("phone_hash IS NOT NULL"),
+    )
 
 
 def downgrade() -> None:

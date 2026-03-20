@@ -21,7 +21,7 @@ class User(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     phone_number: Mapped[str] = mapped_column(EncryptedString(255), nullable=False)
-    phone_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    phone_hash: Mapped[Optional[str]] = mapped_column(String(64), unique=True, nullable=True, index=True)
     kyc_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 

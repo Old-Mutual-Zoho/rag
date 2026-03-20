@@ -89,6 +89,6 @@ def normalize_phone_number(value: Optional[str]) -> str:
     return "".join(ch for ch in raw if ch.isdigit())
 
 
-def hash_phone_number(value: Optional[str]) -> str:
+def hash_phone_number(value: Optional[str]) -> Optional[str]:
     normalized = normalize_phone_number(value)
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest() if normalized else ""
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest() if normalized else None

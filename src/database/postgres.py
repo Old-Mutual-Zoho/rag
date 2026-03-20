@@ -20,7 +20,7 @@ from src.database.security import hash_phone_number, normalize_phone_number
 class User:
     id: str
     phone_number: str
-    phone_hash: str
+    phone_hash: Optional[str]
     kyc_completed: bool = False
 
 

@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
-from sqlalchemy import create_engine, select, func, or_
+from sqlalchemy import create_engine, select, func
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.database.models import (
@@ -75,13 +75,11 @@ class PostgresDB:
         normalized = normalize_phone_number(phone_number)
         phone_hash = hash_phone_number(normalized)
         with self._session() as s:
-            stmt = select(User).where(
-                or_(
-                    User.phone_hash == phone_hash,
-                    User.phone_number == normalized,
-                )
-            )
-            u = s.execute(stmt).scalar_one_or_none()
+            u = None
+            if phone_hash:
+                u = s.execute(select(User).where(User.phone_hash == phone_hash)).scalar_one_or_none()
+            if u is None:
+                u = s.execute(select(User).where(User.phone_number == normalized)).scalar_one_or_none()
             if u:
                 if not getattr(u, "phone_hash", None) and phone_hash:
                     u.phone_hash = phone_hash
@@ -98,13 +96,11 @@ class PostgresDB:
         normalized = normalize_phone_number(phone_number)
         phone_hash = hash_phone_number(normalized)
         with self._session() as s:
-            stmt = select(User).where(
-                or_(
-                    User.phone_hash == phone_hash,
-                    User.phone_number == normalized,
-                )
-            )
-            user = s.execute(stmt).scalar_one_or_none()
+            user = None
+            if phone_hash:
+                user = s.execute(select(User).where(User.phone_hash == phone_hash)).scalar_one_or_none()
+            if user is None:
+                user = s.execute(select(User).where(User.phone_number == normalized)).scalar_one_or_none()
             if user and not getattr(user, "phone_hash", None) and phone_hash:
                 user.phone_hash = phone_hash
                 s.add(user)

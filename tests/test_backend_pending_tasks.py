@@ -17,6 +17,10 @@ def test_phone_hash_lookup_normalizes_number():
     assert user.phone_hash == hash_phone_number(normalize_phone_number("+256 700 000 001"))
 
 
+def test_empty_phone_hash_is_not_stored_as_duplicate_sentinel():
+    assert hash_phone_number("") is None
+
+
 def test_kb_processor_builds_chunks_from_text_file(tmp_path: Path):
     source = tmp_path / "sample.txt"
     source.write_text("Motor private insurance protects private vehicles against accident and theft. " * 20, encoding="utf-8")
