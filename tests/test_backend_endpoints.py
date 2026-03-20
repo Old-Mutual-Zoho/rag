@@ -70,6 +70,42 @@ def test_salesiq_webhook_rejects_bad_signature(monkeypatch):
     assert response.status_code == 403
 
 
+def test_salesiq_webhook_accepts_alternative_payload_shape(monkeypatch):
+    monkeypatch.setenv("ZOHO_WEBHOOK_SECRET", "test-secret")
+
+    async def _fake_handle_chat_message(request, router, db):
+        return SimpleNamespace(
+            response={
+                "mode": "conversational",
+                "response": f"Received: {request.message}",
+                "suggested_action": None,
+                "products_matched": [],
+            }
+        )
+
+    monkeypatch.setattr(main_module, "_handle_chat_message", _fake_handle_chat_message)
+    payload = {
+        "data": {
+            "visitor": {"id": "visitor-123"},
+            "session": {"id": "session-123"},
+            "message": {"content": "Hello from SalesIQ"},
+        }
+    }
+    raw = json.dumps(payload).encode("utf-8")
+    signature = hmac.new(b"test-secret", msg=raw, digestmod=hashlib.sha256).hexdigest()
+
+    response = client.post(
+        "/api/v1/webhook/salesiq",
+        content=raw,
+        headers={"X-ZOHO-SIGNATURE": signature, "Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["action"] == "reply"
+    assert body["replies"][0]["text"] == "Received: Hello from SalesIQ"
+
+
 def test_admin_kb_upload_accepts_raw_body():
     app.dependency_overrides[api_key_protection] = _auth_bypass
     try:

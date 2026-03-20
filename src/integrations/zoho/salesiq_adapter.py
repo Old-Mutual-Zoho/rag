@@ -17,14 +17,76 @@ def verify_salesiq_signature(body: bytes, signature: Optional[str]) -> bool:
     return hmac.compare_digest(expected, signature.strip())
 
 
+def _nested_get(payload: Dict[str, Any], *path: str) -> Any:
+    current: Any = payload
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def _clean_text(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _first_non_empty(*values: Any) -> Optional[str]:
+    for value in values:
+        cleaned = _clean_text(value)
+        if cleaned:
+            return cleaned
+    return None
+
+
 def extract_salesiq_message(payload: Dict[str, Any]) -> Dict[str, Optional[str]]:
     visitor = payload.get("visitor") or {}
     message = payload.get("message") or {}
     session = payload.get("session") or {}
+    data = payload.get("data") or {}
+    event = payload.get("event") or {}
+
     return {
-        "visitor_id": str(visitor.get("id") or payload.get("visitor_id") or payload.get("user_id") or "").strip() or None,
-        "session_id": str(session.get("id") or payload.get("chat_id") or payload.get("session_id") or "").strip() or None,
-        "message_text": str(message.get("text") or payload.get("message") or "").strip() or None,
+        "visitor_id": _first_non_empty(
+            visitor.get("id"),
+            visitor.get("visitor_id"),
+            visitor.get("email"),
+            _nested_get(visitor, "email_info", "email"),
+            _nested_get(visitor, "name"),
+            payload.get("visitor_id"),
+            payload.get("user_id"),
+            payload.get("sender_id"),
+            data.get("visitor_id"),
+            _nested_get(data, "visitor", "id"),
+            _nested_get(event, "visitor", "id"),
+        ),
+        "session_id": _first_non_empty(
+            session.get("id"),
+            session.get("session_id"),
+            payload.get("chat_id"),
+            payload.get("session_id"),
+            payload.get("conversation_id"),
+            data.get("session_id"),
+            data.get("chat_id"),
+            _nested_get(data, "session", "id"),
+            _nested_get(event, "session", "id"),
+        ),
+        "message_text": _first_non_empty(
+            message.get("text"),
+            message.get("message"),
+            message.get("content"),
+            payload.get("message") if not isinstance(payload.get("message"), dict) else None,
+            payload.get("text"),
+            payload.get("question"),
+            data.get("message") if not isinstance(data.get("message"), dict) else None,
+            data.get("text"),
+            _nested_get(data, "message", "text"),
+            _nested_get(data, "message", "content"),
+            _nested_get(event, "message", "text"),
+            _nested_get(event, "message", "content"),
+        ),
     }
 
 
