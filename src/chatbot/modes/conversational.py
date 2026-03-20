@@ -441,6 +441,15 @@ def _build_product_aware_clarification(topic_name: Optional[str]) -> str:
     )
 
 
+def _build_product_choice_clarification(topic_label: Optional[str], options: List[str]) -> str:
+    clean_options = [str(option).strip() for option in (options or []) if str(option).strip()]
+    base = (topic_label or "that area").strip()
+    if clean_options:
+        choices = ", ".join(clean_options[:4])
+        return f"Which {base} option do you mean? I can tell you more about {choices}."
+    return f"Which {base} product do you mean? Tell me the option you want more detail on."
+
+
 def _infer_recommendation_hint(message: str) -> str | None:
     m = (message or "").lower()
     if "accident" in m:
@@ -609,6 +618,22 @@ class ConversationalMode:
                 return await self._process_product_guide_action({"action": str(pending_offer)}, session_id)
             if _is_negative(message):
                 ctx.pop("pending_section_offer", None)
+                self.state_manager.update_session(session_id, {"context": ctx})
+
+        pending_choice = ctx.get("pending_product_choice")
+        if pending_choice:
+            if _is_affirmative(message):
+                return {
+                    "mode": "conversational",
+                    "response": _build_product_choice_clarification(
+                        pending_choice.get("topic_label"),
+                        pending_choice.get("options") or [],
+                    ),
+                    "intent": "clarify_product",
+                    "confidence": 0.9,
+                }
+            if _is_negative(message):
+                ctx.pop("pending_product_choice", None)
                 self.state_manager.update_session(session_id, {"context": ctx})
 
         # If the user is explicitly asking for a product section (benefits/coverage/etc),
@@ -854,9 +879,17 @@ class ConversationalMode:
                 answer_text = recommendation
                 follow_up_flag = True
 
+        related_names = [p[2].get("name") for p in products if p[2].get("name")]
+        unique_related_names: List[str] = []
+        for name in related_names:
+            if name and name not in unique_related_names:
+                unique_related_names.append(name)
+
+        broad_multi_product = broad_query and len(unique_related_names) > 1
+
         # Determine product topic for follow-up guidance.
         digital_flow = _detect_digital_flow(message) or topic.get("digital_flow")
-        top_product = products[0][2] if products else (topic if topic.get("doc_id") else None)
+        top_product = None if broad_multi_product else (products[0][2] if products else (topic if topic.get("doc_id") else None))
 
         if digital_flow or top_product:
             topic_name = None
@@ -877,20 +910,41 @@ class ConversationalMode:
                 "doc_id": topic_doc_id,
                 "url": topic_url,
             }
+            if top_product:
+                ctx.pop("pending_product_choice", None)
             self.state_manager.update_session(session_id, {"context": ctx})
 
         # Append a natural follow-up prompt when the user is learning about a product.
         follow_up_prompt = None
         related_products_block = None
         if broad_query and products:
-            related_names = [p[2].get("name") for p in products if p[2].get("name")]
-            if related_names:
-                related_list = "\n".join([f"- {name}" for name in related_names[:4]])
+            if unique_related_names:
+                related_list = "\n".join([f"- {name}" for name in unique_related_names[:4]])
                 related_products_block = f"Related products you can consider:\n{related_list}"
         if broad_query and "accident" in (message or "").lower():
             follow_up_prompt = (
                 "Is this about Personal Accident cover for an individual, or Group Personal Accident for employees?"
             )
+        elif broad_multi_product:
+            topic_label = "product"
+            lowered_message = (message or "").lower()
+            if "motor" in lowered_message:
+                topic_label = "motor insurance"
+            elif "travel" in lowered_message:
+                topic_label = "travel insurance"
+            elif "medical" in lowered_message or "health" in lowered_message:
+                topic_label = "health insurance"
+
+            follow_up_prompt = _build_product_choice_clarification(topic_label, unique_related_names)
+
+            session = self.state_manager.get_session(session_id) or {}
+            ctx = dict(session.get("context") or {})
+            ctx.pop("pending_section_offer", None)
+            ctx["pending_product_choice"] = {
+                "topic_label": topic_label,
+                "options": unique_related_names[:4],
+            }
+            self.state_manager.update_session(session_id, {"context": ctx})
         elif intent in ("learn", "general", "compare", "discover") and (digital_flow or top_product):
             topic_label = topic_name or "this product"
             answer_lower = (answer_text or "").lower()
@@ -906,6 +960,7 @@ class ConversationalMode:
             session = self.state_manager.get_session(session_id) or {}
             ctx = dict(session.get("context") or {})
             ctx["pending_section_offer"] = "show_benefits"
+            ctx.pop("pending_product_choice", None)
             self.state_manager.update_session(session_id, {"context": ctx})
 
         # Sources removed from conversation response per user request

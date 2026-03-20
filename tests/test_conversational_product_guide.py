@@ -115,6 +115,38 @@ class TravelMotorMatcher:
         return []
 
 
+class BroadMotorMatcher:
+    def match_products(self, query: str, top_k: int = 3):
+        lowered = (query or "").lower()
+        if "motor" not in lowered and "car" not in lowered and "vehicle" not in lowered:
+            return []
+        items = [
+            (
+                1.6,
+                0,
+                {
+                    "product_id": "website:product:other/general/motor-private",
+                    "name": "Motor Private",
+                    "category_name": "Motor",
+                    "sub_category_name": "Private",
+                    "url": "https://www.oldmutual.co.ug/motor-private",
+                },
+            ),
+            (
+                1.4,
+                1,
+                {
+                    "product_id": "website:product:other/general/motor-commercial",
+                    "name": "Motor Commercial",
+                    "category_name": "Motor",
+                    "sub_category_name": "Commercial",
+                    "url": "https://www.oldmutual.co.ug/motor-commercial",
+                },
+            ),
+        ]
+        return items[:top_k]
+
+
 class NoMatchMatcher:
     def match_products(self, query: str, top_k: int = 3):
         return []
@@ -276,6 +308,30 @@ async def test_section_clarification_uses_prior_product_topic_name_when_availabl
     assert out["intent"] == "clarify_section"
     assert "travel insurance" in out["response"].lower()
     assert "benefits, coverage, exclusions, eligibility, or pricing" in out["response"].lower()
+
+
+@pytest.mark.asyncio
+async def test_broad_motor_query_yes_prompts_for_product_choice_instead_of_wrong_benefits():
+    db = PostgresDB()
+    redis = RedisCache()
+    sm = StateManager(redis, db)
+
+    user = db.get_or_create_user(phone_number="256700000014")
+    session_id = sm.create_session(str(user.id))
+
+    conv = ConversationalMode(DummyRAG(), BroadMotorMatcher(), sm)
+
+    first = await conv.process("show me motor insurance options", session_id, str(user.id))
+    out = await conv.process("yes", session_id, str(user.id))
+
+    assert first["mode"] == "conversational"
+    assert "which motor insurance option do you mean" in first["response"].lower()
+    assert "motor private" in first["response"].lower()
+    assert "motor commercial" in first["response"].lower()
+    assert out["mode"] == "conversational"
+    assert "which motor insurance option do you mean" in out["response"].lower()
+    assert "motor private" in out["response"].lower()
+    assert "motor commercial" in out["response"].lower()
 
 
 @pytest.mark.asyncio
