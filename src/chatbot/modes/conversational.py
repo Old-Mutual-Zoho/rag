@@ -516,6 +516,27 @@ def _is_ambiguous_motor_query(message: str) -> bool:
     return any(term in m for term in ambiguous_triggers)
 
 
+def _is_vague_selection_reply(message: str) -> bool:
+    m = (message or "").strip().lower()
+    return m in {
+        "any",
+        "none",
+        "neither",
+        "either",
+        "those",
+        "these",
+        "that",
+        "them",
+    }
+
+
+def _build_vague_selection_clarification() -> str:
+    return (
+        "Could you clarify what you mean? "
+        "If none of those options fit, tell me the type of cover you want, or name the product you want to know more about."
+    )
+
+
 def _infer_recommendation_hint(message: str) -> str | None:
     m = (message or "").lower()
     if "accident" in m:
@@ -817,6 +838,14 @@ class ConversationalMode:
                 "mode": "conversational",
                 "response": _build_product_choice_clarification("motor insurance", motor_options),
                 "intent": "clarify_product",
+                "confidence": 0.9,
+            }
+
+        if form_data is None and _is_vague_selection_reply(message):
+            return {
+                "mode": "conversational",
+                "response": _build_vague_selection_clarification(),
+                "intent": "clarify_selection",
                 "confidence": 0.9,
             }
 

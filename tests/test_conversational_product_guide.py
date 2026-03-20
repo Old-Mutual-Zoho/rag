@@ -381,6 +381,25 @@ async def test_motor_accident_query_prompts_motor_product_clarification():
 
 
 @pytest.mark.asyncio
+async def test_any_reply_returns_clean_selection_clarification():
+    db = PostgresDB()
+    redis = RedisCache()
+    sm = StateManager(redis, db)
+
+    user = db.get_or_create_user(phone_number="256700000017")
+    session_id = sm.create_session(str(user.id))
+
+    conv = ConversationalMode(DummyRAG(), NoMatchMatcher(), sm)
+
+    out = await conv.process("any", session_id, str(user.id))
+
+    assert out["mode"] == "conversational"
+    assert out["intent"] == "clarify_selection"
+    assert "could you clarify what you mean" in out["response"].lower()
+    assert "none of those options fit" in out["response"].lower()
+
+
+@pytest.mark.asyncio
 async def test_product_guide_yes_chain_offers_next_section_and_handles_second_yes():
     db = PostgresDB()
     redis = RedisCache()
